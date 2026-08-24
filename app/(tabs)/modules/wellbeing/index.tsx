@@ -81,7 +81,7 @@ type ModuleDef = {
 
 const MODULE_CATALOG: ModuleDef[] = [
   { key: 'journaling', label: 'Journaling', icon: BookOpen, route: '/modules/wellbeing/entry?module=journaling' },
-  { key: 'morning_pages', label: 'Morning Pages', icon: Sun, route: '/modules/wellbeing/entry?module=morning_pages' },
+  { key: 'morning_pages', label: 'Blank Pages', icon: Sun, route: '/modules/wellbeing/entry?module=morning_pages' },
   { key: 'shadow_work', label: 'Shadow Work', icon: Moon, route: '/modules/wellbeing/entry?module=shadow_work' },
   { key: 'affirmations', label: 'Affirmations', icon: Sparkles, route: '/modules/wellbeing/affirmations' },
   { key: 'mood_tracker', label: 'Mood Tracker', icon: Activity, route: '/modules/wellbeing/mood' },
