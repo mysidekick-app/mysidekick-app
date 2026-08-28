@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Bell, Check, ChevronDown, ChevronUp, ChevronLeft, ListChecks, Plus, Trash2, X } from 'lucide-react-native';
+import { Check, ChevronDown, ChevronUp, ChevronLeft, ListChecks, MoreVertical, Plus, Trash2, X } from 'lucide-react-native';
 import { router } from 'expo-router';
 import { useApp } from '@/components/AppProvider';
 import { supabase } from '@/lib/supabase';
@@ -34,6 +34,7 @@ export default function ListsScreen() {
   const [newListOpen, setNewListOpen] = useState(false);
   const [newListTitle, setNewListTitle] = useState('');
   const [savingList, setSavingList] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const [newItemText, setNewItemText] = useState<Record<string, string>>({});
 
@@ -165,10 +166,46 @@ export default function ListsScreen() {
           <ChevronLeft color="#FFFFFF" size={22} strokeWidth={2.4} />
         </Pressable>
         <Text style={[styles.headerTitle, { color: accentForeground }]}>LISTS</Text>
-        <Pressable style={styles.headerBtn} hitSlop={12}>
-          <Bell color={C.text} size={22} />
+        <Pressable
+          onPress={() => setMenuOpen(true)}
+          style={styles.headerBtn}
+          hitSlop={12}
+        >
+          <MoreVertical color={C.text} size={22} />
         </Pressable>
       </View>
+
+      <Modal
+        visible={menuOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMenuOpen(false)}
+      >
+        <Pressable
+          style={styles.menuShade}
+          onPress={() => setMenuOpen(false)}
+        >
+          <Pressable
+            style={[
+              styles.menuCard,
+              { backgroundColor: C.card, borderColor: C.border },
+            ]}
+            onPress={(event) => event.stopPropagation()}
+          >
+            <Pressable
+  onPress={() => {
+    setMenuOpen(false);
+    router.push('/(tabs)/profile');
+  }}
+  style={styles.menuItem}
+>
+              <Text style={[styles.menuItemText, { color: C.text }]}>
+                Settings
+              </Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {error && <Text style={[styles.error, { color: '#C53A2F' }]}>{error}</Text>}
@@ -315,6 +352,32 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  menuShade: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.25)',
+    alignItems: 'flex-end',
+    paddingTop: 64,
+    paddingRight: 12,
+  },
+  menuCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingVertical: 6,
+    minWidth: 150,
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  menuItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  menuItemText: {
+    fontFamily: FONT_MED,
+    fontSize: 14,
+  },
   headerTitle: { fontFamily: FONT_BOLD, fontSize: 18, letterSpacing: 1.5 },
   content: { padding: 16, paddingBottom: 80 },
   error: { fontFamily: FONT_MED, fontSize: 13, marginBottom: 10 },

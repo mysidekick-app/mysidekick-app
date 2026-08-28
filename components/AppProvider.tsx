@@ -6,7 +6,6 @@ import {
   useMemo,
   useState,
 } from 'react';
-
 import { useColorScheme } from 'react-native';
 
 import { supabase } from '@/lib/supabase';
@@ -37,6 +36,9 @@ type AppSettings = {
   theme_mode: ThemeMode;
   accent_family: AccentFamily;
   currency_code: string;
+  timezone: string;
+  username: string;
+  avatar_url: string | null;
 };
 
 type AppContextValue = AppSettings & {
@@ -58,6 +60,9 @@ const fallbackSettings: AppSettings = {
   theme_mode: 'system',
   accent_family: 'blue',
   currency_code: 'KES',
+  timezone: 'Africa/Nairobi',
+  username: '',
+  avatar_url: null,
 };
 
 export const accentPalettes: Record<
@@ -130,7 +135,8 @@ export function AppProvider({
   const [settings, setSettings] =
     useState<AppSettings>(fallbackSettings);
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] =
+    useState(true);
 
   useEffect(() => {
     let active = true;
@@ -151,10 +157,42 @@ export function AppProvider({
 
       setLoading(true);
 
-      const { data, error } = await supabase
+      /*
+       * Application settings live in:
+       * public.assistant_app_settings
+       */
+
+      const {
+        data: appSettingsData,
+        error: appSettingsError,
+      } = await supabase
         .from('assistant_app_settings')
         .select(
-          'display_name, title, bio, theme_mode, accent_family, currency_code'
+          `
+            display_name,
+            title,
+            bio,
+            theme_mode,
+            accent_family,
+            currency_code,
+            timezone
+          `
+        )
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      /*
+       * Username and profile picture live in:
+       * public.profiles
+       */
+
+      const {
+        data: profileData,
+        error: profileError,
+      } = await supabase
+        .from('profiles')
+        .select(
+          'username, avatar_url'
         )
         .eq('user_id', user.id)
         .maybeSingle();
@@ -163,38 +201,46 @@ export function AppProvider({
         return;
       }
 
-      if (error) {
+      if (appSettingsError) {
         console.error(
           'Failed to load app settings:',
-          error.message
+          appSettingsError.message
         );
-
-        setSettings({
-          ...fallbackSettings,
-          display_name:
-            user.user_metadata?.full_name ??
-            user.email?.split('@')[0] ??
-            '',
-        });
-
-        setLoading(false);
-        return;
       }
 
-      if (data) {
-        setSettings({
-          ...fallbackSettings,
-          ...data,
-        });
-      } else {
-        setSettings({
-          ...fallbackSettings,
-          display_name:
-            user.user_metadata?.full_name ??
-            user.email?.split('@')[0] ??
-            '',
-        });
+      if (profileError) {
+        console.error(
+          'Failed to load profile:',
+          profileError.message
+        );
       }
+
+      const displayName =
+        appSettingsData?.display_name ??
+        user.user_metadata?.full_name ??
+        user.email?.split('@')[0] ??
+        '';
+
+      setSettings({
+        ...fallbackSettings,
+        ...(appSettingsData ?? {}),
+
+        display_name: displayName,
+
+        username:
+          profileData?.username ?? '',
+
+        avatar_url:
+          profileData?.avatar_url ?? null,
+
+        /*
+         * Keep Nairobi as the fallback if an older
+         * account does not yet have a timezone.
+         */
+        timezone:
+          appSettingsData?.timezone ??
+          'Africa/Nairobi',
+      });
 
       setLoading(false);
     }
@@ -217,6 +263,10 @@ export function AppProvider({
       return;
     }
 
+    /*
+     * Update local state immediately so the UI
+     * responds without waiting for Supabase.
+     */
     const next: AppSettings = {
       ...settings,
       ...changes,
@@ -224,7 +274,14 @@ export function AppProvider({
 
     setSettings(next);
 
-    const { error } = await supabase
+    /*
+     * Application settings.
+     *
+     * Username and avatar_url are NOT stored here.
+     */
+    const {
+      error: settingsError,
+    } = await supabase
       .from('assistant_app_settings')
       .upsert(
         {
@@ -235,18 +292,78 @@ export function AppProvider({
           theme_mode: next.theme_mode,
           accent_family: next.accent_family,
           currency_code: next.currency_code,
-          updated_at: new Date().toISOString(),
+          timezone:
+            next.timezone || 'Africa/Nairobi',
+          updated_at:
+            new Date().toISOString(),
         },
         {
           onConflict: 'user_id',
         }
       );
 
-    if (error) {
+    if (settingsError) {
       console.error(
         'Failed to save app settings:',
-        error.message
+        settingsError.message
       );
+    }
+
+    /*
+     * Username and profile picture live in
+     * public.profiles.
+     *
+     * Only update them when explicitly passed
+     * to updateSettings().
+     */
+    if (
+      changes.username !== undefined ||
+      changes.avatar_url !== undefined
+    ) {
+      const profileUpdate: {
+        user_id: string;
+        username?: string;
+        avatar_url?: string | null;
+        updated_at: string;
+      } = {
+        user_id: user.id,
+        updated_at:
+          new Date().toISOString(),
+      };
+
+      if (
+        changes.username !== undefined
+      ) {
+        profileUpdate.username =
+          changes.username
+            .trim()
+            .toLowerCase();
+      }
+
+      if (
+        changes.avatar_url !== undefined
+      ) {
+        profileUpdate.avatar_url =
+          changes.avatar_url;
+      }
+
+      const {
+        error: profileError,
+      } = await supabase
+        .from('profiles')
+        .upsert(
+          profileUpdate,
+          {
+            onConflict: 'user_id',
+          }
+        );
+
+      if (profileError) {
+        console.error(
+          'Failed to save profile:',
+          profileError.message
+        );
+      }
     }
   };
 
@@ -258,42 +375,49 @@ export function AppProvider({
     );
 
   const accent =
-    accentPalettes[settings.accent_family] ??
-    accentPalettes.blue;
+    accentPalettes[
+      settings.accent_family
+    ] ?? accentPalettes.blue;
 
-  const accentForeground = accent.standard;
-  const accentWash = accent.wash;
-  const onAccent = '#FFFFFF';
+  const accentForeground =
+    accent.standard;
 
-  const value = useMemo<AppContextValue>(
-    () => ({
-      ...settings,
+  const accentWash =
+    accent.wash;
 
-      loading:
-        loading || authLoading,
+  const onAccent =
+    '#FFFFFF';
 
-      isDark,
+  const value =
+    useMemo<AppContextValue>(
+      () => ({
+        ...settings,
 
-      accent,
+        loading:
+          loading || authLoading,
 
-      accentForeground,
+        isDark,
 
-      accentWash,
+        accent,
 
-      onAccent,
+        accentForeground,
 
-      updateSettings,
-    }),
-    [
-      settings,
-      loading,
-      authLoading,
-      isDark,
-      accent,
-      accentForeground,
-      accentWash,
-    ]
-  );
+        accentWash,
+
+        onAccent,
+
+        updateSettings,
+      }),
+      [
+        settings,
+        loading,
+        authLoading,
+        isDark,
+        accent,
+        accentForeground,
+        accentWash,
+      ]
+    );
 
   return (
     <AppContext.Provider value={value}>
@@ -303,7 +427,8 @@ export function AppProvider({
 }
 
 export function useApp(): AppContextValue {
-  const context = useContext(AppContext);
+  const context =
+    useContext(AppContext);
 
   if (context === null) {
     throw new Error(

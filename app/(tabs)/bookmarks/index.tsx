@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Linking, Modal, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { Bell, Bookmark, ChevronLeft, ExternalLink, Pencil, Plus, Search, Trash2, X } from 'lucide-react-native';
+import { Bookmark, ChevronLeft, ExternalLink, MoreVertical, Pencil, Plus, Search, Trash2, X } from 'lucide-react-native';
 import { router } from 'expo-router';
 import { useApp } from '@/components/AppProvider';
 import { supabase } from '@/lib/supabase';
@@ -57,6 +57,7 @@ export default function BookmarksScreen() {
   const [tag, setTag] = useState(CATEGORIES[0].tags[0]);
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -194,10 +195,29 @@ export default function BookmarksScreen() {
           <ChevronLeft color="#FFFFFF" size={22} strokeWidth={2.4} />
         </Pressable>
         <Text style={[styles.headerTitle, { color: accentForeground }]}>BOOKMARKS</Text>
-        <Pressable style={styles.bellBtn} hitSlop={12}>
-          <Bell color={isDark ? '#F4F2EE' : '#27241F'} size={20} />
+        <Pressable onPress={() => setMenuOpen(true)} style={styles.bellBtn} hitSlop={12}>
+          <MoreVertical color={isDark ? '#F4F2EE' : '#27241F'} size={20} />
         </Pressable>
       </View>
+
+      <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
+        <Pressable style={styles.menuShade} onPress={() => setMenuOpen(false)}>
+          <Pressable
+            style={[styles.menuCard, { backgroundColor: isDark ? '#1C1C1C' : '#FFFFFF', borderColor: isDark ? '#2A2A2A' : '#ECE9E4' }]}
+            onPress={(event) => event.stopPropagation()}
+          >
+            <Pressable
+  onPress={() => {
+    setMenuOpen(false);
+    router.push('/(tabs)/profile');
+  }}
+  style={styles.menuItem}
+>
+              <Text style={[styles.menuItemText, { color: isDark ? '#F4F2EE' : '#27241F' }]}>Settings</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Full-width search */}
@@ -414,6 +434,11 @@ const styles = StyleSheet.create({
   backBtn: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { fontFamily: 'Poppins-ExtraBold', fontSize: 16, letterSpacing: 1.4, color: '#27241F' },
   bellBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
+  menuShade: { flex: 1, backgroundColor: 'rgba(0,0,0,0.25)', alignItems: 'flex-end', paddingTop: 64, paddingRight: 12 },
+  menuCard: { borderRadius: 14, borderWidth: 1, paddingVertical: 6, minWidth: 150, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 4 },
+  menuItem: { paddingVertical: 12, paddingHorizontal: 16 },
+  menuItemText: { fontFamily: FONT_MED, fontSize: 14 },
+
 
   content: { padding: 16, paddingBottom: 90 },
 

@@ -1,10 +1,24 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
-import { Flame, Trash2, MessageCircle } from 'lucide-react-native';
+import {
+  Flame,
+  Trash2,
+  MessageCircle,
+} from 'lucide-react-native';
 
-import { useLocalSearchParams, router } from 'expo-router';
+import {
+  useLocalSearchParams,
+  router,
+} from 'expo-router';
 
 import { PageHeader } from '@/components/PageHeader';
 
@@ -26,45 +40,88 @@ type Habit = {
   end_date: string | null;
 };
 
-type Completion = { completed_on: string };
+type Completion = {
+  completed_on: string;
+};
 
 const FONT = 'Poppins-Regular';
 const FONT_MED = 'Poppins-Medium';
 const FONT_SEMI = 'Poppins-SemiBold';
 const FONT_BOLD = 'Poppins-Bold';
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MONTHS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
 
 const todayStr = () => {
   const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+  return `${d.getFullYear()}-${String(
+    d.getMonth() + 1
+  ).padStart(2, '0')}-${String(
+    d.getDate()
+  ).padStart(2, '0')}`;
 };
 
 function parseDate(s: string): Date {
   const [y, m, d] = s.split('-').map(Number);
+
   return new Date(y, m - 1, d);
 }
 
 function dateKey(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return `${d.getFullYear()}-${String(
+    d.getMonth() + 1
+  ).padStart(2, '0')}-${String(
+    d.getDate()
+  ).padStart(2, '0')}`;
 }
 
 export default function HabitDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
-  const { accentForeground, isDark, onAccent } = useApp();
+  const { id } =
+    useLocalSearchParams<{ id: string }>();
 
-  const [habit, setHabit] = useState<Habit | null>(null);
-  const [completions, setCompletions] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const {
+    accentForeground,
+    isDark,
+    onAccent,
+  } = useApp();
+
+  const [habit, setHabit] =
+    useState<Habit | null>(null);
+
+  const [completions, setCompletions] =
+    useState<Set<string>>(new Set());
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [error, setError] =
+    useState<string | null>(null);
+
+  const [toast, setToast] =
+    useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
 
     setLoading(true);
 
-    const [{ data: h, error: hErr }, { data: comps, error: cErr }] = await Promise.all([
+    const [
+      { data: h, error: hErr },
+      { data: comps, error: cErr },
+    ] = await Promise.all([
       supabase
         .from('habits')
         .select(
@@ -77,15 +134,25 @@ export default function HabitDetailScreen() {
         .from('habit_completions')
         .select('completed_on')
         .eq('habit_id', id)
-        .order('completed_on', { ascending: false }),
+        .order('completed_on', {
+          ascending: false,
+        }),
     ]);
 
     if (hErr || cErr || !h) {
-      setError('This habit could not be loaded.');
+      setError(
+        'This habit could not be loaded.'
+      );
     } else {
       setHabit(h as Habit);
+
       setCompletions(
-        new Set((comps ?? []).map((c: Completion) => c.completed_on))
+        new Set(
+          (comps ?? []).map(
+            (c: Completion) =>
+              c.completed_on
+          )
+        )
       );
     }
 
@@ -99,22 +166,37 @@ export default function HabitDetailScreen() {
   const longestStreak = useMemo(() => {
     if (!completions.size) return 0;
 
-    const sorted = Array.from(completions).sort();
+    const sorted =
+      Array.from(completions).sort();
 
     let max = 1;
     let cur = 1;
 
-    for (let i = 1; i < sorted.length; i++) {
-      const prev = parseDate(sorted[i - 1]);
-      const curr = parseDate(sorted[i]);
+    for (
+      let i = 1;
+      i < sorted.length;
+      i++
+    ) {
+      const prev = parseDate(
+        sorted[i - 1]
+      );
+
+      const curr = parseDate(
+        sorted[i]
+      );
 
       const diff = Math.round(
-        (curr.getTime() - prev.getTime()) / 86400000
+        (curr.getTime() -
+          prev.getTime()) /
+          86400000
       );
 
       if (diff === 1) {
         cur++;
-        max = Math.max(max, cur);
+        max = Math.max(
+          max,
+          cur
+        );
       } else {
         cur = 1;
       }
@@ -124,9 +206,13 @@ export default function HabitDetailScreen() {
   }, [completions]);
 
   const tiles = useMemo(() => {
-    if (!habit || !habit.start_date) return [];
+    if (!habit || !habit.start_date) {
+      return [];
+    }
 
-    const start = parseDate(habit.start_date);
+    const start = parseDate(
+      habit.start_date
+    );
 
     const end = habit.end_date
       ? parseDate(habit.end_date)
@@ -149,11 +235,17 @@ export default function HabitDetailScreen() {
     }[] = [];
 
     const cur = new Date(start);
+
     let idx = 0;
 
-    while (cur <= end && idx < 400) {
+    while (
+      cur <= end &&
+      idx < 400
+    ) {
       const key = dateKey(cur);
-      const done = completions.has(key);
+
+      const done =
+        completions.has(key);
 
       arr.push({
         key,
@@ -165,7 +257,10 @@ export default function HabitDetailScreen() {
         isToday: key === today,
       });
 
-      cur.setDate(cur.getDate() + 1);
+      cur.setDate(
+        cur.getDate() + 1
+      );
+
       idx++;
     }
 
@@ -173,24 +268,51 @@ export default function HabitDetailScreen() {
   }, [habit, completions]);
 
   const totalDays = tiles.length;
-  const doneDays = tiles.filter((t) => t.done).length;
-  const freezesEarned = Math.floor(doneDays * 0.05);
 
-  const showToast = (msg: string) => {
+  const doneDays = tiles.filter(
+    (t) => t.done
+  ).length;
+
+  const showToast = (
+    msg: string
+  ) => {
     setToast(msg);
-    setTimeout(() => setToast(null), 2500);
+
+    setTimeout(
+      () => setToast(null),
+      2500
+    );
+  };
+
+  const openFlexInChat = () => {
+    if (!habit) return;
+
+    router.push({
+      pathname: '/chat',
+      params: {
+        shareStreak: 'true',
+        streak: String(
+          habit.current_streak
+        ),
+        habitName: habit.name,
+      },
+    } as never);
   };
 
   const deleteHabit = async () => {
     if (!habit) return;
 
-    const { error: delErr } = await supabase
+    const {
+      error: delErr,
+    } = await supabase
       .from('habits')
       .delete()
       .eq('id', id);
 
     if (delErr) {
-      setError('Could not delete this habit.');
+      setError(
+        'Could not delete this habit.'
+      );
     } else {
       router.back();
     }
@@ -198,11 +320,23 @@ export default function HabitDetailScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={[styles.safe, isDark && styles.safeDark]}>
+      <SafeAreaView
+        style={[
+          styles.safe,
+          isDark &&
+            styles.safeDark,
+        ]}
+      >
         <PageHeader title="Habit" />
 
         <View style={styles.center}>
-          <Text style={[styles.emptyText, isDark && styles.darkMuted]}>
+          <Text
+            style={[
+              styles.emptyText,
+              isDark &&
+                styles.darkMuted,
+            ]}
+          >
             Loading...
           </Text>
         </View>
@@ -212,12 +346,25 @@ export default function HabitDetailScreen() {
 
   if (!habit) {
     return (
-      <SafeAreaView style={[styles.safe, isDark && styles.safeDark]}>
+      <SafeAreaView
+        style={[
+          styles.safe,
+          isDark &&
+            styles.safeDark,
+        ]}
+      >
         <PageHeader title="Habit" />
 
         <View style={styles.center}>
-          <Text style={[styles.emptyText, isDark && styles.darkMuted]}>
-            {error || 'Habit not found.'}
+          <Text
+            style={[
+              styles.emptyText,
+              isDark &&
+                styles.darkMuted,
+            ]}
+          >
+            {error ||
+              'Habit not found.'}
           </Text>
         </View>
       </SafeAreaView>
@@ -225,72 +372,197 @@ export default function HabitDetailScreen() {
   }
 
   return (
-    <SafeAreaView style={[styles.safe, isDark && styles.safeDark]}>
+    <SafeAreaView
+      style={[
+        styles.safe,
+        isDark &&
+          styles.safeDark,
+      ]}
+    >
       <PageHeader
-        title={habit.name.length > 18 ? habit.name.slice(0, 18) + '…' : habit.name}
-        onBack={() => router.push('/modules')}
+        title={
+          habit.name.length > 18
+            ? habit.name.slice(0, 18) +
+              '…'
+            : habit.name
+        }
+        onBack={() =>
+          router.push('/modules')
+        }
       />
 
       <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
+        contentContainerStyle={
+          styles.content
+        }
+        showsVerticalScrollIndicator={
+          false
+        }
       >
-        {error && <Text style={styles.error}>{error}</Text>}
+        {error && (
+          <Text style={styles.error}>
+            {error}
+          </Text>
+        )}
 
         {/* Streak hero */}
-        <View style={[styles.streakHero, isDark && styles.cardDark]}>
-          <View style={styles.streakCircle}>
-            <Flame color={accentForeground} size={32} />
+        <View
+          style={[
+            styles.streakHero,
+            isDark &&
+              styles.cardDark,
+          ]}
+        >
+          <View
+            style={
+              styles.streakCircle
+            }
+          >
+            <Flame
+              color={
+                accentForeground
+              }
+              size={32}
+            />
 
-            <Text style={[styles.streakBig, { color: accentForeground }]}>
+            <Text
+              style={[
+                styles.streakBig,
+                {
+                  color:
+                    accentForeground,
+                },
+              ]}
+            >
               {habit.current_streak}
             </Text>
 
-            <Text style={[styles.streakLabel, isDark && styles.darkMuted]}>
+            <Text
+              style={[
+                styles.streakLabel,
+                isDark &&
+                  styles.darkMuted,
+              ]}
+            >
               day streak
             </Text>
           </View>
 
-          <Text style={[styles.habitName, isDark && styles.darkText]}>
+          <Text
+            style={[
+              styles.habitName,
+              isDark &&
+                styles.darkText,
+            ]}
+          >
             {habit.name}
           </Text>
 
-          <Text style={[styles.habitMeta, isDark && styles.darkMuted]}>
+          <Text
+            style={[
+              styles.habitMeta,
+              isDark &&
+                styles.darkMuted,
+            ]}
+          >
             {habit.category}
+
             {habit.duration_minutes
               ? `  ·  ${habit.duration_minutes} min/day`
               : ''}
           </Text>
         </View>
 
-        {/* Stats row: dash/dash days, trophies, best streak */}
-        <View style={styles.statsRow}>
-          <View style={[styles.statCard, isDark && styles.cardDark]}>
-            <Text style={[styles.statValue, { color: accentForeground }]}>
+        {/* Stats */}
+        <View
+          style={styles.statsRow}
+        >
+          <View
+            style={[
+              styles.statCard,
+              isDark &&
+                styles.cardDark,
+            ]}
+          >
+            <Text
+              style={[
+                styles.statValue,
+                {
+                  color:
+                    accentForeground,
+                },
+              ]}
+            >
               {doneDays}/{totalDays}
             </Text>
 
-            <Text style={[styles.statLabel, isDark && styles.darkMuted]}>
+            <Text
+              style={[
+                styles.statLabel,
+                isDark &&
+                  styles.darkMuted,
+              ]}
+            >
               Days
             </Text>
           </View>
 
-          <View style={[styles.statCard, isDark && styles.cardDark]}>
-            <Text style={[styles.statValue, { color: accentForeground }]}>
+          <View
+            style={[
+              styles.statCard,
+              isDark &&
+                styles.cardDark,
+            ]}
+          >
+            <Text
+              style={[
+                styles.statValue,
+                {
+                  color:
+                    accentForeground,
+                },
+              ]}
+            >
               {habit.trophies_earned}
             </Text>
 
-            <Text style={[styles.statLabel, isDark && styles.darkMuted]}>
+            <Text
+              style={[
+                styles.statLabel,
+                isDark &&
+                  styles.darkMuted,
+              ]}
+            >
               Trophies
             </Text>
           </View>
 
-          <View style={[styles.statCard, isDark && styles.cardDark]}>
-            <Text style={[styles.statValue, { color: accentForeground }]}>
+          <View
+            style={[
+              styles.statCard,
+              isDark &&
+                styles.cardDark,
+            ]}
+          >
+            <Text
+              style={[
+                styles.statValue,
+                {
+                  color:
+                    accentForeground,
+                },
+              ]}
+            >
               {longestStreak}
             </Text>
 
-            <Text style={[styles.statLabel, isDark && styles.darkMuted]}>
+            <Text
+              style={[
+                styles.statLabel,
+                isDark &&
+                  styles.darkMuted,
+              ]}
+            >
               Best streak
             </Text>
           </View>
@@ -298,60 +570,118 @@ export default function HabitDetailScreen() {
 
         {/* Flex in chat */}
         <Pressable
-          style={[styles.flexBtn, { backgroundColor: accentForeground }]}
-          onPress={() => router.push('/chat/leonard' as never)}
+          style={[
+            styles.flexBtn,
+            {
+              backgroundColor:
+                accentForeground,
+            },
+          ]}
+          onPress={
+            openFlexInChat
+          }
         >
-          <MessageCircle color={onAccent} size={16} />
+          <MessageCircle
+            color={onAccent}
+            size={16}
+          />
 
-          <Text style={[styles.flexBtnText, { color: onAccent }]}>
+          <Text
+            style={[
+              styles.flexBtnText,
+              {
+                color: onAccent,
+              },
+            ]}
+          >
             Flex in chat
           </Text>
         </Pressable>
 
         {/* Tracking board - VIEW ONLY */}
-        <View style={[styles.tilesCard, isDark && styles.cardDark]}>
-          <Text style={[styles.tilesTitle, isDark && styles.darkText]}>
+        <View
+          style={[
+            styles.tilesCard,
+            isDark &&
+              styles.cardDark,
+          ]}
+        >
+          <Text
+            style={[
+              styles.tilesTitle,
+              isDark &&
+                styles.darkText,
+            ]}
+          >
             Tracking board
           </Text>
 
-          <View style={styles.tilesGrid}>
-            {tiles.map((tile) => (
-              <View
-                key={tile.key}
-                style={[
-                  styles.tile,
-                  tile.done && { backgroundColor: accentForeground },
-                  !tile.done &&
-                    !tile.isFuture && {
-                      backgroundColor: isDark ? '#1E1E1E' : '#F5F3EF',
-                    },
-                  tile.isFuture && {
-                    backgroundColor: 'transparent',
-                    borderWidth: 1,
-                    borderColor: isDark ? '#2A2A2A' : '#ECE9E4',
-                  },
-                  tile.isToday &&
-                    !tile.done && {
-                      borderWidth: 1.5,
-                      borderColor: accentForeground,
-                    },
-                ]}
-              >
-                <Text
+          <View
+            style={
+              styles.tilesGrid
+            }
+          >
+            {tiles.map(
+              (tile) => (
+                <View
+                  key={tile.key}
                   style={[
-                    styles.tileDay,
-                    isDark && !tile.done && styles.darkText,
+                    styles.tile,
                     tile.done && {
-                      color: onAccent,
-                      fontFamily: FONT_BOLD,
+                      backgroundColor:
+                        accentForeground,
                     },
-                    tile.isFuture && { opacity: 0.3 },
+
+                    !tile.done &&
+                      !tile.isFuture && {
+                        backgroundColor:
+                          isDark
+                            ? '#1E1E1E'
+                            : '#F5F3EF',
+                      },
+
+                    tile.isFuture && {
+                      backgroundColor:
+                        'transparent',
+                      borderWidth: 1,
+                      borderColor:
+                        isDark
+                          ? '#2A2A2A'
+                          : '#ECE9E4',
+                    },
+
+                    tile.isToday &&
+                      !tile.done && {
+                        borderWidth: 1.5,
+                        borderColor:
+                          accentForeground,
+                      },
                   ]}
                 >
-                  {tile.tileNumber}
-                </Text>
-              </View>
-            ))}
+                  <Text
+                    style={[
+                      styles.tileDay,
+                      isDark &&
+                        !tile.done &&
+                        styles.darkText,
+
+                      tile.done && {
+                        color:
+                          onAccent,
+                        fontFamily:
+                          FONT_BOLD,
+                      },
+
+                      tile.isFuture && {
+                        opacity: 0.3,
+                      },
+                    ]}
+                  >
+                    {tile.tileNumber}
+                  </Text>
+                </View>
+              )
+            )}
           </View>
         </View>
 
@@ -359,21 +689,43 @@ export default function HabitDetailScreen() {
           onPress={deleteHabit}
           style={[
             styles.deleteBtn,
-            isDark && styles.deleteBtnDark,
+            isDark &&
+              styles.deleteBtnDark,
           ]}
         >
-          <Trash2 color="#C53A2F" size={16} />
+          <Trash2
+            color="#C53A2F"
+            size={16}
+          />
 
-          <Text style={styles.deleteText}>
+          <Text
+            style={styles.deleteText}
+          >
             Delete habit
           </Text>
         </Pressable>
       </ScrollView>
 
       {toast && (
-        <View style={styles.toastWrap}>
-          <View style={[styles.toast, isDark && styles.cardDark]}>
-            <Text style={[styles.toastText, isDark && styles.darkText]}>
+        <View
+          style={
+            styles.toastWrap
+          }
+        >
+          <View
+            style={[
+              styles.toast,
+              isDark &&
+                styles.cardDark,
+            ]}
+          >
+            <Text
+              style={[
+                styles.toastText,
+                isDark &&
+                  styles.darkText,
+              ]}
+            >
               {toast}
             </Text>
           </View>
@@ -386,11 +738,13 @@ export default function HabitDetailScreen() {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: '#FBFAF8',
+    backgroundColor:
+      '#FBFAF8',
   },
 
   safeDark: {
-    backgroundColor: '#090909',
+    backgroundColor:
+      '#090909',
   },
 
   content: {
@@ -415,7 +769,8 @@ const styles = StyleSheet.create({
 
   center: {
     flex: 1,
-    justifyContent: 'center',
+    justifyContent:
+      'center',
     alignItems: 'center',
   },
 

@@ -15,6 +15,7 @@ import {
 import {
   Check,
   CheckCheck,
+  Plus,
   Search,
   Send,
   UserPlus,
@@ -55,117 +56,38 @@ type IncomingRequest = {
   created_at: string;
 };
 
+type IncomingGroupInvite = {
+  id: string;
+  group_id: string;
+  group_name: string;
+  inviter_id: string;
+  inviter_name: string;
+  created_at: string;
+};
+
 /* =========================================================
    SYSTEM CHATS
 ========================================================= */
+
+const SIDEKICK_GREETING =
+  "Hi! I'm your Sidekick. How can I help you today?";
 
 const SYSTEM_CHATS: ChatItem[] = [
   {
     id: 'sys-sidekick',
     name: 'Sidekick',
-    detail: 'No messages yet',
+    detail: SIDEKICK_GREETING,
     time: '',
     category: 'system',
     icon: 'S',
     route: '/chat/sidekick',
-  },
-  {
-    id: 'sys-planner',
-    name: 'Planner',
-    detail: 'No messages yet',
-    time: '',
-    category: 'system',
-    icon: 'P',
-    route: '/chat/planner',
-    moduleRoute: '/planner',
-  },
-  {
-    id: 'sys-habits',
-    name: 'Habits',
-    detail: 'No messages yet',
-    time: '',
-    category: 'system',
-    icon: 'H',
-    route: '/chat/habits',
-    moduleRoute: '/habits',
-  },
-  {
-    id: 'sys-reminders',
-    name: 'Reminders',
-    detail: 'No messages yet',
-    time: '',
-    category: 'system',
-    icon: 'R',
-    route: '/chat/reminders',
-    moduleRoute: '/reminders',
-  },
-  {
-    id: 'sys-plants',
-    name: 'Plants',
-    detail: 'No messages yet',
-    time: '',
-    category: 'system',
-    icon: 'P',
-    route: '/chat/plants',
-    moduleRoute: '/plants',
-  },
-  {
-    id: 'sys-bookmark',
-    name: 'Bookmarks',
-    detail: 'No messages yet',
-    time: '',
-    category: 'system',
-    icon: 'B',
-    route: '/chat/bookmark',
-    moduleRoute: '/bookmark',
-  },
-  {
-    id: 'sys-finances',
-    name: 'Finances',
-    detail: 'No messages yet',
-    time: '',
-    category: 'system',
-    icon: 'F',
-    route: '/chat/finances',
-    moduleRoute: '/modules/finances',
-  },
-  {
-    id: 'sys-wellbeing',
-    name: 'Well-being',
-    detail: 'No messages yet',
-    time: '',
-    category: 'system',
-    icon: 'W',
-    route: '/chat/well-being',
-    moduleRoute: '/modules/wellbeing',
-  },
-  {
-    id: 'sys-lists',
-    name: 'Lists',
-    detail: 'No messages yet',
-    time: '',
-    category: 'system',
-    icon: 'L',
-    route: '/chat/lists',
-    moduleRoute: '/modules/lists',
-  },
-  {
-    id: 'sys-games',
-    name: 'Games',
-    detail: 'No messages yet',
-    time: '',
-    category: 'system',
-    icon: 'G',
-    route: '/chat/games',
-    moduleRoute: '/modules/games',
   },
 ];
 
 const filters = [
   'All',
   'Unread',
-  'System',
-  'People',
+  'Groups',
 ] as const;
 
 type FilterKey =
@@ -201,6 +123,15 @@ export default function ChatScreen() {
   const [userFriends, setUserFriends] =
     useState<ChatItem[]>([]);
 
+  const [userGroups, setUserGroups] =
+    useState<ChatItem[]>([]);
+
+  const [groupsLoading, setGroupsLoading] =
+    useState(false);
+
+  const [sidekickPreview, setSidekickPreview] =
+    useState<{ content: string; time: string } | null>(null);
+
   /* ---------------------------------------------------------
      Add friend modal
   --------------------------------------------------------- */
@@ -224,6 +155,22 @@ export default function ChatScreen() {
     useState<string | null>(null);
 
   /* ---------------------------------------------------------
+     Create group modal
+  --------------------------------------------------------- */
+
+  const [createGroupOpen, setCreateGroupOpen] =
+    useState(false);
+
+  const [newGroupName, setNewGroupName] =
+    useState('');
+
+  const [creatingGroup, setCreatingGroup] =
+    useState(false);
+
+  const [createGroupError, setCreateGroupError] =
+    useState<string | null>(null);
+
+  /* ---------------------------------------------------------
      Incoming requests
   --------------------------------------------------------- */
 
@@ -234,6 +181,12 @@ export default function ChatScreen() {
     useState(true);
 
   const [requestActionId, setRequestActionId] =
+    useState<string | null>(null);
+
+  const [incomingGroupInvites, setIncomingGroupInvites] =
+    useState<IncomingGroupInvite[]>([]);
+
+  const [groupInviteActionId, setGroupInviteActionId] =
     useState<string | null>(null);
 
   /* =========================================================
@@ -342,6 +295,275 @@ export default function ChatScreen() {
         friendsList,
       );
     }, []);
+
+  /* =========================================================
+     LOAD GROUPS
+  ========================================================= */
+
+  const loadGroups =
+    useCallback(async () => {
+      setGroupsLoading(true);
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        setUserGroups([]);
+        setGroupsLoading(false);
+        return;
+      }
+
+      const {
+        data: memberRows,
+        error: memberError,
+      } = await supabase
+        .from('social_group_members')
+        .select('group_id, role')
+        .eq('profile_id', user.id);
+
+      if (memberError) {
+        console.error('LOAD GROUP MEMBERSHIPS ERROR:', memberError);
+        setUserGroups([]);
+        setGroupsLoading(false);
+        return;
+      }
+
+      const groupIds = (memberRows ?? []).map((r: { group_id: string }) => r.group_id);
+      if (!groupIds.length) {
+        setUserGroups([]);
+        setGroupsLoading(false);
+        return;
+      }
+
+      const roleByGroupId = new Map(
+        (memberRows ?? []).map((r: { group_id: string; role: string }) => [r.group_id, r.role])
+      );
+
+      const {
+        data: groupRows,
+        error: groupError,
+      } = await supabase
+        .from('social_groups')
+        .select('id, name, created_at')
+        .in('id', groupIds)
+        .order('created_at', { ascending: false });
+
+      if (groupError) {
+        console.error('LOAD GROUPS ERROR:', groupError);
+        setUserGroups([]);
+        setGroupsLoading(false);
+        return;
+      }
+
+      const groupsList: ChatItem[] = (groupRows ?? []).map(
+        (g: { id: string; name: string }) => ({
+          id: `group-${g.id}`,
+          name: g.name,
+          detail: roleByGroupId.get(g.id) === 'admin' ? 'You\u2019re an admin' : 'Group',
+          time: '',
+          category: 'groups' as const,
+          icon: g.name.slice(0, 1).toUpperCase(),
+          route: `/chat/group/${g.id}`,
+        })
+      );
+
+      setUserGroups(groupsList);
+      setGroupsLoading(false);
+    }, []);
+
+  /* =========================================================
+     LOAD SIDEKICK PREVIEW (latest message for the list row)
+  ========================================================= */
+
+  const loadSidekickPreview =
+    useCallback(async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // system_messages may not exist yet if Sidekick hasn't been
+      // wired up on the backend — fail quietly and keep the
+      // default greeting rather than showing an error.
+      const { data, error } = await supabase
+        .from('system_messages')
+        .select('content, created_at')
+        .eq('user_id', user.id)
+        .eq('module_key', 'sidekick')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error || !data) return;
+
+      const time = new Date(data.created_at).toLocaleTimeString([], {
+        hour: 'numeric',
+        minute: '2-digit',
+      });
+
+      setSidekickPreview({ content: data.content, time });
+    }, []);
+
+  /* =========================================================
+     LOAD + ACT ON INCOMING GROUP INVITES
+  ========================================================= */
+
+  const loadIncomingGroupInvites =
+    useCallback(async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) { setIncomingGroupInvites([]); return; }
+
+      const { data: inviteRows, error: inviteError } = await supabase
+        .from('social_group_invites')
+        .select('id, group_id, inviter_id, created_at')
+        .eq('invitee_id', user.id)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false });
+
+      if (inviteError) {
+        console.error('LOAD GROUP INVITES ERROR:', inviteError);
+        setIncomingGroupInvites([]);
+        return;
+      }
+
+      if (!inviteRows?.length) {
+        setIncomingGroupInvites([]);
+        return;
+      }
+
+      const groupIds = [...new Set(inviteRows.map((r) => r.group_id))];
+      const inviterIds = [...new Set(inviteRows.map((r) => r.inviter_id))];
+
+      const [{ data: groupRows }, { data: profileRows }] = await Promise.all([
+        supabase.from('social_groups').select('id, name').in('id', groupIds),
+        supabase.from('social_profiles').select('user_id, display_name').in('user_id', inviterIds),
+      ]);
+
+      const groupNameById = new Map((groupRows ?? []).map((g) => [g.id, g.name]));
+      const inviterNameById = new Map((profileRows ?? []).map((p) => [p.user_id, p.display_name]));
+
+      setIncomingGroupInvites(
+        inviteRows.map((r) => ({
+          id: r.id,
+          group_id: r.group_id,
+          group_name: groupNameById.get(r.group_id) ?? 'Group',
+          inviter_id: r.inviter_id,
+          inviter_name: inviterNameById.get(r.inviter_id) ?? 'Someone',
+          created_at: r.created_at,
+        }))
+      );
+    }, []);
+
+  const acceptGroupInvite =
+    async (invite: IncomingGroupInvite) => {
+      setGroupInviteActionId(invite.id);
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) { setGroupInviteActionId(null); return; }
+
+      const { error: updateError } = await supabase
+        .from('social_group_invites')
+        .update({ status: 'accepted' })
+        .eq('id', invite.id);
+
+      if (updateError) {
+        console.error('ACCEPT GROUP INVITE ERROR:', updateError);
+        setGroupInviteActionId(null);
+        return;
+      }
+
+      const { error: memberError } = await supabase
+        .from('social_group_members')
+        .insert({ group_id: invite.group_id, profile_id: user.id, role: 'member' });
+
+      if (memberError) {
+        console.error('JOIN GROUP AFTER ACCEPT ERROR:', memberError);
+      }
+
+      setIncomingGroupInvites((prev) => prev.filter((i) => i.id !== invite.id));
+      await loadGroups();
+      setGroupInviteActionId(null);
+    };
+
+  const declineGroupInvite =
+    async (invite: IncomingGroupInvite) => {
+      setGroupInviteActionId(invite.id);
+      const { error } = await supabase
+        .from('social_group_invites')
+        .update({ status: 'declined' })
+        .eq('id', invite.id);
+
+      if (error) {
+        console.error('DECLINE GROUP INVITE ERROR:', error);
+      }
+
+      setIncomingGroupInvites((prev) => prev.filter((i) => i.id !== invite.id));
+      setGroupInviteActionId(null);
+    };
+
+  /* =========================================================
+     CREATE GROUP (from the Groups tab, no pre-invited friend)
+  ========================================================= */
+
+  const handleCreateGroup =
+    async () => {
+      const name = newGroupName.trim();
+      if (!name || creatingGroup) return;
+
+      setCreatingGroup(true);
+      setCreateGroupError(null);
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        setCreateGroupError('You must be signed in.');
+        setCreatingGroup(false);
+        return;
+      }
+
+      const {
+        data: groupData,
+        error: groupErr,
+      } = await supabase
+        .from('social_groups')
+        .insert({ name, created_by: user.id })
+        .select('id')
+        .single();
+
+      if (groupErr || !groupData) {
+        console.error('CREATE GROUP ERROR:', groupErr);
+        setCreateGroupError('Could not create group.');
+        setCreatingGroup(false);
+        return;
+      }
+
+      const groupId = (groupData as { id: string }).id;
+
+      const {
+        error: memberErr,
+      } = await supabase
+        .from('social_group_members')
+        .insert({ group_id: groupId, profile_id: user.id, role: 'admin' });
+
+      setCreatingGroup(false);
+
+      if (memberErr) {
+        console.error('CREATE GROUP MEMBER ERROR:', memberErr);
+        setCreateGroupError('Group created, but could not add you as a member.');
+        return;
+      }
+
+      setNewGroupName('');
+      setCreateGroupOpen(false);
+      await loadGroups();
+      router.push(`/chat/group/${groupId}` as never);
+    };
 
   /* =========================================================
      LOAD INCOMING FRIEND REQUESTS
@@ -493,9 +715,15 @@ export default function ChatScreen() {
   useEffect(() => {
     loadFriends();
     loadIncomingRequests();
+    loadGroups();
+    loadSidekickPreview();
+    loadIncomingGroupInvites();
   }, [
     loadFriends,
     loadIncomingRequests,
+    loadGroups,
+    loadSidekickPreview,
+    loadIncomingGroupInvites,
   ]);
 
   /* =========================================================
@@ -504,10 +732,15 @@ export default function ChatScreen() {
 
   const allChats = useMemo(
     () => [
-      ...SYSTEM_CHATS,
+      ...SYSTEM_CHATS.map((chat) =>
+        chat.id === 'sys-sidekick' && sidekickPreview
+          ? { ...chat, detail: sidekickPreview.content, time: sidekickPreview.time }
+          : chat,
+      ),
       ...userFriends,
+      ...userGroups,
     ],
-    [userFriends],
+    [userFriends, userGroups, sidekickPreview],
   );
 
   const filteredChats =
@@ -541,18 +774,11 @@ export default function ChatScreen() {
             (c) => c.unread,
           );
 
-        case 'System':
+        case 'Groups':
           return byName.filter(
             (c) =>
               c.category ===
-              'system',
-          );
-
-        case 'People':
-          return byName.filter(
-            (c) =>
-              c.category ===
-              'direct',
+              'groups',
           );
 
         default:
@@ -1212,6 +1438,26 @@ export default function ChatScreen() {
             ),
           )}
         </ScrollView>
+
+        {filter === 'Groups' && (
+          <Pressable
+            onPress={() => {
+              setCreateGroupOpen(true);
+              setNewGroupName('');
+              setCreateGroupError(null);
+            }}
+            style={[
+              styles.addGroupBtn,
+              isDark && styles.addGroupBtnDark,
+              { borderColor: accentForeground },
+            ]}
+          >
+            <Plus color={accentForeground} size={16} />
+            <Text style={[styles.addGroupBtnText, { color: accentForeground }]}>
+              Add Group
+            </Text>
+          </Pressable>
+        )}
       </View>
 
       {/* =====================================================
@@ -1427,6 +1673,83 @@ export default function ChatScreen() {
                 </View>
               ),
             )}
+          </View>
+        )}
+
+        {/* =================================================
+            GROUP INVITES
+        ================================================= */}
+
+        {incomingGroupInvites.length > 0 && (
+          <View
+            style={[
+              styles.requestsCard,
+              isDark && styles.requestsCardDark,
+            ]}
+          >
+            <View style={styles.requestsHeader}>
+              <View>
+                <Text style={[styles.requestsTitle, isDark && styles.darkText]}>
+                  GROUP INVITES
+                </Text>
+                <Text style={[styles.requestsSubtitle, isDark && styles.darkMuted]}>
+                  Groups you've been invited to
+                </Text>
+              </View>
+
+              <View style={[styles.requestCount, { backgroundColor: accentForeground }]}>
+                <Text style={styles.requestCountText}>{incomingGroupInvites.length}</Text>
+              </View>
+            </View>
+
+            {incomingGroupInvites.map((invite) => (
+              <View key={invite.id} style={[styles.requestRow, isDark && styles.requestRowDark]}>
+                <View style={[styles.friendAvatar, { backgroundColor: accentForeground }]}>
+                  <Text style={styles.friendAvatarText}>
+                    {invite.group_name.slice(0, 1).toUpperCase()}
+                  </Text>
+                </View>
+
+                <View style={styles.requestCopy}>
+                  <Text style={[styles.requestName, isDark && styles.darkText]}>
+                    {invite.group_name}
+                  </Text>
+                  <Text style={[styles.requestUsername, isDark && styles.darkMuted]}>
+                    Invited by {invite.inviter_name}
+                  </Text>
+                </View>
+
+                <View style={styles.requestButtons}>
+                  <Pressable
+                    disabled={groupInviteActionId === invite.id}
+                    onPress={() => acceptGroupInvite(invite)}
+                    style={[
+                      styles.acceptBtn,
+                      { backgroundColor: accentForeground },
+                      groupInviteActionId === invite.id && styles.disabledBtn,
+                    ]}
+                  >
+                    {groupInviteActionId === invite.id ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Check color="#FFFFFF" size={15} />
+                    )}
+                  </Pressable>
+
+                  <Pressable
+                    disabled={groupInviteActionId === invite.id}
+                    onPress={() => declineGroupInvite(invite)}
+                    style={[
+                      styles.declineBtn,
+                      isDark && styles.declineBtnDark,
+                      groupInviteActionId === invite.id && styles.disabledBtn,
+                    ]}
+                  >
+                    <X color={isDark ? '#DDD8D0' : '#706C65'} size={15} />
+                  </Pressable>
+                </View>
+              </View>
+            ))}
           </View>
         )}
 
@@ -1874,6 +2197,97 @@ export default function ChatScreen() {
           </ScrollView>
         </View>
       </Modal>
+
+      {/* =====================================================
+          CREATE GROUP MODAL
+      ===================================================== */}
+
+      <Modal
+        visible={createGroupOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setCreateGroupOpen(false)}
+      >
+        <Pressable
+          style={styles.friendModalShade}
+          onPress={() => setCreateGroupOpen(false)}
+        />
+
+        <View
+          style={[
+            styles.friendSheet,
+            isDark && styles.friendSheetDark,
+          ]}
+        >
+          <View style={styles.friendSheetHeader}>
+            <Text
+              style={[
+                styles.friendSheetTitle,
+                isDark && styles.darkText,
+              ]}
+            >
+              Create a group
+            </Text>
+
+            <Pressable
+              onPress={() => setCreateGroupOpen(false)}
+              hitSlop={12}
+            >
+              <X color={isDark ? '#AAA59D' : '#8D8B86'} size={22} />
+            </Pressable>
+          </View>
+
+          <View
+            style={[
+              styles.search,
+              isDark && styles.searchDark,
+            ]}
+          >
+            <TextInput
+              value={newGroupName}
+              onChangeText={setNewGroupName}
+              placeholder="Group name"
+              placeholderTextColor={isDark ? '#8C8982' : '#A4A09A'}
+              style={[
+                styles.searchInput,
+                isDark && styles.darkText,
+              ]}
+              autoFocus
+              onSubmitEditing={handleCreateGroup}
+            />
+          </View>
+
+          {createGroupError && (
+            <Text style={styles.friendError}>{createGroupError}</Text>
+          )}
+
+          <Pressable
+            onPress={handleCreateGroup}
+            disabled={creatingGroup || !newGroupName.trim()}
+            style={[
+              styles.createGroupBtn,
+              { backgroundColor: accentForeground },
+              (creatingGroup || !newGroupName.trim()) && { opacity: 0.5 },
+            ]}
+          >
+            {creatingGroup ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.createGroupBtnText}>Create Group</Text>
+            )}
+          </Pressable>
+
+          <Text
+            style={[
+              styles.friendHint,
+              isDark && styles.darkMuted,
+              { marginTop: 4 },
+            ]}
+          >
+            You'll be the admin. Invite friends and add subgroups once it's created.
+          </Text>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -2308,6 +2722,43 @@ const styles =
     /* -----------------------------------------------------
        Friend modal
     ----------------------------------------------------- */
+
+    addGroupBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      alignSelf: 'flex-start',
+      gap: 6,
+      marginTop: 10,
+      marginHorizontal: 20,
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: 18,
+      borderWidth: 1,
+      backgroundColor: '#FFFFFF',
+    },
+
+    addGroupBtnDark: {
+      backgroundColor: '#151515',
+    },
+
+    addGroupBtnText: {
+      fontFamily: FONT_MED,
+      fontSize: 13,
+    },
+
+    createGroupBtn: {
+      marginTop: 16,
+      borderRadius: 14,
+      paddingVertical: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+
+    createGroupBtnText: {
+      fontFamily: FONT_BOLD,
+      fontSize: 15,
+      color: '#FFFFFF',
+    },
 
     friendModalShade: {
       flex: 1,

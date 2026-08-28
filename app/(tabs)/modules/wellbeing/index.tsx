@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
-  Bell,
   BookOpen,
+  MoreVertical,
   ChevronLeft,
   Heart,
   Moon,
@@ -119,6 +119,7 @@ export default function WellbeingDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   // The Well-being tables are user-scoped. Always use the signed-in user's id.
   const [userId, setUserId] = useState<string | null>(null);
@@ -305,10 +306,49 @@ export default function WellbeingDashboard() {
           <ChevronLeft color="#FFFFFF" size={24} />
         </Pressable>
         <Text style={[styles.headerTitle, { color: accent }]}>WELL-BEING</Text>
-        <Pressable style={styles.headerBtn} hitSlop={12}>
-          <Bell color={COLORS.text} size={22} />
+        <Pressable
+          onPress={() => setMenuOpen(true)}
+          style={styles.headerBtn}
+          hitSlop={12}
+        >
+          <MoreVertical color={COLORS.text} size={22} />
         </Pressable>
       </View>
+
+      <Modal
+        visible={menuOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMenuOpen(false)}
+      >
+        <Pressable
+          style={styles.menuShade}
+          onPress={() => setMenuOpen(false)}
+        >
+          <Pressable
+            style={[
+              styles.menuCard,
+              {
+                backgroundColor: COLORS.card,
+                borderColor: COLORS.cardBorder,
+              },
+            ]}
+            onPress={(event) => event.stopPropagation()}
+          >
+            <Pressable
+  onPress={() => {
+    setMenuOpen(false);
+    router.push('/(tabs)/profile');
+  }}
+  style={styles.menuItem}
+>
+              <Text style={[styles.menuItemText, { color: COLORS.text }]}>
+                Settings
+              </Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <ScrollView
         contentContainerStyle={styles.scroll}
@@ -399,6 +439,33 @@ function makeStyles(C: Palette) {
       fontSize: 18,
       letterSpacing: 1.2,
       color: C.text,
+    },
+
+    menuShade: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.25)',
+      alignItems: 'flex-end',
+      paddingTop: 64,
+      paddingRight: 12,
+    },
+    menuCard: {
+      borderRadius: 14,
+      borderWidth: 1,
+      paddingVertical: 6,
+      minWidth: 150,
+      shadowColor: '#000',
+      shadowOpacity: 0.12,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 4,
+    },
+    menuItem: {
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+    },
+    menuItemText: {
+      fontFamily: FONT_MEDIUM,
+      fontSize: 14,
     },
 
     /* Scroll */

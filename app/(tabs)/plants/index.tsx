@@ -13,8 +13,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
-  Bell,
   ChevronLeft,
+  MoreVertical,
   Droplets,
   Pencil,
   Plus,
@@ -218,6 +218,7 @@ export default function PlantsScreen() {
   const [notes, setNotes] = useState('');
 
   const [saving, setSaving] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [wateringId, setWateringId] =
     useState<string | null>(null);
   const [deletingId, setDeletingId] =
@@ -634,15 +635,56 @@ export default function PlantsScreen() {
         </Text>
 
         <Pressable
+          onPress={() => setMenuOpen(true)}
           style={styles.headerBtn}
           hitSlop={12}
         >
-          <Bell
+          <MoreVertical
             color={C.text}
             size={22}
           />
         </Pressable>
       </View>
+
+      <Modal
+        visible={menuOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMenuOpen(false)}
+      >
+        <Pressable
+          style={styles.menuShade}
+          onPress={() => setMenuOpen(false)}
+        >
+          <Pressable
+            style={[
+              styles.menuCard,
+              {
+                backgroundColor: C.card,
+                borderColor: C.border,
+              },
+            ]}
+            onPress={(event) => event.stopPropagation()}
+          >
+<Pressable
+  onPress={() => {
+    setMenuOpen(false);
+    router.push('/(tabs)/profile');
+  }}
+  style={styles.menuItem}
+>
+              <Text
+                style={[
+                  styles.menuItemText,
+                  { color: C.text },
+                ]}
+              >
+                Settings
+              </Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* PLANT LIST */}
 
@@ -1821,6 +1863,36 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  menuShade: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.25)',
+    alignItems: 'flex-end',
+    paddingTop: 64,
+    paddingRight: 12,
+  },
+
+  menuCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingVertical: 6,
+    minWidth: 150,
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+
+  menuItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+
+  menuItemText: {
+    fontFamily: FONT_MED,
+    fontSize: 14,
+  },
+
 
   headerTitle: {
     fontFamily: FONT_BOLD,

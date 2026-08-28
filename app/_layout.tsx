@@ -1,4 +1,14 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
+
+import {
+  Animated,
+  Easing,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+} from 'react-native';
+
+import LottieView from 'lottie-react-native';
 
 import {
   Stack,
@@ -19,67 +29,5 @@ import {
   useAuth,
 } from '../components/AuthProvider';
 
-function AppShell() {
-  const { isDark } = useApp();
-
-  return (
-    <>
-      <StatusBar
-        style={isDark ? 'light' : 'dark'}
-      />
-      <AuthGate />
-    </>
-  );
-}
-
-function AuthGate() {
-  const { session, loading } = useAuth();
-
-  const segments = useSegments();
-  const router = useRouter();
-
-  useEffect(() => {
-    if (loading) {
-      return;
-    }
-
-    const inAuth =
-      segments[0] === '(auth)';
-
-    if (!session && !inAuth) {
-      router.replace('/login');
-      return;
-    }
-
-    if (session && inAuth) {
-      router.replace(
-        '/(tabs)/modules',
-      );
-    }
-  }, [
-    session,
-    loading,
-    segments,
-    router,
-  ]);
-
-  return (
-    <Stack
-      screenOptions={{
-        headerShown: false,
-      }}
-    />
-  );
-}
-
-export default function RootLayout() {
-  return (
-    <SafeAreaProvider>
-      <AuthProvider>
-        <AppProvider>
-          <AppShell />
-        </AppProvider>
-      </AuthProvider>
-    </SafeAreaProvider>
-  );
-}
+const loadingAnimation: any =
+  require('../assets/loading.json');

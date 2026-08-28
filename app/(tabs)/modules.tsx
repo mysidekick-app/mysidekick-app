@@ -21,7 +21,11 @@ import {
   ChevronLeft,
   MoreVertical,
   Sparkles,
+  Settings,
+  LogOut,
 } from 'lucide-react-native';
+
+import { useState } from 'react';
 
 import { useApp } from '@/components/AppProvider';
 
@@ -108,6 +112,9 @@ export default function ModulesScreen() {
     isDark,
   } = useApp();
 
+  const [menuOpen, setMenuOpen] =
+    useState(false);
+
   const C = isDark
     ? {
         bg: '#090909',
@@ -169,6 +176,7 @@ export default function ModulesScreen() {
         </Text>
 
         <Pressable
+          onPress={() => setMenuOpen(true)}
           style={styles.headerBtn}
           hitSlop={12}
           accessibilityLabel="More options"
@@ -361,6 +369,110 @@ export default function ModulesScreen() {
           </View>
         </View>
       </ScrollView>
+
+      {/* =====================================================
+          RIGHT-HAND MENU
+      ===================================================== */}
+
+      {menuOpen && (
+        <Pressable
+          style={styles.menuOverlay}
+          onPress={() => setMenuOpen(false)}
+        >
+          <Pressable
+            style={[
+              styles.menu,
+              {
+                backgroundColor: C.card,
+                borderColor: C.border,
+              },
+            ]}
+            onPress={(event) =>
+              event.stopPropagation()
+            }
+          >
+            {/* Settings */}
+
+            <Pressable
+              onPress={() => {
+                setMenuOpen(false);
+                router.push(
+                  '/(tabs)/profile',
+                );
+              }}
+              style={styles.menuItem}
+            >
+              <View
+                style={[
+                  styles.menuIcon,
+                  {
+                    backgroundColor:
+                      isDark
+                        ? '#292929'
+                        : '#F3F2EF',
+                  },
+                ]}
+              >
+                <Settings
+                  color={accentForeground}
+                  size={17}
+                />
+              </View>
+
+              <Text
+                style={[
+                  styles.menuItemText,
+                  {
+                    color: C.text,
+                  },
+                ]}
+              >
+                Settings
+              </Text>
+            </Pressable>
+
+            {/* Logout */}
+
+            <Pressable
+              onPress={() => {
+                setMenuOpen(false);
+              }}
+              style={[
+                styles.menuItem,
+                styles.menuItemLast,
+              ]}
+            >
+              <View
+                style={[
+                  styles.menuIcon,
+                  {
+                    backgroundColor:
+                      isDark
+                        ? '#292929'
+                        : '#F3F2EF',
+                  },
+                ]}
+              >
+                <LogOut
+                  color={C.muted}
+                  size={17}
+                />
+              </View>
+
+              <Text
+                style={[
+                  styles.menuItemText,
+                  {
+                    color: C.text,
+                  },
+                ]}
+              >
+                Logout
+              </Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      )}
     </SafeAreaView>
   );
 }
@@ -491,6 +603,7 @@ const styles =
      * Temporary black-and-white
      * Sidekick placeholder.
      */
+
     sidekickPeek: {
       width: 58,
       height: 58,
@@ -539,5 +652,67 @@ const styles =
       fontSize: 10.5,
       marginTop: 12,
       opacity: 0.75,
+    },
+
+    /* -----------------------------------------------------
+       RIGHT-HAND MENU
+    ----------------------------------------------------- */
+
+    menuOverlay: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor:
+        'rgba(0,0,0,0.18)',
+    },
+
+    menu: {
+      position: 'absolute',
+      top: 72,
+      right: 16,
+      minWidth: 190,
+      borderRadius: 16,
+      borderWidth: 1,
+      paddingVertical: 6,
+      paddingHorizontal: 6,
+
+      shadowColor: '#000',
+      shadowOffset: {
+        width: 0,
+        height: 4,
+      },
+      shadowOpacity: 0.15,
+      shadowRadius: 10,
+      elevation: 8,
+    },
+
+    menuItem: {
+      minHeight: 50,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingHorizontal: 8,
+      borderRadius: 11,
+    },
+
+    menuItemLast: {
+      marginTop: 2,
+    },
+
+    menuIcon: {
+      width: 32,
+      height: 32,
+      borderRadius: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+
+    menuItemText: {
+      fontFamily:
+        FONT_SEMI,
+      fontSize: 13,
+      flex: 1,
     },
   });

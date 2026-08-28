@@ -20,7 +20,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
-  Bell,
+  MoreVertical,
   Check,
   ChevronLeft,
   Pencil,
@@ -759,6 +759,9 @@ export default function PlannerScreen() {
     selectedTaskId,
     setSelectedTaskId,
   ] = useState<string | null>(null);
+
+  const [menuOpen, setMenuOpen] =
+    useState(false);
 
   const [
     editingTaskId,
@@ -2026,15 +2029,56 @@ export default function PlannerScreen() {
         </Text>
 
         <Pressable
+          onPress={() => setMenuOpen(true)}
           style={styles.headerBtn}
           hitSlop={12}
         >
-          <Bell
+          <MoreVertical
             color={C.text}
             size={22}
           />
         </Pressable>
       </View>
+
+      <Modal
+        visible={menuOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMenuOpen(false)}
+      >
+        <Pressable
+          style={styles.headerMenuShade}
+          onPress={() => setMenuOpen(false)}
+        >
+          <Pressable
+            style={[
+              styles.headerMenuCard,
+              {
+                backgroundColor: C.card,
+                borderColor: C.border,
+              },
+            ]}
+            onPress={(event) => event.stopPropagation()}
+          >
+            <Pressable
+  style={styles.headerMenuItem}
+  onPress={() => {
+    setMenuOpen(false);
+    router.push('/(tabs)/profile');
+  }}
+>
+              <Text
+                style={[
+                  styles.headerMenuText,
+                  { color: C.text },
+                ]}
+              >
+                Settings
+              </Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <ScrollView
         contentContainerStyle={
@@ -4308,6 +4352,36 @@ const styles =
         'center',
       justifyContent:
         'center',
+    },
+
+    headerMenuShade: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.25)',
+      alignItems: 'flex-end',
+      paddingTop: 64,
+      paddingRight: 12,
+    },
+
+    headerMenuCard: {
+      borderRadius: 14,
+      borderWidth: 1,
+      minWidth: 150,
+      paddingVertical: 6,
+      shadowColor: '#000',
+      shadowOpacity: 0.12,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 4,
+    },
+
+    headerMenuItem: {
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+    },
+
+    headerMenuText: {
+      fontFamily: FONT_MED,
+      fontSize: 14,
     },
 
     headerTitle: {

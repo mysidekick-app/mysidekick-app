@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
   Bell,
+  MoreVertical,
   CalendarDays,
   Check,
   ChevronLeft,
@@ -270,6 +271,7 @@ export default function RemindersScreen() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState<Reminder | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const [filter, setFilter] = useState<FilterTag>('all');
 
@@ -732,15 +734,56 @@ export default function RemindersScreen() {
         </Text>
 
         <Pressable
+          onPress={() => setMenuOpen(true)}
           style={styles.bellBtn}
           hitSlop={12}
         >
-          <Bell
+          <MoreVertical
             color={C.text}
             size={20}
           />
         </Pressable>
       </View>
+
+      <Modal
+        visible={menuOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMenuOpen(false)}
+      >
+        <Pressable
+          style={styles.menuShade}
+          onPress={() => setMenuOpen(false)}
+        >
+          <Pressable
+            style={[
+              styles.menuCard,
+              {
+                backgroundColor: C.card,
+                borderColor: C.border,
+              },
+            ]}
+            onPress={(event) => event.stopPropagation()}
+          >
+            <Pressable
+  onPress={() => {
+    setMenuOpen(false);
+    router.push('/(tabs)/profile');
+  }}
+  style={styles.menuItem}
+>
+              <Text
+                style={[
+                  styles.menuItemText,
+                  { color: C.text },
+                ]}
+              >
+                Settings
+              </Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <ScrollView
         contentContainerStyle={styles.content}
@@ -1458,6 +1501,33 @@ function makeStyles(C: Palette) {
       fontSize: 16,
       letterSpacing: 1.4,
       color: C.text,
+    },
+
+    menuShade: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.25)',
+      alignItems: 'flex-end',
+      paddingTop: 64,
+      paddingRight: 12,
+    },
+    menuCard: {
+      borderRadius: 14,
+      borderWidth: 1,
+      paddingVertical: 6,
+      minWidth: 150,
+      shadowColor: '#000',
+      shadowOpacity: 0.12,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 4,
+    },
+    menuItem: {
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+    },
+    menuItemText: {
+      fontFamily: FONT_MED,
+      fontSize: 14,
     },
 
     bellBtn: {

@@ -144,11 +144,14 @@ export default function WordSearchScreen() {
     setScoreSaved(true);
     const bonus = Math.max(0, prog.points - Math.floor(elapsed / 10));
     const score = prog.points + bonus;
+    const { data: { user } } = await supabase.auth.getUser();
+    const playerId = user?.id;
+    if (!playerId) return;
     await supabase.from('game_scores').insert({
+      player_id: playerId,
       game: 'wordsearch',
-      player_name: 'Player',
-      score,
       mode: 'solo',
+      points: score,
       level,
     });
   }, [scoreSaved, prog.points, elapsed, level]);
