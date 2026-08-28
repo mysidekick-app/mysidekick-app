@@ -49,7 +49,6 @@ export default function SignUpScreen() {
    * - no other special characters
    *
    * Examples:
-   *
    * john
    * john123
    * john_doe
@@ -58,7 +57,6 @@ export default function SignUpScreen() {
    * john_123
    *
    * Not allowed:
-   *
    * .john
    * john.
    * john..doe
@@ -72,37 +70,32 @@ export default function SignUpScreen() {
   const isValidUsername = (value: string) => {
     if (!value) return false;
 
-    /*
-     * Must begin and end with a letter or number.
-     */
+    // Must begin with a letter or number.
     if (!/^[a-z0-9]/.test(value)) return false;
+
+    // Must end with a letter or number.
     if (!/[a-z0-9]$/.test(value)) return false;
 
-    /*
-     * Only lowercase letters, numbers, underscore and full stop.
-     */
+    // Only lowercase letters, numbers, underscore and full stop.
     if (!/^[a-z0-9_.]+$/.test(value)) return false;
 
     /*
-     * Full stop must be between letters.
+     * Every full stop must have a letter immediately
+     * before and after it.
      *
-     * This means:
-     * john.doe     ✓
-     * john.a       ✓
-     * john.123     ✗
-     * john_.doe    ✗
-     * john._doe    ✗
-     * john..doe    ✗
+     * Examples:
+     * john.doe   ✓
+     * john.a     ✓
+     * john.123   ✗
+     * john_.doe  ✗
+     * john._doe  ✗
+     * john..doe  ✗
      */
     if (value.includes('.')) {
       if (!/[a-z]\.[a-z]/.test(value)) {
         return false;
       }
 
-      /*
-       * Every full stop must have a letter immediately
-       * before and after it.
-       */
       for (let i = 0; i < value.length; i++) {
         if (value[i] === '.') {
           const before = value[i - 1];
@@ -124,7 +117,12 @@ export default function SignUpScreen() {
   };
 
   /*
-   * Check username availability against Supabase.
+   * Check username availability using the Supabase RPC function.
+   *
+   * This does NOT directly query profiles.
+   *
+   * The Supabase function is responsible for checking whether
+   * the username already exists.
    */
   useEffect(() => {
     const cleanUsername = username.trim().toLowerCase();
@@ -146,11 +144,12 @@ export default function SignUpScreen() {
     const timer = setTimeout(async () => {
       setUsernameChecking(true);
 
-      const { data, error: queryError } = await supabase
-        .from('profiles')
-        .select('user_id')
-        .eq('username', cleanUsername)
-        .maybeSingle();
+      const { data, error: queryError } = await supabase.rpc(
+        'is_username_available',
+        {
+          check_username: cleanUsername,
+        }
+      );
 
       if (cancelled) return;
 
@@ -163,6 +162,7 @@ export default function SignUpScreen() {
         );
 
         setUsernameAvailable(null);
+
         setUsernameError(
           'Could not check username availability. Please try again.'
         );
@@ -170,7 +170,7 @@ export default function SignUpScreen() {
         return;
       }
 
-      if (data) {
+      if (data === false) {
         setUsernameAvailable(false);
         setUsernameError('Username not available.');
       } else {
@@ -225,8 +225,8 @@ export default function SignUpScreen() {
     }
 
     /*
-     * Do not allow signup until availability has been
-     * confirmed by Supabase.
+     * Do not allow signup until username availability
+     * has been confirmed by Supabase.
      */
     if (usernameChecking) {
       setError('Please wait while we check your username.');
@@ -259,8 +259,8 @@ export default function SignUpScreen() {
 
     if (result.error) {
       /*
-       * This also catches the rare case where another
-       * user claims the username between our availability
+       * This catches the rare case where another user
+       * claims the username between our availability
        * check and the actual signup.
        */
       const message = result.error.toLowerCase();
