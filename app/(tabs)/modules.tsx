@@ -18,9 +18,10 @@ import {
   Sprout,
   HeartPulse,
   Gamepad2,
+  UsersRound,
   ChevronLeft,
+  ChevronRight,
   MoreVertical,
-  Sparkles,
   Settings,
   LogOut,
 } from 'lucide-react-native';
@@ -172,7 +173,7 @@ export default function ModulesScreen() {
             },
           ]}
         >
-          HOME
+          MODULES
         </Text>
 
         <Pressable
@@ -196,11 +197,424 @@ export default function ModulesScreen() {
         contentContainerStyle={[
           styles.content,
           {
-            paddingTop: 28,
+            paddingTop: 22,
           },
         ]}
         showsVerticalScrollIndicator={false}
       >
+        {/* ===================================================
+            YOUR LIFE SUMMARY
+        =================================================== */}
+
+        <Pressable
+          onPress={() => {
+            // Insights screen will be connected here.
+          }}
+          style={({ pressed }) => [
+            styles.lifeSummaryCard,
+            {
+              backgroundColor: C.card,
+              borderColor: C.border,
+            },
+            pressed && styles.lifeSummaryPressed,
+          ]}
+          accessibilityLabel="Open your life insights"
+        >
+          {/* TOP ROW */}
+
+          <View style={styles.lifeSummaryHeader}>
+            <Text
+              style={[
+                styles.lifeSummaryTitle,
+                {
+                  color: C.text,
+                },
+              ]}
+            >
+               DASHBOARD
+            </Text>
+
+            <View
+              style={[
+                styles.lifeSummaryArrow,
+                {
+                  backgroundColor: isDark
+                    ? '#242424'
+                    : '#F3F2EF',
+                },
+              ]}
+            >
+              <ChevronRight
+                color={accentForeground}
+                size={19}
+                strokeWidth={2.5}
+              />
+            </View>
+          </View>
+
+          {/* =================================================
+              OVERALL LIFE SCORE
+          ================================================= */}
+
+          <View style={styles.lifeSummaryMain}>
+            <View>
+              <View style={styles.scoreRow}>
+                <Text
+                  style={[
+                    styles.lifeScore,
+                    {
+                      color: accentForeground,
+                    },
+                  ]}
+                >
+                  82%
+                </Text>
+
+                <Text
+                  style={[
+                    styles.lifeScoreTrend,
+                    {
+                      color: accentForeground,
+                    },
+                  ]}
+                >
+                  ↑ 7%
+                </Text>
+              </View>
+
+              <Text
+                style={[
+                  styles.lifeScoreLabel,
+                  {
+                    color: C.muted,
+                  },
+                ]}
+              >
+                GOOD MOMENTUM
+              </Text>
+            </View>
+          </View>
+
+          {/* =================================================
+              SIX CORE DIMENSIONS
+              3 COLUMNS × 2 ROWS
+          ================================================= */}
+
+          <View
+            style={[
+              styles.dimensionGrid,
+              {
+                borderTopColor: C.border,
+              },
+            ]}
+          >
+            {/* -------------------------------------------------
+                WELLBEING
+            ------------------------------------------------- */}
+
+            <View style={styles.dimension}>
+              <View
+                style={[
+                  styles.dimensionIcon,
+                  {
+                    backgroundColor: isDark
+                      ? '#242424'
+                      : '#F3F2EF',
+                  },
+                ]}
+              >
+                <HeartPulse
+                  color={accentForeground}
+                  size={14}
+                  strokeWidth={2.2}
+                />
+              </View>
+
+              <View style={styles.dimensionText}>
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.dimensionLabel,
+                    {
+                      color: C.muted,
+                    },
+                  ]}
+                >
+                  WELLBEING
+                </Text>
+
+                <Text
+                  style={[
+                    styles.dimensionValue,
+                    {
+                      color: C.text,
+                    },
+                  ]}
+                >
+                  82
+                </Text>
+              </View>
+            </View>
+
+            {/* -------------------------------------------------
+                EXECUTION
+            ------------------------------------------------- */}
+
+            <View style={styles.dimension}>
+              <View
+                style={[
+                  styles.dimensionIcon,
+                  {
+                    backgroundColor: isDark
+                      ? '#242424'
+                      : '#F3F2EF',
+                  },
+                ]}
+              >
+                <CalendarDays
+                  color={accentForeground}
+                  size={14}
+                  strokeWidth={2.2}
+                />
+              </View>
+
+              <View style={styles.dimensionText}>
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.dimensionLabel,
+                    {
+                      color: C.muted,
+                    },
+                  ]}
+                >
+                  EXECUTION
+                </Text>
+
+                <Text
+                  style={[
+                    styles.dimensionValue,
+                    {
+                      color: C.text,
+                    },
+                  ]}
+                >
+                  76
+                </Text>
+              </View>
+            </View>
+
+            {/* -------------------------------------------------
+                CONSISTENCY
+            ------------------------------------------------- */}
+
+            <View style={styles.dimension}>
+              <View
+                style={[
+                  styles.dimensionIcon,
+                  {
+                    backgroundColor: isDark
+                      ? '#242424'
+                      : '#F3F2EF',
+                  },
+                ]}
+              >
+                <CheckCircle2
+                  color={accentForeground}
+                  size={14}
+                  strokeWidth={2.2}
+                />
+              </View>
+
+              <View style={styles.dimensionText}>
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.dimensionLabel,
+                    {
+                      color: C.muted,
+                    },
+                  ]}
+                >
+                  CONSISTENCY
+                </Text>
+
+                <Text
+                  style={[
+                    styles.dimensionValue,
+                    {
+                      color: C.text,
+                    },
+                  ]}
+                >
+                  84
+                </Text>
+              </View>
+            </View>
+
+            {/* -------------------------------------------------
+                FINANCIAL
+            ------------------------------------------------- */}
+
+            <View style={styles.dimension}>
+              <View
+                style={[
+                  styles.dimensionIcon,
+                  {
+                    backgroundColor: isDark
+                      ? '#242424'
+                      : '#F3F2EF',
+                  },
+                ]}
+              >
+                <WalletCards
+                  color={accentForeground}
+                  size={14}
+                  strokeWidth={2.2}
+                />
+              </View>
+
+              <View style={styles.dimensionText}>
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.dimensionLabel,
+                    {
+                      color: C.muted,
+                    },
+                  ]}
+                >
+                  FINANCIAL
+                </Text>
+
+                <Text
+                  style={[
+                    styles.dimensionValue,
+                    {
+                      color: C.text,
+                    },
+                  ]}
+                >
+                  71
+                </Text>
+              </View>
+            </View>
+
+            {/* -------------------------------------------------
+                CONNECTION
+            ------------------------------------------------- */}
+
+            <View style={styles.dimension}>
+              <View
+                style={[
+                  styles.dimensionIcon,
+                  {
+                    backgroundColor: isDark
+                      ? '#242424'
+                      : '#F3F2EF',
+                  },
+                ]}
+              >
+                <UsersRound
+                  color={accentForeground}
+                  size={14}
+                  strokeWidth={2.2}
+                />
+              </View>
+
+              <View style={styles.dimensionText}>
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.dimensionLabel,
+                    {
+                      color: C.muted,
+                    },
+                  ]}
+                >
+                  CONNECTION
+                </Text>
+
+                <Text
+                  style={[
+                    styles.dimensionValue,
+                    {
+                      color: C.text,
+                    },
+                  ]}
+                >
+                  63
+                </Text>
+              </View>
+            </View>
+
+            {/* -------------------------------------------------
+                GROWTH
+            ------------------------------------------------- */}
+
+            <View style={styles.dimension}>
+              <View
+                style={[
+                  styles.dimensionIcon,
+                  {
+                    backgroundColor: isDark
+                      ? '#242424'
+                      : '#F3F2EF',
+                  },
+                ]}
+              >
+                <Sprout
+                  color={accentForeground}
+                  size={14}
+                  strokeWidth={2.2}
+                />
+              </View>
+
+              <View style={styles.dimensionText}>
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.dimensionLabel,
+                    {
+                      color: C.muted,
+                    },
+                  ]}
+                >
+                  GROWTH
+                </Text>
+
+                <Text
+                  style={[
+                    styles.dimensionValue,
+                    {
+                      color: C.text,
+                    },
+                  ]}
+                >
+                  74
+                </Text>
+              </View>
+            </View>
+          </View>
+        </Pressable>
+
+        {/* ===================================================
+            YOUR MODULES
+        =================================================== */}
+
+        <View style={styles.sectionLabelRow}>
+          <Text
+            style={[
+              styles.sectionLabel,
+              {
+                color: C.muted,
+              },
+            ]}
+          >
+            YOUR MODULES
+          </Text>
+        </View>
+
         {/* ===================================================
             MODULE GRID
         =================================================== */}
@@ -250,6 +664,9 @@ export default function ModulesScreen() {
                 </View>
 
                 <Text
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.72}
                   style={[
                     styles.moduleLabel,
                     {
@@ -262,111 +679,6 @@ export default function ModulesScreen() {
               </Pressable>
             ),
           )}
-        </View>
-
-        {/* ===================================================
-            SIDEKICK CARD
-        =================================================== */}
-
-        <View
-          style={[
-            styles.sidekickCard,
-            {
-              backgroundColor:
-                accentForeground,
-              borderColor:
-                accentForeground,
-            },
-          ]}
-        >
-          {/* -------------------------------------------------
-              CHARACTER STAGE
-          ------------------------------------------------- */}
-
-          <View
-            style={
-              styles.sidekickCharacterStage
-            }
-          >
-            <View
-              style={[
-                styles.sidekickPeek,
-                {
-                  backgroundColor:
-                    '#000000',
-                },
-              ]}
-            >
-              <Sparkles
-                color="#FFFFFF"
-                size={20}
-                strokeWidth={2.2}
-              />
-            </View>
-          </View>
-
-          {/* -------------------------------------------------
-              SIDEKICK MESSAGE
-          ------------------------------------------------- */}
-
-          <View
-            style={styles.sidekickCopy}
-          >
-            <Text
-              style={[
-                styles.sidekickEyebrow,
-                {
-                  color:
-                    '#FFFFFF',
-                },
-              ]}
-            >
-              YOUR SIDEKICK
-            </Text>
-
-            <Text
-              style={[
-                styles.sidekickTitle,
-                {
-                  color:
-                    '#FFFFFF',
-                },
-              ]}
-            >
-              Tiny nudges.
-              {'\n'}
-              Bigger wins.
-            </Text>
-
-            <Text
-              style={[
-                styles.sidekickMessage,
-                {
-                  color:
-                    'rgba(255,255,255,0.88)',
-                },
-              ]}
-            >
-              I’ll keep an eye on
-              the little things and
-              give you a friendly
-              nudge when something
-              deserves your attention.
-            </Text>
-
-            <Text
-              style={[
-                styles.sidekickHint,
-                {
-                  color:
-                    'rgba(255,255,255,0.72)',
-                },
-              ]}
-            >
-              Your Sidekick is getting
-              ready…
-            </Text>
-          </View>
         </View>
       </ScrollView>
 
@@ -391,7 +703,7 @@ export default function ModulesScreen() {
               event.stopPropagation()
             }
           >
-            {/* Settings */}
+            {/* SETTINGS */}
 
             <Pressable
               onPress={() => {
@@ -431,7 +743,7 @@ export default function ModulesScreen() {
               </Text>
             </Pressable>
 
-            {/* Logout */}
+            {/* LOGOUT */}
 
             <Pressable
               onPress={() => {
@@ -487,9 +799,9 @@ const styles =
       flex: 1,
     },
 
-    /* -----------------------------------------------------
+    /* =====================================================
        HEADER
-    ----------------------------------------------------- */
+    ===================================================== */
 
     toolkitHeader: {
       flexDirection: 'row',
@@ -517,18 +829,164 @@ const styles =
         'center',
     },
 
-    /* -----------------------------------------------------
+    /* =====================================================
        CONTENT
-    ----------------------------------------------------- */
+    ===================================================== */
 
     content: {
       paddingHorizontal: 22,
       paddingBottom: 36,
     },
 
-    /* -----------------------------------------------------
+    /* =====================================================
+       YOUR LIFE
+    ===================================================== */
+
+    lifeSummaryCard: {
+      width: '100%',
+      borderRadius: 22,
+      borderWidth: 1,
+      paddingHorizontal: 18,
+      paddingTop: 16,
+      paddingBottom: 16,
+      marginBottom: 24,
+    },
+
+    lifeSummaryPressed: {
+      opacity: 0.88,
+    },
+
+    lifeSummaryHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent:
+        'space-between',
+      marginBottom: 8,
+    },
+
+    lifeSummaryTitle: {
+      fontFamily:
+        FONT_BOLD,
+      fontSize: 13,
+      letterSpacing: 1,
+    },
+
+    lifeSummaryArrow: {
+      width: 32,
+      height: 32,
+      borderRadius: 10,
+      alignItems: 'center',
+      justifyContent:
+        'center',
+    },
+
+    /* =====================================================
+       OVERALL SCORE
+    ===================================================== */
+
+    lifeSummaryMain: {
+      marginBottom: 11,
+    },
+
+    scoreRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 9,
+    },
+
+    lifeScore: {
+      fontFamily:
+        FONT_BOLD,
+      fontSize: 38,
+      lineHeight: 43,
+    },
+
+    lifeScoreTrend: {
+      fontFamily:
+        FONT_BOLD,
+      fontSize: 12,
+      marginTop: 5,
+    },
+
+    lifeScoreLabel: {
+      fontFamily:
+        FONT_SEMI,
+      fontSize: 9,
+      letterSpacing: 1,
+      marginTop: -1,
+    },
+
+    /* =====================================================
+       SIX DIMENSIONS
+    ===================================================== */
+
+    dimensionGrid: {
+      borderTopWidth: 1,
+      paddingTop: 12,
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      rowGap: 10,
+    },
+
+    dimension: {
+      width: '33.333%',
+      flexDirection: 'row',
+      alignItems: 'center',
+      minWidth: 0,
+      paddingRight: 4,
+    },
+
+    dimensionIcon: {
+      width: 27,
+      height: 27,
+      borderRadius: 9,
+      alignItems: 'center',
+      justifyContent:
+        'center',
+      marginRight: 5,
+      flexShrink: 0,
+    },
+
+    dimensionText: {
+      flex: 1,
+      minWidth: 0,
+      justifyContent: 'center',
+    },
+
+    dimensionLabel: {
+      fontFamily:
+        FONT_SEMI,
+      fontSize: 6.5,
+      letterSpacing: 0.25,
+      includeFontPadding: false,
+    },
+
+    dimensionValue: {
+      fontFamily:
+        FONT_BOLD,
+      fontSize: 14,
+      lineHeight: 16,
+      marginTop: 1,
+    },
+
+    /* =====================================================
+       YOUR MODULES
+    ===================================================== */
+
+    sectionLabelRow: {
+      marginBottom: 10,
+    },
+
+    sectionLabel: {
+      fontFamily:
+        FONT_BOLD,
+      fontSize: 9,
+      letterSpacing: 1,
+    },
+
+    /* =====================================================
        MODULE GRID
-    ----------------------------------------------------- */
+    ===================================================== */
 
     grid: {
       flexDirection: 'row',
@@ -544,11 +1002,12 @@ const styles =
       maxHeight: 150,
       borderRadius: 16,
       borderWidth: 1,
-      padding: 12,
+      paddingHorizontal: 7,
+      paddingVertical: 12,
       alignItems: 'center',
       justifyContent:
         'center',
-      gap: 10,
+      gap: 9,
     },
 
     modulePressed: {
@@ -567,96 +1026,16 @@ const styles =
     moduleLabel: {
       fontFamily:
         FONT_BOLD,
-      fontSize: 11,
-      letterSpacing: 0.5,
+      fontSize: 8,
+      letterSpacing: 0.15,
       textAlign: 'center',
+      includeFontPadding: false,
+      flexShrink: 1,
     },
 
-    /* -----------------------------------------------------
-       SIDEKICK
-    ----------------------------------------------------- */
-
-    sidekickCard: {
-      width: '100%',
-      minHeight: 190,
-      marginTop: 22,
-      borderRadius: 24,
-      borderWidth: 1,
-      paddingHorizontal: 18,
-      paddingVertical: 18,
-      overflow: 'hidden',
-      flexDirection: 'row',
-      alignItems: 'center',
-    },
-
-    sidekickCharacterStage: {
-      width: 90,
-      alignSelf: 'stretch',
-      alignItems: 'center',
-      justifyContent:
-        'flex-end',
-      paddingBottom: 4,
-      marginRight: 10,
-    },
-
-    /*
-     * Temporary black-and-white
-     * Sidekick placeholder.
-     */
-
-    sidekickPeek: {
-      width: 58,
-      height: 58,
-      borderRadius: 29,
-      alignItems: 'center',
-      justifyContent:
-        'center',
-      transform: [
-        {
-          translateY: 6,
-        },
-      ],
-    },
-
-    sidekickCopy: {
-      flex: 1,
-      paddingRight: 8,
-    },
-
-    sidekickEyebrow: {
-      fontFamily:
-        FONT_SEMI,
-      fontSize: 9.5,
-      letterSpacing: 1.2,
-      marginBottom: 5,
-    },
-
-    sidekickTitle: {
-      fontFamily:
-        FONT_BOLD,
-      fontSize: 18,
-      lineHeight: 23,
-      marginBottom: 7,
-    },
-
-    sidekickMessage: {
-      fontFamily:
-        FONT,
-      fontSize: 12.5,
-      lineHeight: 18,
-    },
-
-    sidekickHint: {
-      fontFamily:
-        FONT_MED,
-      fontSize: 10.5,
-      marginTop: 12,
-      opacity: 0.75,
-    },
-
-    /* -----------------------------------------------------
-       RIGHT-HAND MENU
-    ----------------------------------------------------- */
+    /* =====================================================
+       MENU
+    ===================================================== */
 
     menuOverlay: {
       position: 'absolute',
@@ -706,7 +1085,8 @@ const styles =
       height: 32,
       borderRadius: 10,
       alignItems: 'center',
-      justifyContent: 'center',
+      justifyContent:
+        'center',
     },
 
     menuItemText: {

@@ -18,8 +18,8 @@ import {
 
 import { router, useLocalSearchParams } from 'expo-router';
 import { Audio } from 'expo-av';
-import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 
 import {
   BarChart3,
@@ -51,6 +51,8 @@ type Profile = {
   username: string;
 } | null;
 
+type AttachmentType = 'image' | 'audio' | 'document';
+
 type Message = {
   id: string;
   conversation_id: string;
@@ -58,12 +60,12 @@ type Message = {
   content: string;
   created_at: string;
   attachment_url?: string | null;
-  attachment_type?: 'image' | 'audio' | 'document' | null;
+  attachment_type?: AttachmentType | null;
   attachment_name?: string | null;
 };
 
 type AttachmentOption = {
-  key: string;
+  key: 'image' | 'audio' | 'document' | 'poll' | 'event';
   label: string;
   Icon: typeof ImageIcon;
 };
@@ -112,13 +114,6 @@ export default function ChatDetailScreen() {
 
   const normalizedId = (id ?? '').toLowerCase();
 
-  /*
-   * IMPORTANT:
-   * Sidekick is a special AI chat.
-   *
-   * It does NOT use social_messages.
-   * Messages are sent to the sidekick-chat Edge Function.
-   */
   const isSidekick = normalizedId === 'sidekick';
 
   const colors = isDark
@@ -151,11 +146,18 @@ export default function ChatDetailScreen() {
   const [sending, setSending] = useState(false);
 
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
+
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
-  const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
+
+  const [playingMessageId, setPlayingMessageId] = useState<string | null>(
+    null,
+  );
+
   const recordingRef = useRef<Audio.Recording | null>(null);
-  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
   const soundRef = useRef<Audio.Sound | null>(null);
 
   const [menuOpen, setMenuOpen] = useState(false);
@@ -177,10 +179,7 @@ export default function ChatDetailScreen() {
   const [profileViewOpen, setProfileViewOpen] = useState(false);
 
   const [pollQuestion, setPollQuestion] = useState('');
-  const [pollOptions, setPollOptions] = useState<string[]>([
-    '',
-    '',
-  ]);
+  const [pollOptions, setPollOptions] = useState<string[]>(['', '']);
 
   const [eventTitle, setEventTitle] = useState('');
   const [eventDate, setEventDate] = useState('');
@@ -194,25 +193,25 @@ export default function ChatDetailScreen() {
 
   const conversationId = `direct:${id}`;
 
-  const showToast = useCallback((msg: string) => {
-    setToast(msg);
+  const showToast = useCallback((message: string) => {
+    setToast(message);
 
     setTimeout(() => {
       setToast(null);
     }, 2500);
   }, []);
 
+  const scrollToBottom = useCallback((animated = true) => {
+    setTimeout(() => {
+      listRef.current?.scrollToEnd({ animated });
+    }, 60);
+  }, []);
+
   /*
-   * Load profile only for normal user chats.
+   * Load the person being chatted with.
    */
   const loadProfile = useCallback(async () => {
-    if (isSidekick) {
-      setProfile(null);
-      setProfileLoading(false);
-      return;
-    }
-
-    if (SYSTEM_CHAT_TITLES[normalizedId]) {
+    if (isSidekick || SYSTEM_CHAT_TITLES[normalizedId]) {
       setProfile(null);
       setProfileLoading(false);
       return;
@@ -234,6 +233,7 @@ export default function ChatDetailScreen() {
 
     if (error) {
       console.error('Profile load error:', error);
+      setProfile(null);
       setProfileError('Could not load profile.');
     } else {
       setProfile(data as Profile);
@@ -243,9 +243,9 @@ export default function ChatDetailScreen() {
   }, [id, isSidekick, normalizedId]);
 
   /*
-   * Load normal chat messages.
+   * Load direct messages.
    *
-   * Sidekick intentionally skips this.
+   * Sidekick does not use social_messages.
    */
   const loadMessages = useCallback(async () => {
     if (isSidekick) {
@@ -283,35 +283,39 @@ export default function ChatDetailScreen() {
     setMessagesLoading(false);
   }, [conversationId, id, isSidekick]);
 
+  /*
+   * Load current authenticated user.
+   */
+  useEffect(() => {
+    let mounted = true;
+
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (mounted) {
+        setMyId(user?.id ?? null);
+      }
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  /*
+   * Load profile and messages.
+   */
   useEffect(() => {
     loadProfile();
     loadMessages();
-
-    supabase.auth
-      .getUser()
-      .then(({ data: { user } }) => {
-        setMyId(user?.id ?? null);
-      });
   }, [loadProfile, loadMessages]);
 
-  /*
-   * Scroll to the latest message.
-   */
   useEffect(() => {
     if (messages.length > 0) {
-      setTimeout(() => {
-        listRef.current?.scrollToEnd({
-          animated: false,
-        });
-      }, 60);
+      scrollToBottom(false);
     }
-  }, [messages.length]);
+  }, [messages.length, scrollToBottom]);
 
   /*
-   * SIDEKICK SEND
-   *
-   * Sends the message to:
-   * supabase/functions/sidekick-chat/index.ts
+   * SIDEKICK
    */
   const handleSendSidekick = async (text: string) => {
     if (!text || sending) {
@@ -321,8 +325,7 @@ export default function ChatDetailScreen() {
     setSending(true);
     setMessagesError(null);
 
-    const userId =
-      myId ?? `user-${Date.now()}`;
+    const userId = myId ?? `user-${Date.now()}`;
 
     const optimisticUserMessage: Message = {
       id: `local-user-${Date.now()}`,
@@ -332,24 +335,16 @@ export default function ChatDetailScreen() {
       created_at: new Date().toISOString(),
     };
 
-    setMessages((prev) => [
-      ...prev,
+    setMessages((previous) => [
+      ...previous,
       optimisticUserMessage,
     ]);
 
     setDraft('');
-
-    setTimeout(() => {
-      listRef.current?.scrollToEnd({
-        animated: true,
-      });
-    }, 60);
+    scrollToBottom();
 
     try {
-      const {
-        data,
-        error,
-      } = await supabase.functions.invoke(
+      const { data, error } = await supabase.functions.invoke(
         'sidekick-chat',
         {
           body: {
@@ -359,16 +354,12 @@ export default function ChatDetailScreen() {
       );
 
       if (error) {
-        console.error(
-          'Sidekick Edge Function error:',
-          error,
-        );
+        console.error('Sidekick Edge Function error:', error);
 
-        setMessages((prev) =>
-          prev.filter(
+        setMessages((previous) =>
+          previous.filter(
             (message) =>
-              message.id !==
-              optimisticUserMessage.id,
+              message.id !== optimisticUserMessage.id,
           ),
         );
 
@@ -385,16 +376,12 @@ export default function ChatDetailScreen() {
           : '';
 
       if (!reply) {
-        console.error(
-          'Sidekick returned no reply:',
-          data,
-        );
+        console.error('Sidekick returned no reply:', data);
 
-        setMessages((prev) =>
-          prev.filter(
+        setMessages((previous) =>
+          previous.filter(
             (message) =>
-              message.id !==
-              optimisticUserMessage.id,
+              message.id !== optimisticUserMessage.id,
           ),
         );
 
@@ -413,27 +400,19 @@ export default function ChatDetailScreen() {
         created_at: new Date().toISOString(),
       };
 
-      setMessages((prev) => [
-        ...prev,
+      setMessages((previous) => [
+        ...previous,
         sidekickMessage,
       ]);
 
-      setTimeout(() => {
-        listRef.current?.scrollToEnd({
-          animated: true,
-        });
-      }, 60);
+      scrollToBottom();
     } catch (error) {
-      console.error(
-        'Sidekick request failed:',
-        error,
-      );
+      console.error('Sidekick request failed:', error);
 
-      setMessages((prev) =>
-        prev.filter(
+      setMessages((previous) =>
+        previous.filter(
           (message) =>
-            message.id !==
-            optimisticUserMessage.id,
+            message.id !== optimisticUserMessage.id,
         ),
       );
 
@@ -446,11 +425,9 @@ export default function ChatDetailScreen() {
   };
 
   /*
-   * NORMAL CHAT SEND
+   * NORMAL CHAT
    */
-  const handleSendNormalChat = async (
-    text: string,
-  ) => {
+  const handleSendNormalChat = async (text: string) => {
     if (!text || sending || !myId) {
       return;
     }
@@ -465,18 +442,13 @@ export default function ChatDetailScreen() {
       created_at: new Date().toISOString(),
     };
 
-    setMessages((prev) => [
-      ...prev,
+    setMessages((previous) => [
+      ...previous,
       optimistic,
     ]);
 
     setDraft('');
-
-    setTimeout(() => {
-      listRef.current?.scrollToEnd({
-        animated: true,
-      });
-    }, 60);
+    scrollToBottom();
 
     const { error } = await supabase
       .from('social_messages')
@@ -487,13 +459,10 @@ export default function ChatDetailScreen() {
       });
 
     if (error) {
-      console.error(
-        'Send message error:',
-        error,
-      );
+      console.error('Send message error:', error);
 
-      setMessages((prev) =>
-        prev.filter(
+      setMessages((previous) =>
+        previous.filter(
           (message) =>
             message.id !== optimistic.id,
         ),
@@ -507,9 +476,6 @@ export default function ChatDetailScreen() {
     setSending(false);
   };
 
-  /*
-   * Main send handler.
-   */
   const handleSend = async () => {
     const text = draft.trim();
 
@@ -525,53 +491,70 @@ export default function ChatDetailScreen() {
   };
 
   /*
-   * Attachments
-   */
-  /*
-   * Attachments — upload helper
-   * Reads the local file at `uri`, uploads it to the
-   * `chat-attachments` storage bucket under this user's own
-   * folder (required by the storage RLS policy), and returns a
-   * public URL. Returns null on any failure.
+   * ATTACHMENTS
    */
   const uploadAttachment = async (
     uri: string,
-    type: 'image' | 'audio' | 'document',
+    type: AttachmentType,
     fileName: string,
     mimeType: string,
   ): Promise<string | null> => {
-    if (!myId) return null;
+    if (!myId) {
+      return null;
+    }
+
     try {
       const response = await fetch(uri);
       const blob = await response.blob();
+
       const path = `${myId}/${Date.now()}-${fileName}`;
 
       const { error: uploadError } = await supabase.storage
         .from('chat-attachments')
-        .upload(path, blob, { contentType: mimeType, upsert: false });
+        .upload(path, blob, {
+          contentType: mimeType,
+          upsert: false,
+        });
 
       if (uploadError) {
-        console.error('ATTACHMENT UPLOAD ERROR:', uploadError);
+        console.error(
+          'ATTACHMENT UPLOAD ERROR:',
+          uploadError,
+        );
+
         return null;
       }
 
-      const { data } = supabase.storage.from('chat-attachments').getPublicUrl(path);
+      const { data } = supabase.storage
+        .from('chat-attachments')
+        .getPublicUrl(path);
+
       return data.publicUrl;
-    } catch (err) {
-      console.error('ATTACHMENT UPLOAD EXCEPTION:', err);
+    } catch (error) {
+      console.error(
+        'ATTACHMENT UPLOAD EXCEPTION:',
+        error,
+      );
+
       return null;
     }
   };
 
   const sendAttachmentMessage = async (
-    type: 'image' | 'audio' | 'document',
+    type: AttachmentType,
     url: string,
     fileName: string,
   ) => {
-    if (!myId) return;
+    if (!myId) {
+      return;
+    }
 
     const fallbackContent =
-      type === 'image' ? '📷 Photo' : type === 'audio' ? '🎤 Voice message' : `📄 ${fileName}`;
+      type === 'image'
+        ? '📷 Photo'
+        : type === 'audio'
+          ? '🎤 Voice message'
+          : `📄 ${fileName}`;
 
     const optimistic: Message = {
       id: `local-${Date.now()}`,
@@ -584,21 +567,37 @@ export default function ChatDetailScreen() {
       attachment_name: fileName,
     };
 
-    setMessages((prev) => [...prev, optimistic]);
-    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 60);
+    setMessages((previous) => [
+      ...previous,
+      optimistic,
+    ]);
 
-    const { error } = await supabase.from('social_messages').insert({
-      conversation_id: conversationId,
-      sender_id: myId,
-      content: fallbackContent,
-      attachment_url: url,
-      attachment_type: type,
-      attachment_name: fileName,
-    });
+    scrollToBottom();
+
+    const { error } = await supabase
+      .from('social_messages')
+      .insert({
+        conversation_id: conversationId,
+        sender_id: myId,
+        content: fallbackContent,
+        attachment_url: url,
+        attachment_type: type,
+        attachment_name: fileName,
+      });
 
     if (error) {
-      console.error('SEND ATTACHMENT MESSAGE ERROR:', error);
-      setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
+      console.error(
+        'SEND ATTACHMENT MESSAGE ERROR:',
+        error,
+      );
+
+      setMessages((previous) =>
+        previous.filter(
+          (message) =>
+            message.id !== optimistic.id,
+        ),
+      );
+
       showToast('Failed to send attachment.');
     } else {
       await loadMessages();
@@ -606,226 +605,401 @@ export default function ChatDetailScreen() {
   };
 
   const handlePickImage = async () => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    const permission =
+      await ImagePicker.requestMediaLibraryPermissionsAsync();
+
     if (!permission.granted) {
-      showToast('Photo library access is needed to attach a photo.');
+      showToast(
+        'Photo library access is needed to attach a photo.',
+      );
+
       return;
     }
 
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.7,
-    });
+    const result =
+      await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.7,
+      });
 
-    if (result.canceled || !result.assets?.length) return;
+    if (
+      result.canceled ||
+      !result.assets?.length
+    ) {
+      return;
+    }
 
     const asset = result.assets[0];
-    const fileName = asset.fileName ?? `photo-${Date.now()}.jpg`;
-    const mimeType = asset.mimeType ?? 'image/jpeg';
+
+    const fileName =
+      asset.fileName ??
+      `photo-${Date.now()}.jpg`;
+
+    const mimeType =
+      asset.mimeType ??
+      'image/jpeg';
 
     setUploadingAttachment(true);
-    const url = await uploadAttachment(asset.uri, 'image', fileName, mimeType);
+
+    const url = await uploadAttachment(
+      asset.uri,
+      'image',
+      fileName,
+      mimeType,
+    );
+
     setUploadingAttachment(false);
 
     if (!url) {
       showToast('Could not upload photo.');
       return;
     }
-    await sendAttachmentMessage('image', url, fileName);
+
+    await sendAttachmentMessage(
+      'image',
+      url,
+      fileName,
+    );
   };
 
-  const handlePickDocument = async (filterAudioOnly: boolean) => {
-    const result = await DocumentPicker.getDocumentAsync({
-      type: filterAudioOnly ? 'audio/*' : '*/*',
-      copyToCacheDirectory: true,
-    });
+  const handlePickDocument = async (
+    audioOnly: boolean,
+  ) => {
+    const result =
+      await DocumentPicker.getDocumentAsync({
+        type: audioOnly ? 'audio/*' : '*/*',
+        copyToCacheDirectory: true,
+      });
 
-    if (result.canceled || !result.assets?.length) return;
+    if (
+      result.canceled ||
+      !result.assets?.length
+    ) {
+      return;
+    }
 
     const asset = result.assets[0];
-    const fileName = asset.name ?? `file-${Date.now()}`;
-    const mimeType = asset.mimeType ?? 'application/octet-stream';
-    const type: 'audio' | 'document' = filterAudioOnly ? 'audio' : 'document';
+
+    const fileName =
+      asset.name ??
+      `file-${Date.now()}`;
+
+    const mimeType =
+      asset.mimeType ??
+      'application/octet-stream';
+
+    const type: AttachmentType =
+      audioOnly
+        ? 'audio'
+        : 'document';
 
     setUploadingAttachment(true);
-    const url = await uploadAttachment(asset.uri, type, fileName, mimeType);
+
+    const url = await uploadAttachment(
+      asset.uri,
+      type,
+      fileName,
+      mimeType,
+    );
+
     setUploadingAttachment(false);
 
     if (!url) {
       showToast('Could not upload file.');
       return;
     }
-    await sendAttachmentMessage(type, url, fileName);
+
+    await sendAttachmentMessage(
+      type,
+      url,
+      fileName,
+    );
   };
 
   /*
-   * Voice notes — live recording via the composer mic button
+   * VOICE RECORDING
    */
   const startRecording = async () => {
-    const permission = await Audio.requestPermissionsAsync();
+    const permission =
+      await Audio.requestPermissionsAsync();
+
     if (!permission.granted) {
-      showToast('Microphone access is needed to record a voice note.');
+      showToast(
+        'Microphone access is needed to record a voice note.',
+      );
+
       return;
     }
 
     try {
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-      const { recording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY,
-      );
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
+      const { recording } =
+        await Audio.Recording.createAsync(
+          Audio.RecordingOptionsPresets.HIGH_QUALITY,
+        );
+
       recordingRef.current = recording;
+
       setIsRecording(true);
       setRecordingSeconds(0);
-      recordingTimerRef.current = setInterval(() => {
-        setRecordingSeconds((s) => s + 1);
-      }, 1000);
-    } catch (err) {
-      console.error('START RECORDING ERROR:', err);
-      showToast('Could not start recording.');
+
+      recordingTimerRef.current =
+        setInterval(() => {
+          setRecordingSeconds(
+            (seconds) => seconds + 1,
+          );
+        }, 1000);
+    } catch (error) {
+      console.error(
+        'START RECORDING ERROR:',
+        error,
+      );
+
+      showToast(
+        'Could not start recording.',
+      );
     }
   };
 
   const cancelRecording = async () => {
-    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    if (recordingTimerRef.current) {
+      clearInterval(
+        recordingTimerRef.current,
+      );
+
+      recordingTimerRef.current = null;
+    }
+
     setIsRecording(false);
     setRecordingSeconds(0);
+
     try {
       await recordingRef.current?.stopAndUnloadAsync();
     } catch {
-      // already stopped — nothing to clean up
+      // Recording may already have stopped.
     }
+
     recordingRef.current = null;
   };
 
   const stopRecordingAndSend = async () => {
-    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    if (recordingTimerRef.current) {
+      clearInterval(
+        recordingTimerRef.current,
+      );
+
+      recordingTimerRef.current = null;
+    }
+
     setIsRecording(false);
 
-    const recording = recordingRef.current;
-    if (!recording) return;
+    const recording =
+      recordingRef.current;
+
+    if (!recording) {
+      return;
+    }
 
     try {
       await recording.stopAndUnloadAsync();
-      const uri = recording.getURI();
+
+      const uri =
+        recording.getURI();
+
       recordingRef.current = null;
       setRecordingSeconds(0);
 
-      if (!uri) return;
+      if (!uri) {
+        return;
+      }
 
-      const fileName = `voice-${Date.now()}.m4a`;
+      const fileName =
+        `voice-${Date.now()}.m4a`;
+
       setUploadingAttachment(true);
-      const url = await uploadAttachment(uri, 'audio', fileName, 'audio/m4a');
+
+      const url =
+        await uploadAttachment(
+          uri,
+          'audio',
+          fileName,
+          'audio/m4a',
+        );
+
       setUploadingAttachment(false);
 
       if (!url) {
-        showToast('Could not upload voice note.');
+        showToast(
+          'Could not upload voice note.',
+        );
+
         return;
       }
-      await sendAttachmentMessage('audio', url, fileName);
-    } catch (err) {
-      console.error('STOP RECORDING ERROR:', err);
-      showToast('Could not save voice note.');
+
+      await sendAttachmentMessage(
+        'audio',
+        url,
+        fileName,
+      );
+    } catch (error) {
+      console.error(
+        'STOP RECORDING ERROR:',
+        error,
+      );
+
+      setUploadingAttachment(false);
+
+      showToast(
+        'Could not save voice note.',
+      );
     }
   };
 
-  const togglePlayback = async (message: Message) => {
-    if (!message.attachment_url) return;
+  const togglePlayback = async (
+    message: Message,
+  ) => {
+    if (!message.attachment_url) {
+      return;
+    }
 
-    if (playingMessageId === message.id) {
+    if (
+      playingMessageId === message.id
+    ) {
       await soundRef.current?.stopAsync();
       await soundRef.current?.unloadAsync();
+
       soundRef.current = null;
       setPlayingMessageId(null);
+
       return;
     }
 
     if (soundRef.current) {
       await soundRef.current.stopAsync();
       await soundRef.current.unloadAsync();
+
       soundRef.current = null;
     }
 
     try {
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: message.attachment_url },
-        { shouldPlay: true },
-      );
+      const { sound } =
+        await Audio.Sound.createAsync(
+          {
+            uri: message.attachment_url,
+          },
+          {
+            shouldPlay: true,
+          },
+        );
+
       soundRef.current = sound;
       setPlayingMessageId(message.id);
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded && status.didJustFinish) {
-          setPlayingMessageId(null);
-          sound.unloadAsync();
-          soundRef.current = null;
-        }
-      });
-    } catch (err) {
-      console.error('PLAYBACK ERROR:', err);
-      showToast('Could not play voice note.');
+
+      sound.setOnPlaybackStatusUpdate(
+        (status) => {
+          if (
+            status.isLoaded &&
+            status.didJustFinish
+          ) {
+            setPlayingMessageId(null);
+
+            sound.unloadAsync();
+            soundRef.current = null;
+          }
+        },
+      );
+    } catch (error) {
+      console.error(
+        'PLAYBACK ERROR:',
+        error,
+      );
+
+      showToast(
+        'Could not play voice note.',
+      );
     }
   };
 
   useEffect(() => {
     return () => {
       soundRef.current?.unloadAsync();
-      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+
+      if (recordingTimerRef.current) {
+        clearInterval(
+          recordingTimerRef.current,
+        );
+      }
+
+      recordingRef.current
+        ?.stopAndUnloadAsync()
+        .catch(() => {});
     };
   }, []);
 
+  /*
+   * ATTACHMENT MENU
+   */
   const handleAttachment = (
     option: AttachmentOption,
   ) => {
     setAttachOpen(false);
 
-    if (option.key === 'poll') {
-      setPollQuestion('');
-      setPollOptions(['', '']);
-      setPollOpen(true);
-      return;
-    }
+    switch (option.key) {
+      case 'poll':
+        setPollQuestion('');
+        setPollOptions(['', '']);
+        setPollOpen(true);
+        break;
 
-    if (option.key === 'event') {
-      setEventTitle('');
-      setEventDate('');
-      setEventTime('');
-      setEventDesc('');
-      setEventOpen(true);
-      return;
-    }
+      case 'event':
+        setEventTitle('');
+        setEventDate('');
+        setEventTime('');
+        setEventDesc('');
+        setEventOpen(true);
+        break;
 
-    if (option.key === 'image') {
-      handlePickImage();
-      return;
-    }
+      case 'image':
+        handlePickImage();
+        break;
 
-    if (option.key === 'audio') {
-      handlePickDocument(true);
-      return;
-    }
+      case 'audio':
+        handlePickDocument(true);
+        break;
 
-    if (option.key === 'document') {
-      handlePickDocument(false);
-      return;
+      case 'document':
+        handlePickDocument(false);
+        break;
     }
   };
 
   /*
-   * Poll
+   * POLL
    */
   const sendPoll = async () => {
-    const q = pollQuestion.trim();
+    const question =
+      pollQuestion.trim();
 
-    const opts = pollOptions
-      .map((option) => option.trim())
-      .filter(Boolean);
+    const options =
+      pollOptions
+        .map((option) => option.trim())
+        .filter(Boolean);
 
-    if (!q || opts.length < 2 || !myId) {
+    if (
+      !question ||
+      options.length < 2 ||
+      !myId
+    ) {
       return;
     }
 
     const content =
-      `📊 Poll: ${q}\n` +
-      opts
+      `📊 Poll: ${question}\n` +
+      options
         .map(
           (option, index) =>
             `${index + 1}. ${option}`,
@@ -842,59 +1016,70 @@ export default function ChatDetailScreen() {
       created_at: new Date().toISOString(),
     };
 
-    setMessages((prev) => [
-      ...prev,
+    setMessages((previous) => [
+      ...previous,
       optimistic,
     ]);
 
-    setTimeout(() => {
-      listRef.current?.scrollToEnd({
-        animated: true,
-      });
-    }, 60);
+    scrollToBottom();
 
-    const { error } = await supabase
-      .from('social_messages')
-      .insert({
-        conversation_id: conversationId,
-        sender_id: myId,
-        content,
-      });
+    const { error } =
+      await supabase
+        .from('social_messages')
+        .insert({
+          conversation_id:
+            conversationId,
+          sender_id: myId,
+          content,
+        });
 
     if (error) {
-      setMessages((prev) =>
-        prev.filter(
+      console.error(
+        'SEND POLL ERROR:',
+        error,
+      );
+
+      setMessages((previous) =>
+        previous.filter(
           (message) =>
-            message.id !== optimistic.id,
+            message.id !==
+            optimistic.id,
         ),
       );
 
-      showToast('Failed to send poll.');
+      showToast(
+        'Failed to send poll.',
+      );
     }
   };
 
   /*
-   * Event
+   * EVENT
    */
   const sendEvent = async () => {
-    const title = eventTitle.trim();
+    const title =
+      eventTitle.trim();
 
     if (!title || !myId) {
       return;
     }
 
-    let content = `📅 Event: ${title}`;
+    let content =
+      `📅 Event: ${title}`;
 
-    if (eventDate) {
-      content += `\nDate: ${eventDate}`;
+    if (eventDate.trim()) {
+      content +=
+        `\nDate: ${eventDate.trim()}`;
     }
 
-    if (eventTime) {
-      content += `\nTime: ${eventTime}`;
+    if (eventTime.trim()) {
+      content +=
+        `\nTime: ${eventTime.trim()}`;
     }
 
     if (eventDesc.trim()) {
-      content += `\n${eventDesc.trim()}`;
+      content +=
+        `\n${eventDesc.trim()}`;
     }
 
     content +=
@@ -910,67 +1095,83 @@ export default function ChatDetailScreen() {
       created_at: new Date().toISOString(),
     };
 
-    setMessages((prev) => [
-      ...prev,
+    setMessages((previous) => [
+      ...previous,
       optimistic,
     ]);
 
-    setTimeout(() => {
-      listRef.current?.scrollToEnd({
-        animated: true,
-      });
-    }, 60);
+    scrollToBottom();
 
-    const { error } = await supabase
-      .from('social_messages')
-      .insert({
-        conversation_id: conversationId,
-        sender_id: myId,
-        content,
-      });
+    const { error } =
+      await supabase
+        .from('social_messages')
+        .insert({
+          conversation_id:
+            conversationId,
+          sender_id: myId,
+          content,
+        });
 
     if (error) {
-      setMessages((prev) =>
-        prev.filter(
+      console.error(
+        'SEND EVENT ERROR:',
+        error,
+      );
+
+      setMessages((previous) =>
+        previous.filter(
           (message) =>
-            message.id !== optimistic.id,
+            message.id !==
+            optimistic.id,
         ),
       );
 
-      showToast('Failed to send event.');
+      showToast(
+        'Failed to send event.',
+      );
     }
   };
 
   /*
-   * Report
+   * REPORT
    */
   const handleReport = async () => {
-    const reason = reportReason.trim();
+    const reason =
+      reportReason.trim();
 
     if (
       !reason ||
       reportSubmitting ||
-      !myId
+      !myId ||
+      !id ||
+      isSidekick
     ) {
       return;
     }
 
     setReportSubmitting(true);
 
-    const { error } = await supabase
-      .from('social_reports')
-      .insert({
-        reporter_id: myId,
-        reported_id: id,
-        reason,
-      });
+    const { error } =
+      await supabase
+        .from('social_reports')
+        .insert({
+          reporter_id: myId,
+          reported_id: id,
+          reason,
+        });
 
     setReportSubmitting(false);
 
     if (error) {
+      console.error(
+        'REPORT ERROR:',
+        error,
+      );
+
       showToast(
         'Could not submit report.',
       );
+
       return;
     }
 
@@ -984,32 +1185,46 @@ export default function ChatDetailScreen() {
   };
 
   /*
-   * Block
+   * BLOCK
    */
   const handleBlock = async () => {
-    if (!myId || isSidekick) {
+    if (
+      !myId ||
+      !id ||
+      isSidekick
+    ) {
       return;
     }
 
     setActionLoading('block');
 
-    const { error } = await supabase
-      .from('social_blocks')
-      .insert({
-        blocker_id: myId,
-        blocked_id: id,
-      });
+    const { error } =
+      await supabase
+        .from('social_blocks')
+        .insert({
+          blocker_id: myId,
+          blocked_id: id,
+        });
 
     setActionLoading(null);
 
     if (error) {
-      showToast('Could not block user.');
+      console.error(
+        'BLOCK ERROR:',
+        error,
+      );
+
+      showToast(
+        'Could not block user.',
+      );
+
       return;
     }
 
     showToast(
       `Blocked ${
-        profile?.display_name ?? 'user'
+        profile?.display_name ??
+        'user'
       }`,
     );
 
@@ -1019,42 +1234,74 @@ export default function ChatDetailScreen() {
   };
 
   /*
-   * Clear chat
+   * CLEAR CHAT
    */
   const handleClearChat = async () => {
-    if (isSidekick) {
-      setActionLoading('clear');
-      const { error } = await supabase
-        .from('system_messages')
-        .delete()
-        .eq('user_id', myId)
-        .eq('module_key', 'sidekick');
-      setActionLoading(null);
-      if (error) {
-        showToast('Could not clear Sidekick chat.');
-        return;
-      }
-      setMessages([]);
-      showToast('Sidekick chat cleared.');
+    if (!myId) {
+      showToast(
+        'Could not identify your account.',
+      );
+
       return;
     }
 
     setActionLoading('clear');
 
-    const { error } = await supabase
-      .from('social_messages')
-      .delete()
-      .eq(
-        'conversation_id',
-        conversationId,
+    if (isSidekick) {
+      const { error } =
+        await supabase
+          .from('system_messages')
+          .delete()
+          .eq('user_id', myId)
+          .eq(
+            'module_key',
+            'sidekick',
+          );
+
+      setActionLoading(null);
+
+      if (error) {
+        console.error(
+          'CLEAR SIDEKICK ERROR:',
+          error,
+        );
+
+        showToast(
+          'Could not clear Sidekick chat.',
+        );
+
+        return;
+      }
+
+      setMessages([]);
+      showToast(
+        'Sidekick chat cleared.',
       );
+
+      return;
+    }
+
+    const { error } =
+      await supabase
+        .from('social_messages')
+        .delete()
+        .eq(
+          'conversation_id',
+          conversationId,
+        );
 
     setActionLoading(null);
 
     if (error) {
+      console.error(
+        'CLEAR CHAT ERROR:',
+        error,
+      );
+
       showToast(
         'Could not clear chat.',
       );
+
       return;
     }
 
@@ -1063,15 +1310,17 @@ export default function ChatDetailScreen() {
   };
 
   /*
-   * Create group
+   * CREATE GROUP
    */
   const handleCreateGroup = async () => {
-    const name = groupName.trim();
+    const name =
+      groupName.trim();
 
     if (
       !name ||
       groupSubmitting ||
       !myId ||
+      !id ||
       isSidekick
     ) {
       return;
@@ -1081,7 +1330,7 @@ export default function ChatDetailScreen() {
 
     const {
       data: groupData,
-      error: groupErr,
+      error: groupError,
     } = await supabase
       .from('social_groups')
       .insert({
@@ -1091,57 +1340,86 @@ export default function ChatDetailScreen() {
       .select('id')
       .single();
 
-    if (groupErr || !groupData) {
+    if (
+      groupError ||
+      !groupData
+    ) {
+      console.error(
+        'CREATE GROUP ERROR:',
+        groupError,
+      );
+
       setGroupSubmitting(false);
+
       showToast(
         'Could not create group.',
       );
+
       return;
     }
 
-    const groupId = (
-      groupData as { id: string }
-    ).id;
+    const groupId =
+      (
+        groupData as {
+          id: string;
+        }
+      ).id;
 
-    const { error: memberErr } =
-      await supabase
-        .from('social_group_members')
-        .insert({
-          group_id: groupId,
-          profile_id: myId,
-          role: 'admin',
-        });
+    const {
+      error: memberError,
+    } = await supabase
+      .from('social_group_members')
+      .insert({
+        group_id: groupId,
+        profile_id: myId,
+        role: 'admin',
+      });
 
-    if (memberErr) {
+    if (memberError) {
+      console.error(
+        'ADD GROUP MEMBER ERROR:',
+        memberError,
+      );
+
       setGroupSubmitting(false);
+
       showToast(
         'Could not add you to group.',
       );
+
       return;
     }
 
-    const { error: inviteErr } =
-      await supabase
-        .from('social_group_invites')
-        .insert({
-          group_id: groupId,
-          inviter_id: myId,
-          invitee_id: id,
-          status: 'pending',
-        });
+    const {
+      error: inviteError,
+    } = await supabase
+      .from('social_group_invites')
+      .insert({
+        group_id: groupId,
+        inviter_id: myId,
+        invitee_id: id,
+        status: 'pending',
+      });
 
     setGroupSubmitting(false);
 
-    if (inviteErr) {
+    if (inviteError) {
+      console.error(
+        'GROUP INVITE ERROR:',
+        inviteError,
+      );
+
       showToast(
         'Group created, but invite failed.',
       );
+
       return;
     }
 
     setGroupSuccess(
       `Group invite sent to ${
-        profile?.display_name ?? 'user'
+        profile?.display_name ??
+        'user'
       }`,
     );
 
@@ -1153,16 +1431,8 @@ export default function ChatDetailScreen() {
     }, 1800);
   };
 
-  const closeMenu = () => {
-    setMenuOpen(false);
-  };
-
-  const closeAttach = () => {
-    setAttachOpen(false);
-  };
-
   /*
-   * Render message
+   * MESSAGE RENDERING
    */
   const renderMessage = ({
     item,
@@ -1176,12 +1446,22 @@ export default function ChatDetailScreen() {
       isSidekick &&
       item.sender_id === 'sidekick';
 
-    const time = new Date(
-      item.created_at,
-    ).toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    const time =
+      new Date(
+        item.created_at,
+      ).toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+
+    const outgoing =
+      isMine &&
+      !isSidekickReply;
+
+    const contentColor =
+      outgoing
+        ? onAccent
+        : colors.text;
 
     return (
       <View
@@ -1195,7 +1475,6 @@ export default function ChatDetailScreen() {
         <View
           style={[
             styles.bubble,
-
             isSidekickReply
               ? {
                   backgroundColor:
@@ -1205,7 +1484,7 @@ export default function ChatDetailScreen() {
                   borderWidth: 1,
                   borderBottomLeftRadius: 6,
                 }
-              : isMine
+              : outgoing
                 ? {
                     backgroundColor:
                       accentForeground,
@@ -1235,31 +1514,67 @@ export default function ChatDetailScreen() {
             </Text>
           ) : null}
 
-          {item.attachment_type === 'image' && item.attachment_url ? (
+          {item.attachment_type ===
+            'image' &&
+          item.attachment_url ? (
             <Image
-              source={{ uri: item.attachment_url }}
-              style={styles.attachmentImage}
+              source={{
+                uri: item.attachment_url,
+              }}
+              style={
+                styles.attachmentImage
+              }
               resizeMode="cover"
             />
           ) : null}
 
-          {item.attachment_type === 'audio' && item.attachment_url ? (
+          {item.attachment_type ===
+            'audio' &&
+          item.attachment_url ? (
             <Pressable
-              onPress={() => togglePlayback(item)}
+              onPress={() =>
+                togglePlayback(item)
+              }
               style={[
                 styles.audioBubble,
-                { borderColor: isMine && !isSidekickReply ? 'rgba(255,255,255,0.4)' : colors.border },
+                {
+                  borderColor:
+                    outgoing
+                      ? 'rgba(255,255,255,0.4)'
+                      : colors.border,
+                },
               ]}
             >
-              {playingMessageId === item.id ? (
-                <Pause color={isMine && !isSidekickReply ? onAccent : colors.text} size={18} />
+              {playingMessageId ===
+              item.id ? (
+                <Pause
+                  color={
+                    outgoing
+                      ? onAccent
+                      : colors.text
+                  }
+                  size={18}
+                />
               ) : (
-                <Play color={isMine && !isSidekickReply ? onAccent : colors.text} size={18} />
+                <Play
+                  color={
+                    outgoing
+                      ? onAccent
+                      : colors.text
+                  }
+                  size={18}
+                />
               )}
+
               <Text
                 style={[
                   styles.audioBubbleText,
-                  { color: isMine && !isSidekickReply ? onAccent : colors.text },
+                  {
+                    color:
+                      outgoing
+                        ? onAccent
+                        : colors.text,
+                  },
                 ]}
               >
                 Voice message
@@ -1267,50 +1582,73 @@ export default function ChatDetailScreen() {
             </Pressable>
           ) : null}
 
-          {item.attachment_type === 'document' && item.attachment_url ? (
+          {item.attachment_type ===
+            'document' &&
+          item.attachment_url ? (
             <Pressable
-              onPress={() => item.attachment_url && Linking.openURL(item.attachment_url)}
+              onPress={() =>
+                Linking.openURL(
+                  item.attachment_url!,
+                )
+              }
               style={[
                 styles.docBubble,
-                { borderColor: isMine && !isSidekickReply ? 'rgba(255,255,255,0.4)' : colors.border },
+                {
+                  borderColor:
+                    outgoing
+                      ? 'rgba(255,255,255,0.4)'
+                      : colors.border,
+                },
               ]}
             >
-              <FileText color={isMine && !isSidekickReply ? onAccent : colors.text} size={18} />
+              <FileText
+                color={
+                  outgoing
+                    ? onAccent
+                    : colors.text
+                }
+                size={18}
+              />
+
               <Text
                 numberOfLines={1}
                 style={[
                   styles.docBubbleText,
-                  { color: isMine && !isSidekickReply ? onAccent : colors.text },
+                  {
+                    color:
+                      outgoing
+                        ? onAccent
+                        : colors.text,
+                  },
                 ]}
               >
-                {item.attachment_name ?? 'Document'}
+                {item.attachment_name ??
+                  'Document'}
               </Text>
             </Pressable>
           ) : null}
 
-          <Text
-            style={[
-              styles.bubbleText,
-              {
-                color:
-                  isMine && !isSidekickReply
-                    ? onAccent
-                    : colors.text,
-              },
-              item.attachment_type ? { display: 'none' } : undefined,
-            ]}
-          >
-            {item.content}
-          </Text>
+          {!item.attachment_type ? (
+            <Text
+              style={[
+                styles.bubbleText,
+                {
+                  color:
+                    contentColor,
+                },
+              ]}
+            >
+              {item.content}
+            </Text>
+          ) : null}
 
           <Text
             style={[
               styles.bubbleTime,
               {
-                color:
-                  isMine && !isSidekickReply
-                    ? 'rgba(255,255,255,0.75)'
-                    : colors.muted,
+                color: outgoing
+                  ? 'rgba(255,255,255,0.75)'
+                  : colors.muted,
               },
             ]}
           >
@@ -1337,12 +1675,19 @@ export default function ChatDetailScreen() {
       normalizedId
     ];
 
+  const closeMenu = () =>
+    setMenuOpen(false);
+
+  const closeAttach = () =>
+    setAttachOpen(false);
+
   return (
     <SafeAreaView
       style={[
         styles.safe,
         {
-          backgroundColor: colors.bg,
+          backgroundColor:
+            colors.bg,
         },
       ]}
     >
@@ -1358,7 +1703,11 @@ export default function ChatDetailScreen() {
         ]}
       >
         <Pressable
-          onPress={() => router.replace('/chat' as never)}
+          onPress={() =>
+            router.replace(
+              '/chat' as never,
+            )
+          }
           hitSlop={12}
           style={styles.headerBtn}
         >
@@ -1378,9 +1727,13 @@ export default function ChatDetailScreen() {
             />
           ) : (
             <Pressable
-              disabled={!showProfileButton}
+              disabled={
+                !showProfileButton
+              }
               onPress={() =>
-                setProfileViewOpen(true)
+                setProfileViewOpen(
+                  true,
+                )
               }
               style={
                 styles.headerTitleWrap
@@ -1399,12 +1752,16 @@ export default function ChatDetailScreen() {
                 {headerName}
               </Text>
 
-              {isSidekick ? null : (
+              {!isSidekick ? (
                 <View
-                  style={styles.activeRow}
+                  style={
+                    styles.activeRow
+                  }
                 >
                   <View
-                    style={styles.activeDot}
+                    style={
+                      styles.activeDot
+                    }
                   />
 
                   <Text
@@ -1419,7 +1776,7 @@ export default function ChatDetailScreen() {
                     Active now
                   </Text>
                 </View>
-              )}
+              ) : null}
             </Pressable>
           )}
         </View>
@@ -1446,7 +1803,9 @@ export default function ChatDetailScreen() {
             style={styles.centerState}
           >
             <ActivityIndicator
-              color={accentForeground}
+              color={
+                accentForeground
+              }
               size="large"
             />
 
@@ -1454,7 +1813,8 @@ export default function ChatDetailScreen() {
               style={[
                 styles.stateText,
                 {
-                  color: colors.muted,
+                  color:
+                    colors.muted,
                 },
               ]}
             >
@@ -1469,7 +1829,8 @@ export default function ChatDetailScreen() {
               style={[
                 styles.stateText,
                 {
-                  color: colors.text,
+                  color:
+                    colors.text,
                 },
               ]}
             >
@@ -1505,7 +1866,8 @@ export default function ChatDetailScreen() {
                   style={[
                     styles.sidekickGreeting,
                     {
-                      color: colors.text,
+                      color:
+                        colors.text,
                     },
                   ]}
                 >
@@ -1516,7 +1878,8 @@ export default function ChatDetailScreen() {
                   style={[
                     styles.sidekickGreetingSecond,
                     {
-                      color: colors.text,
+                      color:
+                        colors.text,
                     },
                   ]}
                 >
@@ -1528,7 +1891,8 @@ export default function ChatDetailScreen() {
                 style={[
                   styles.stateText,
                   {
-                    color: colors.muted,
+                    color:
+                      colors.muted,
                   },
                 ]}
               >
@@ -1585,7 +1949,8 @@ export default function ChatDetailScreen() {
             },
           ]}
         >
-          {!isSidekick && !isRecording && (
+          {!isSidekick &&
+          !isRecording ? (
             <Pressable
               onPress={() =>
                 setAttachOpen(true)
@@ -1602,26 +1967,79 @@ export default function ChatDetailScreen() {
               ]}
             >
               <Paperclip
-                color={colors.muted}
+                color={
+                  colors.muted
+                }
                 size={20}
               />
             </Pressable>
-          )}
+          ) : null}
 
           {isRecording ? (
-            <View style={[styles.recordingRow, { borderColor: colors.border, backgroundColor: colors.bg }]}>
-              <View style={styles.recordingDot} />
-              <Text style={[styles.recordingText, { color: colors.text }]}>
-                Recording… {Math.floor(recordingSeconds / 60)}:{String(recordingSeconds % 60).padStart(2, '0')}
+            <View
+              style={[
+                styles.recordingRow,
+                {
+                  borderColor:
+                    colors.border,
+                  backgroundColor:
+                    colors.bg,
+                },
+              ]}
+            >
+              <View
+                style={
+                  styles.recordingDot
+                }
+              />
+
+              <Text
+                style={[
+                  styles.recordingText,
+                  {
+                    color:
+                      colors.text,
+                  },
+                ]}
+              >
+                Recording…{' '}
+                {Math.floor(
+                  recordingSeconds /
+                    60,
+                )}
+                :
+                {String(
+                  recordingSeconds %
+                    60,
+                ).padStart(
+                  2,
+                  '0',
+                )}
               </Text>
-              <Pressable onPress={cancelRecording} hitSlop={8} style={styles.recordingCancelBtn}>
-                <X color={colors.muted} size={18} />
+
+              <Pressable
+                onPress={
+                  cancelRecording
+                }
+                hitSlop={8}
+                style={
+                  styles.recordingCancelBtn
+                }
+              >
+                <X
+                  color={
+                    colors.muted
+                  }
+                  size={18}
+                />
               </Pressable>
             </View>
           ) : (
             <TextInput
               value={draft}
-              onChangeText={setDraft}
+              onChangeText={
+                setDraft
+              }
               placeholder={
                 isSidekick
                   ? 'Message Sidekick…'
@@ -1633,7 +2051,8 @@ export default function ChatDetailScreen() {
               style={[
                 styles.input,
                 {
-                  color: colors.text,
+                  color:
+                    colors.text,
                   backgroundColor:
                     colors.bg,
                   borderColor:
@@ -1649,38 +2068,68 @@ export default function ChatDetailScreen() {
 
           {isRecording ? (
             <Pressable
-              onPress={stopRecordingAndSend}
-              hitSlop={8}
-              style={[styles.sendBtn, { backgroundColor: accentForeground }]}
-            >
-              {uploadingAttachment ? (
-                <ActivityIndicator color="#FFFFFF" size="small" />
-              ) : (
-                <Square color="#FFFFFF" size={16} />
-              )}
-            </Pressable>
-          ) : !isSidekick && !draft.trim() ? (
-            <Pressable
-              onPress={startRecording}
-              disabled={uploadingAttachment}
+              onPress={
+                stopRecordingAndSend
+              }
               hitSlop={8}
               style={[
                 styles.sendBtn,
-                { backgroundColor: accentForeground },
-                uploadingAttachment && styles.sendBtnDisabled,
+                {
+                  backgroundColor:
+                    accentForeground,
+                },
               ]}
             >
               {uploadingAttachment ? (
-                <ActivityIndicator color="#FFFFFF" size="small" />
+                <ActivityIndicator
+                  color="#FFFFFF"
+                  size="small"
+                />
               ) : (
-                <Mic color="#FFFFFF" size={18} />
+                <Square
+                  color="#FFFFFF"
+                  size={16}
+                />
+              )}
+            </Pressable>
+          ) : !isSidekick &&
+            !draft.trim() ? (
+            <Pressable
+              onPress={
+                startRecording
+              }
+              disabled={
+                uploadingAttachment
+              }
+              hitSlop={8}
+              style={[
+                styles.sendBtn,
+                {
+                  backgroundColor:
+                    accentForeground,
+                },
+                uploadingAttachment &&
+                  styles.sendBtnDisabled,
+              ]}
+            >
+              {uploadingAttachment ? (
+                <ActivityIndicator
+                  color="#FFFFFF"
+                  size="small"
+                />
+              ) : (
+                <Mic
+                  color="#FFFFFF"
+                  size={18}
+                />
               )}
             </Pressable>
           ) : (
             <Pressable
               onPress={handleSend}
               disabled={
-                !draft.trim() || sending
+                !draft.trim() ||
+                sending
               }
               hitSlop={8}
               style={[
@@ -1714,7 +2163,9 @@ export default function ChatDetailScreen() {
 
       {toast ? (
         <View
-          style={styles.toastWrap}
+          style={
+            styles.toastWrap
+          }
         >
           <View
             style={[
@@ -1753,7 +2204,9 @@ export default function ChatDetailScreen() {
         }
       >
         <Pressable
-          style={styles.sheetShade}
+          style={
+            styles.sheetShade
+          }
           onPress={closeAttach}
         />
 
@@ -1779,13 +2232,16 @@ export default function ChatDetailScreen() {
           />
 
           <View
-            style={styles.sheetHeader}
+            style={
+              styles.sheetHeader
+            }
           >
             <Text
               style={[
                 styles.sheetTitle,
                 {
-                  color: colors.text,
+                  color:
+                    colors.text,
                 },
               ]}
             >
@@ -1799,19 +2255,23 @@ export default function ChatDetailScreen() {
               hitSlop={12}
             >
               <X
-                color={colors.muted}
+                color={
+                  colors.muted
+                }
                 size={22}
               />
             </Pressable>
           </View>
 
           <View
-            style={styles.attachGrid}
+            style={
+              styles.attachGrid
+            }
           >
             {ATTACHMENT_OPTIONS.map(
               (option) => {
-                const { Icon } =
-                  option;
+                const Icon =
+                  option.Icon;
 
                 return (
                   <Pressable
@@ -1876,7 +2336,9 @@ export default function ChatDetailScreen() {
         }
       >
         <Pressable
-          style={styles.sheetShade}
+          style={
+            styles.sheetShade
+          }
           onPress={closeMenu}
         />
 
@@ -1902,13 +2364,16 @@ export default function ChatDetailScreen() {
           />
 
           <View
-            style={styles.sheetHeader}
+            style={
+              styles.sheetHeader
+            }
           >
             <Text
               style={[
                 styles.sheetTitle,
                 {
-                  color: colors.text,
+                  color:
+                    colors.text,
                 },
               ]}
             >
@@ -1920,13 +2385,15 @@ export default function ChatDetailScreen() {
               hitSlop={12}
             >
               <X
-                color={colors.muted}
+                color={
+                  colors.muted
+                }
                 size={22}
               />
             </Pressable>
           </View>
 
-          {!isSidekick && (
+          {!isSidekick ? (
             <>
               <Pressable
                 style={[
@@ -1938,7 +2405,9 @@ export default function ChatDetailScreen() {
                 ]}
                 onPress={() => {
                   closeMenu();
-                  setReportOpen(true);
+                  setReportOpen(
+                    true,
+                  );
                 }}
               >
                 <Text
@@ -1986,7 +2455,7 @@ export default function ChatDetailScreen() {
                 </Text>
               </Pressable>
             </>
-          )}
+          ) : null}
 
           <Pressable
             style={[
@@ -2020,14 +2489,16 @@ export default function ChatDetailScreen() {
             </Text>
           </Pressable>
 
-          {!isSidekick && (
+          {!isSidekick ? (
             <Pressable
               style={
                 styles.menuItem
               }
               onPress={() => {
                 closeMenu();
-                setGroupOpen(true);
+                setGroupOpen(
+                  true,
+                );
               }}
             >
               <Text
@@ -2042,7 +2513,7 @@ export default function ChatDetailScreen() {
                 Add to Group
               </Text>
             </Pressable>
-          )}
+          ) : null}
         </View>
       </Modal>
 
@@ -2057,7 +2528,9 @@ export default function ChatDetailScreen() {
         }
       >
         <View
-          style={styles.subShade}
+          style={
+            styles.subShade
+          }
         >
           <View
             style={[
@@ -2071,7 +2544,9 @@ export default function ChatDetailScreen() {
             ]}
           >
             <View
-              style={styles.subHeader}
+              style={
+                styles.subHeader
+              }
             >
               <Text
                 style={[
@@ -2202,7 +2677,9 @@ export default function ChatDetailScreen() {
         }
       >
         <View
-          style={styles.subShade}
+          style={
+            styles.subShade
+          }
         >
           <View
             style={[
@@ -2216,7 +2693,9 @@ export default function ChatDetailScreen() {
             ]}
           >
             <View
-              style={styles.subHeader}
+              style={
+                styles.subHeader
+              }
             >
               <Text
                 style={[
@@ -2356,7 +2835,9 @@ export default function ChatDetailScreen() {
         }
       >
         <View
-          style={styles.modalShade}
+          style={
+            styles.modalShade
+          }
         >
           <View
             style={[
@@ -2370,7 +2851,9 @@ export default function ChatDetailScreen() {
             ]}
           >
             <View
-              style={styles.sheetHeader}
+              style={
+                styles.sheetHeader
+              }
             >
               <Text
                 style={[
@@ -2438,16 +2921,16 @@ export default function ChatDetailScreen() {
                       text,
                     ) => {
                       setPollOptions(
-                        (prev) =>
-                          prev.map(
+                        (previous) =>
+                          previous.map(
                             (
-                              item,
-                              itemIndex,
+                              current,
+                              currentIndex,
                             ) =>
-                              itemIndex ===
+                              currentIndex ===
                               index
                                 ? text
-                                : item,
+                                : current,
                           ),
                       );
                     }}
@@ -2467,22 +2950,23 @@ export default function ChatDetailScreen() {
                         borderColor:
                           colors.border,
                         marginBottom: 0,
+                        flex: 1,
                       },
                     ]}
                   />
 
                   {pollOptions.length >
-                    2 && (
+                  2 ? (
                     <Pressable
                       onPress={() =>
                         setPollOptions(
-                          (prev) =>
-                            prev.filter(
+                          (previous) =>
+                            previous.filter(
                               (
                                 _,
-                                itemIndex,
+                                currentIndex,
                               ) =>
-                                itemIndex !==
+                                currentIndex !==
                                 index,
                             ),
                         )
@@ -2496,7 +2980,7 @@ export default function ChatDetailScreen() {
                         size={18}
                       />
                     </Pressable>
-                  )}
+                  ) : null}
                 </View>
               ),
             )}
@@ -2504,8 +2988,8 @@ export default function ChatDetailScreen() {
             <Pressable
               onPress={() =>
                 setPollOptions(
-                  (prev) => [
-                    ...prev,
+                  (previous) => [
+                    ...previous,
                     '',
                   ],
                 )
@@ -2573,7 +3057,9 @@ export default function ChatDetailScreen() {
         }
       >
         <View
-          style={styles.modalShade}
+          style={
+            styles.modalShade
+          }
         >
           <View
             style={[
@@ -2587,7 +3073,9 @@ export default function ChatDetailScreen() {
             ]}
           >
             <View
-              style={styles.sheetHeader}
+              style={
+                styles.sheetHeader
+              }
             >
               <Text
                 style={[
@@ -2642,7 +3130,9 @@ export default function ChatDetailScreen() {
             />
 
             <View
-              style={styles.eventRow}
+              style={
+                styles.eventRow
+              }
             >
               <TextInput
                 value={eventDate}
@@ -2760,7 +3250,9 @@ export default function ChatDetailScreen() {
       {/* PROFILE */}
 
       <Modal
-        visible={profileViewOpen}
+        visible={
+          profileViewOpen
+        }
         transparent
         animationType="slide"
         onRequestClose={() =>
@@ -2770,7 +3262,9 @@ export default function ChatDetailScreen() {
         }
       >
         <View
-          style={styles.modalShade}
+          style={
+            styles.modalShade
+          }
         >
           <View
             style={[
@@ -2784,7 +3278,9 @@ export default function ChatDetailScreen() {
             ]}
           >
             <View
-              style={styles.sheetHeader}
+              style={
+                styles.sheetHeader
+              }
             >
               <Text
                 style={[
@@ -3199,7 +3695,8 @@ const styles = StyleSheet.create({
 
   sheetShade: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor:
+      'rgba(0,0,0,0.45)',
   },
 
   sheet: {
@@ -3270,7 +3767,8 @@ const styles = StyleSheet.create({
 
   subShade: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor:
+      'rgba(0,0,0,0.5)',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
@@ -3339,7 +3837,8 @@ const styles = StyleSheet.create({
   modalShade: {
     flex: 1,
     justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor:
+      'rgba(0,0,0,0.45)',
   },
 
   pollOptionRow: {
