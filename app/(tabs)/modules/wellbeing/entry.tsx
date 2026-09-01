@@ -86,7 +86,7 @@ const MODULE_CONFIG: Record<ModuleKey, ModuleConfig> = {
   morning_pages: {
     key: 'morning_pages',
     label: 'MORNING PAGES',
-    title: 'MORNING PAGES',
+    title: 'BLANK PAGES',
     placeholder:
       "Let your mind wander onto the page...",
     hasPrompt: false,

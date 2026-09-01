@@ -7,6 +7,7 @@ import {
 
 import {
   ActivityIndicator,
+  Alert,
   Modal,
   Pressable,
   SafeAreaView,
@@ -34,6 +35,13 @@ import {
 
 import { useApp } from '@/components/AppProvider';
 import { supabase } from '@/lib/supabase';
+import {
+  ensureDirectConversation,
+  ensureGroupConversation,
+  getConversationReadMap,
+  markConversationRead,
+  sendChatMessage,
+} from './chat/chatHelpers';
 
 /* =========================================================
    TYPES
@@ -57,6 +65,9 @@ type SocialProfile = {
   user_id: string;
   display_name: string;
   username: string;
+  title?: string | null;
+  tag?: string | null;
+  profile_title?: string | null;
 };
 
 type IncomingRequest = {
@@ -75,12 +86,27 @@ type IncomingGroupInvite = {
   created_at: string;
 };
 
+type ChatTag = {
+  id: string;
+  user_id: string;
+  name: string;
+  created_at: string;
+};
+
+type ChatTagAssignment = {
+  id: string;
+  user_id: string;
+  chat_id: string;
+  tag_id: string;
+  created_at: string;
+};
+
 /* =========================================================
    SYSTEM CHAT
 ========================================================= */
 
 const SIDEKICK_GREETING =
-  "Hi! I'm your Sidekick. How can I help you today?";
+  "Hi! I'm your Sidekick. I'm here to help you improve your life, one atomic habit at a time!";
 
 const SYSTEM_CHATS: ChatItem[] = [
   {
@@ -134,6 +160,7 @@ export default function ChatScreen() {
     flex?: string;
     streak?: string;
     habitTitle?: string;
+    filter?: string;
   }>();
 
   const flexMode =
@@ -161,7 +188,41 @@ export default function ChatScreen() {
     useState('');
 
   const [filter, setFilter] =
-    useState<FilterKey>('All');
+    useState<FilterKey | null>('All');
+
+  const [chatTags, setChatTags] =
+    useState<ChatTag[]>([]);
+
+  const [chatTagAssignments, setChatTagAssignments] =
+    useState<ChatTagAssignment[]>([]);
+
+  const [selectedTagIds, setSelectedTagIds] =
+    useState<string[]>([]);
+
+  const [showAddTagModal, setShowAddTagModal] =
+    useState(false);
+
+  const [newTagName, setNewTagName] =
+    useState('');
+
+  const [editingTagId, setEditingTagId] =
+    useState<string | null>(null);
+
+  const [addTagError, setAddTagError] =
+    useState<string | null>(null);
+
+  const [addingTag, setAddingTag] =
+    useState(false);
+
+  const [tagChat, setTagChat] =
+    useState<ChatItem | null>(null);
+
+  const [tagModalError, setTagModalError] =
+    useState<string | null>(null);
+
+  // Read state is kept for the current app session. Opening a chat marks it read.
+  const [readChatAt, setReadChatAt] = useState<Record<string, string>>({});
+  const [myUserId, setMyUserId] = useState<string | null>(null);
 
   const [userFriends, setUserFriends] =
     useState<ChatItem[]>([]);
@@ -226,6 +287,9 @@ export default function ChatScreen() {
   const [newGroupName, setNewGroupName] =
     useState('');
 
+  const [newGroupDescription, setNewGroupDescription] =
+    useState('');
+
   const [creatingGroup, setCreatingGroup] =
     useState(false);
 
@@ -255,6 +319,8 @@ export default function ChatScreen() {
   const [groupInviteActionId, setGroupInviteActionId] =
     useState<string | null>(null);
 
+  useEffect(() => { supabase.auth.getUser().then(({ data: { user } }) => setMyUserId(user?.id ?? null)); }, []);
+
   /* =========================================================
      LOAD FRIENDS
   ========================================================= */
@@ -274,8 +340,8 @@ export default function ChatScreen() {
       error: friendshipError,
     } = await supabase
       .from('friendships')
-      .select('friend_user_id')
-      .eq('user_id', user.id);
+      .select('user_id, friend_user_id')
+      .or(`user_id.eq.${user.id},friend_user_id.eq.${user.id}`);
 
     if (friendshipError) {
       console.error(
@@ -287,12 +353,14 @@ export default function ChatScreen() {
       return;
     }
 
-    const friendIds =
-      (friendshipRows ?? []).map(
-        (row: {
-          friend_user_id: string;
-        }) => row.friend_user_id,
-      );
+    const friendIds: string[] = [
+      ...new Set<string>(
+        (friendshipRows ?? []).map(
+          (row: { user_id: string; friend_user_id: string }) =>
+            row.user_id === user.id ? row.friend_user_id : row.user_id,
+        ),
+      ),
+    ];
 
     if (!friendIds.length) {
       setUserFriends([]);
@@ -304,9 +372,7 @@ export default function ChatScreen() {
       error: profileError,
     } = await supabase
       .from('social_profiles')
-      .select(
-        'user_id, display_name, username',
-      )
+      .select('*')
       .in('user_id', friendIds);
 
     if (profileError) {
@@ -319,13 +385,57 @@ export default function ChatScreen() {
       return;
     }
 
+    const conversationByFriend = new Map<string, string>();
+    for (const friendId of friendIds) {
+      const { id: conversationId } = await ensureDirectConversation(user.id, friendId);
+      if (conversationId) conversationByFriend.set(friendId, conversationId);
+    }
+
+    const directConversationIds = [...conversationByFriend.values()];
+    const readRows = directConversationIds.length
+      ? await getConversationReadMap(user.id, directConversationIds)
+      : new Map<string, string>();
+
+    const { data: messageRows } = directConversationIds.length
+      ? await supabase
+          .from('chat_messages')
+          .select('conversation_id, sender_id, body, created_at')
+          .in('conversation_id', directConversationIds)
+          .is('deleted_at', null)
+          .order('created_at', { ascending: false })
+      : { data: [] as any[] };
+
+    const messagesByConversation = new Map<string, any[]>();
+    (messageRows ?? []).forEach((row: any) => {
+      const list = messagesByConversation.get(row.conversation_id) ?? [];
+      list.push(row);
+      messagesByConversation.set(row.conversation_id, list);
+    });
+
+    const getDirectRows = (friendId: string) => {
+      const conversationId = conversationByFriend.get(friendId);
+      return conversationId ? (messagesByConversation.get(conversationId) ?? []) : [];
+    };
+
     const friendsList: ChatItem[] =
       (profiles ?? []).map(
         (profile: SocialProfile) => ({
           id: profile.user_id,
           name: profile.display_name,
-          detail: `@${profile.username}`,
-          time: 'Active',
+          detail: (() => {
+            const last = getDirectRows(profile.user_id)[0];
+            return last?.body?.trim() || (profile.title || profile.tag || profile.profile_title || `@${profile.username}`);
+          })(),
+          time: (() => {
+            const last = getDirectRows(profile.user_id)[0];
+            return last ? formatChatTime(last.created_at) : '';
+          })(),
+          unread: (() => {
+            const rows = getDirectRows(profile.user_id);
+            const conversationId = conversationByFriend.get(profile.user_id);
+            const lastRead = (conversationId ? readRows.get(conversationId) : undefined) ?? readChatAt[conversationId ?? ''];
+            return rows.filter((row: any) => row.sender_id !== user.id && (!lastRead || row.created_at > lastRead)).length;
+          })(),
           category: 'direct',
           icon: (
             profile.display_name || '?'
@@ -337,7 +447,7 @@ export default function ChatScreen() {
       );
 
     setUserFriends(friendsList);
-  }, []);
+  }, [readChatAt]);
 
   /* =========================================================
      LOAD GROUPS
@@ -360,9 +470,9 @@ export default function ChatScreen() {
       data: memberRows,
       error: memberError,
     } = await supabase
-      .from('social_group_members')
+      .from('chat_group_members')
       .select('group_id, role')
-      .eq('profile_id', user.id);
+      .eq('user_id', user.id);
 
     if (memberError) {
       console.error(
@@ -404,10 +514,8 @@ export default function ChatScreen() {
       data: groupRows,
       error: groupError,
     } = await supabase
-      .from('social_groups')
-      .select(
-        'id, name, created_at',
-      )
+      .from('chat_groups')
+      .select('id, name, description, created_at')
       .in('id', groupIds)
       .order(
         'created_at',
@@ -427,6 +535,57 @@ export default function ChatScreen() {
       return;
     }
 
+    // Groups use a channel conversation. A group id is NOT a conversation id.
+    const { data: channelRows } = await supabase
+      .from('chat_channels')
+      .select('id, group_id')
+      .in('group_id', groupIds)
+      .order('is_default', { ascending: false })
+      .order('position', { ascending: true });
+
+    const channelByGroup = new Map<string, string>();
+    (channelRows ?? []).forEach((row: any) => {
+      if (!channelByGroup.has(row.group_id)) channelByGroup.set(row.group_id, row.id);
+    });
+
+    const channelIds = [...new Set([...channelByGroup.values()])];
+    const { data: conversationRows } = channelIds.length
+      ? await supabase
+          .from('chat_conversations')
+          .select('id, group_id, channel_id')
+          .eq('type', 'channel')
+          .in('channel_id', channelIds)
+      : { data: [] as any[] };
+
+    const conversationByGroup = new Map<string, string>();
+    (conversationRows ?? []).forEach((row: any) => {
+      if (row.group_id) conversationByGroup.set(row.group_id, row.id);
+    });
+
+    const groupConversationIds = [...conversationByGroup.values()];
+    const groupReadMap = await getConversationReadMap(user.id, groupConversationIds);
+    const { data: groupMessageRows } = groupConversationIds.length
+      ? await supabase
+          .from('chat_messages')
+          .select('conversation_id, sender_id, body, created_at')
+          .in('conversation_id', groupConversationIds)
+          .is('deleted_at', null)
+          .order('created_at', { ascending: false })
+      : { data: [] as any[] };
+
+    const groupMessagesByConversation = new Map<string, any[]>();
+    (groupMessageRows ?? []).forEach((row: any) => {
+      const list = groupMessagesByConversation.get(row.conversation_id) ?? [];
+      list.push(row);
+      groupMessagesByConversation.set(row.conversation_id, list);
+    });
+
+    const senderIds = [...new Set((groupMessageRows ?? []).map((row: any) => row.sender_id).filter(Boolean))];
+    const { data: senderProfiles } = senderIds.length
+      ? await supabase.from('social_profiles').select('user_id, display_name').in('user_id', senderIds)
+      : { data: [] as any[] };
+    const senderNames = new Map((senderProfiles ?? []).map((p: any) => [p.user_id, p.display_name]));
+
     const groupsList: ChatItem[] =
       (groupRows ?? []).map(
         (group: {
@@ -435,13 +594,21 @@ export default function ChatScreen() {
         }) => ({
           id: `group-${group.id}`,
           name: group.name,
-          detail:
-            roleByGroupId.get(
-              group.id,
-            ) === 'admin'
-              ? 'You’re an admin'
-              : 'Group',
-          time: '',
+          detail: (() => {
+            const last = (groupMessagesByConversation.get(conversationByGroup.get(group.id) ?? '') ?? [])[0];
+            if (!last) return ['admin', 'owner'].includes(String(roleByGroupId.get(group.id) ?? '')) ? 'You’re an admin' : 'Group';
+            const sender = last.sender_id === user.id ? 'You' : (senderNames.get(last.sender_id) ?? 'Member');
+            return `${sender}: ${last.body || 'Attachment'}`;
+          })(),
+          time: (() => {
+            const last = (groupMessagesByConversation.get(conversationByGroup.get(group.id) ?? '') ?? [])[0];
+            return last ? formatChatTime(last.created_at) : '';
+          })(),
+          unread: (() => {
+            const rows = groupMessagesByConversation.get(conversationByGroup.get(group.id) ?? '') ?? [];
+            const lastRead = groupReadMap.get(conversationByGroup.get(group.id) ?? '') ?? readChatAt[conversationByGroup.get(group.id) ?? ''];
+            return rows.filter((row: any) => row.sender_id !== user.id && (!lastRead || row.created_at > lastRead)).length;
+          })(),
           category: 'groups',
           icon: (
             group.name || '?'
@@ -455,7 +622,7 @@ export default function ChatScreen() {
 
     setUserGroups(groupsList);
     setGroupsLoading(false);
-  }, []);
+  }, [readChatAt]);
 
   /* =========================================================
      SIDEKICK PREVIEW
@@ -514,6 +681,277 @@ export default function ChatScreen() {
     }, []);
 
   /* =========================================================
+     LOAD CHAT TAGS
+  ========================================================= */
+
+  const loadChatTags = useCallback(async () => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      setChatTags([]);
+      setChatTagAssignments([]);
+      return;
+    }
+
+    const [
+      { data: tags, error: tagsError },
+      { data: assignments, error: assignmentsError },
+    ] = await Promise.all([
+      supabase
+        .from('social_chat_tags')
+        .select('id, user_id, name, created_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: true }),
+      supabase
+        .from('social_chat_tag_assignments')
+        .select('id, user_id, chat_id, tag_id, created_at')
+        .eq('user_id', user.id),
+    ]);
+
+    if (tagsError) {
+      console.error('LOAD CHAT TAGS ERROR:', tagsError);
+      setChatTags([]);
+    } else {
+      setChatTags((tags ?? []) as ChatTag[]);
+    }
+
+    if (assignmentsError) {
+      console.error(
+        'LOAD CHAT TAG ASSIGNMENTS ERROR:',
+        assignmentsError,
+      );
+      setChatTagAssignments([]);
+    } else {
+      setChatTagAssignments(
+        (assignments ?? []) as ChatTagAssignment[],
+      );
+    }
+  }, []);
+
+  /* =========================================================
+     CHAT TAG HELPERS
+  ========================================================= */
+
+  const getTagChatId = (chat: ChatItem) => chat.id;
+
+  const isChatTagged = (chat: ChatItem, tagId: string) =>
+    chatTagAssignments.some(
+      (assignment) =>
+        assignment.chat_id === getTagChatId(chat) &&
+        assignment.tag_id === tagId,
+    );
+
+  const toggleTagFilter = (tagId: string) => {
+    setSelectedTagIds((previous) =>
+      previous.includes(tagId)
+        ? previous.filter((id) => id !== tagId)
+        : [...previous, tagId],
+    );
+  };
+
+  const openAddTag = () => {
+    setEditingTagId(null);
+    setNewTagName('');
+    setAddTagError(null);
+    setShowAddTagModal(true);
+  };
+
+  const createChatTag = async () => {
+    const name = newTagName.trim();
+    if (addingTag) return;
+    if (!name) { setAddTagError('Enter a tag name.'); return; }
+    if (name.length > 20) { setAddTagError('Tag names can be up to 20 characters.'); return; }
+
+    setAddingTag(true); setAddTagError(null);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setAddTagError('You must be signed in.'); setAddingTag(false); return; }
+
+    if (editingTagId) {
+      const { data, error } = await supabase.from('social_chat_tags').update({ name }).eq('id', editingTagId).eq('user_id', user.id).select('id, user_id, name, created_at').single();
+      setAddingTag(false);
+      if (error || !data) { setAddTagError(error?.message || 'Could not edit tag.'); return; }
+      setChatTags(previous => previous.map(tag => tag.id === editingTagId ? data as ChatTag : tag));
+      setEditingTagId(null); setNewTagName(''); setShowAddTagModal(false);
+      return;
+    }
+
+    const { data, error } = await supabase.from('social_chat_tags').insert({ user_id: user.id, name }).select('id, user_id, name, created_at').single();
+    setAddingTag(false);
+    if (error || !data) {
+      if (error?.code === '23505') setAddTagError('You already have a tag with that name.');
+      else setAddTagError(error?.message || 'Could not create tag.');
+      return;
+    }
+    const tag = data as ChatTag;
+    setChatTags(previous => [...previous, tag]);
+    setFilter(null); setSelectedTagIds(previous => [...previous, tag.id]);
+    setNewTagName(''); setShowAddTagModal(false);
+  };
+
+  const deleteChatTag = async (tag: ChatTag) => {
+    Alert.alert('Delete tag?', `Delete “${tag.name}” and remove it from all chats?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          const { error: assignmentError } = await supabase
+            .from('social_chat_tag_assignments')
+            .delete()
+            .eq('user_id', tag.user_id)
+            .eq('tag_id', tag.id);
+          if (assignmentError) {
+            Alert.alert('Could not delete tag', assignmentError.message);
+            return;
+          }
+          const { error } = await supabase
+            .from('social_chat_tags')
+            .delete()
+            .eq('id', tag.id)
+            .eq('user_id', tag.user_id);
+          if (error) {
+            Alert.alert('Could not delete tag', error.message);
+            return;
+          }
+          setChatTags((previous) => previous.filter((item) => item.id !== tag.id));
+          setChatTagAssignments((previous) => previous.filter((item) => item.tag_id !== tag.id));
+          setSelectedTagIds((previous) => previous.filter((id) => id !== tag.id));
+        },
+      },
+    ]);
+  };
+
+  const editChatTag = (tag: ChatTag) => {
+    setEditingTagId(tag.id);
+    setNewTagName(tag.name);
+    setAddTagError(null);
+    setShowAddTagModal(true);
+  };
+
+  const reorderChatTag = async (tag: ChatTag) => {
+    const index = chatTags.findIndex((item) => item.id === tag.id);
+    if (index < 0) return;
+    const options: any[] = [
+      { text: 'Cancel', style: 'cancel' },
+    ];
+    if (index > 0) {
+      options.push({ text: 'Move up', onPress: () => swapChatTags(index, index - 1) });
+    }
+    if (index < chatTags.length - 1) {
+      options.push({ text: 'Move down', onPress: () => swapChatTags(index, index + 1) });
+    }
+    Alert.alert(`Re-order “${tag.name}”`, undefined, options);
+  };
+
+  const swapChatTags = async (a: number, b: number) => {
+    const first = chatTags[a];
+    const second = chatTags[b];
+    if (!first || !second) return;
+    const firstDate = first.created_at;
+    const secondDate = second.created_at;
+    const [firstUpdate, secondUpdate] = await Promise.all([
+      supabase.from('social_chat_tags').update({ created_at: secondDate }).eq('id', first.id).eq('user_id', first.user_id),
+      supabase.from('social_chat_tags').update({ created_at: firstDate }).eq('id', second.id).eq('user_id', second.user_id),
+    ]);
+    if (firstUpdate.error || secondUpdate.error) {
+      Alert.alert('Could not reorder tag', firstUpdate.error?.message || secondUpdate.error?.message || 'Please try again.');
+      return;
+    }
+    const next = [...chatTags];
+    [next[a], next[b]] = [next[b], next[a]];
+    setChatTags(next);
+  };
+
+  const handleTagLongPress = (tag: ChatTag) => {
+    Alert.alert(`Tag: ${tag.name}`, 'Choose an action.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Edit', onPress: () => editChatTag(tag) },
+      { text: 'Delete', style: 'destructive', onPress: () => deleteChatTag(tag) },
+      { text: 'Re-order', onPress: () => reorderChatTag(tag) },
+    ]);
+  };
+
+  const openTagChat = (chat: ChatItem) => {
+    setTagChat(chat);
+    setTagModalError(null);
+  };
+
+  const closeTagChat = () => {
+    setTagChat(null);
+    setTagModalError(null);
+  };
+
+  const setChatTagAssignment = async (
+    chat: ChatItem,
+    tag: ChatTag,
+    assigned: boolean,
+  ) => {
+    const chatId = getTagChatId(chat);
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      setTagModalError('You must be signed in.');
+      return;
+    }
+
+    if (assigned) {
+      const { data, error } = await supabase
+        .from('social_chat_tag_assignments')
+        .insert({
+          user_id: user.id,
+          chat_id: chatId,
+          tag_id: tag.id,
+        })
+        .select('id, user_id, chat_id, tag_id, created_at')
+        .single();
+
+      if (error) {
+        console.error('ADD CHAT TAG ERROR:', error);
+        if (error.code !== '23505') {
+          setTagModalError(error.message || 'Could not add tag.');
+        }
+        return;
+      }
+
+      if (data) {
+        setChatTagAssignments((previous) => [
+          ...previous,
+          data as ChatTagAssignment,
+        ]);
+      }
+      return;
+    }
+
+    const { error } = await supabase
+      .from('social_chat_tag_assignments')
+      .delete()
+      .eq('user_id', user.id)
+      .eq('chat_id', chatId)
+      .eq('tag_id', tag.id);
+
+    if (error) {
+      console.error('REMOVE CHAT TAG ERROR:', error);
+      setTagModalError(error.message || 'Could not remove tag.');
+      return;
+    }
+
+    setChatTagAssignments((previous) =>
+      previous.filter(
+        (assignment) =>
+          !(
+            assignment.chat_id === chatId &&
+            assignment.tag_id === tag.id
+          ),
+      ),
+    );
+  };
+
+  /* =========================================================
      GROUP INVITES
   ========================================================= */
 
@@ -533,7 +971,7 @@ export default function ChatScreen() {
         error: inviteError,
       } = await supabase
         .from(
-          'social_group_invites',
+          'chat_group_invitations',
         )
         .select(
           'id, group_id, inviter_id, created_at',
@@ -591,7 +1029,7 @@ export default function ChatScreen() {
         { data: profileRows },
       ] = await Promise.all([
         supabase
-          .from('social_groups')
+          .from('chat_groups')
           .select(
             'id, name',
           )
@@ -679,7 +1117,7 @@ export default function ChatScreen() {
         error: updateError,
       } = await supabase
         .from(
-          'social_group_invites',
+          'chat_group_invitations',
         )
         .update({
           status: 'accepted',
@@ -702,14 +1140,10 @@ export default function ChatScreen() {
       const {
         error: memberError,
       } = await supabase
-        .from(
-          'social_group_members',
-        )
+        .from('chat_group_members')
         .insert({
-          group_id:
-            invite.group_id,
-          profile_id:
-            user.id,
+          group_id: invite.group_id,
+          user_id: user.id,
           role: 'member',
         });
 
@@ -718,6 +1152,11 @@ export default function ChatScreen() {
           'JOIN GROUP AFTER ACCEPT ERROR:',
           memberError,
         );
+      }
+
+      const conversation = await ensureGroupConversation(invite.group_id, user.id);
+      if (conversation.error || !conversation.id) {
+        console.error('JOIN GROUP CHAT ERROR:', conversation.error);
       }
 
       setIncomingGroupInvites(
@@ -750,7 +1189,7 @@ export default function ChatScreen() {
         error,
       } = await supabase
         .from(
-          'social_group_invites',
+          'chat_group_invitations',
         )
         .update({
           status: 'declined',
@@ -783,111 +1222,86 @@ export default function ChatScreen() {
      CREATE GROUP
   ========================================================= */
 
-  const handleCreateGroup =
-    async () => {
-      const name =
-        newGroupName.trim();
+  const handleCreateGroup = async () => {
+    const name = newGroupName.trim();
+    const description = newGroupDescription.trim();
+    if (!name || creatingGroup) return;
 
-      if (
-        !name ||
-        creatingGroup
-      ) {
-        return;
-      }
+    setCreatingGroup(true);
+    setCreateGroupError(null);
 
-      setCreatingGroup(true);
-      setCreateGroupError(null);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setCreateGroupError('You must be signed in.');
+      setCreatingGroup(false);
+      return;
+    }
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        setCreateGroupError(
-          'You must be signed in.',
-        );
-
-        setCreatingGroup(false);
-        return;
-      }
-
-      const {
-        data: groupData,
-        error: groupError,
-      } = await supabase
-        .from('social_groups')
+    try {
+      // The current Chat schema uses chat_groups -> chat_channels ->
+      // chat_conversations(type=channel) for group conversations.
+      const { data: groupData, error: groupError } = await supabase
+        .from('chat_groups')
         .insert({
           name,
-          created_by:
-            user.id,
+          description,
+          visibility: 'private',
+          owner_id: user.id,
         })
         .select('id')
         .single();
+      if (groupError || !groupData) throw groupError ?? new Error('Could not create group.');
 
-      if (
-        groupError ||
-        !groupData
-      ) {
-        console.error(
-          'CREATE GROUP ERROR:',
-          groupError,
-        );
+      const groupId = groupData.id;
 
-        setCreateGroupError(
-          groupError?.message ||
-            'Could not create group.',
-        );
+      const { error: memberError } = await supabase
+        .from('chat_group_members')
+        .insert({ group_id: groupId, user_id: user.id, role: 'owner' });
+      if (memberError) throw memberError;
 
-        setCreatingGroup(false);
-        return;
-      }
-
-      const groupId =
-        (
-          groupData as {
-            id: string;
-          }
-        ).id;
-
-      const {
-        error: memberError,
-      } = await supabase
-        .from(
-          'social_group_members',
-        )
+      const { data: channelData, error: channelError } = await supabase
+        .from('chat_channels')
         .insert({
-          group_id:
-            groupId,
-          profile_id:
-            user.id,
-          role: 'admin',
-        });
+          group_id: groupId,
+          name,
+          description,
+          position: 0,
+          is_default: true,
+          created_by: user.id,
+        })
+        .select('id')
+        .single();
+      if (channelError || !channelData) throw channelError ?? new Error('Could not create group channel.');
 
-      setCreatingGroup(false);
+      const { data: conversationData, error: conversationError } = await supabase
+        .from('chat_conversations')
+        .insert({
+          type: 'channel',
+          group_id: groupId,
+          channel_id: channelData.id,
+          created_by: user.id,
+        })
+        .select('id')
+        .single();
+      if (conversationError || !conversationData) throw conversationError ?? new Error('Could not create group conversation.');
 
-      if (memberError) {
-        console.error(
-          'CREATE GROUP MEMBER ERROR:',
-          memberError,
-        );
-
-        setCreateGroupError(
-          memberError.message ||
-            'Group created, but could not add you as a member.',
-        );
-
-        return;
-      }
+      const { error: conversationMemberError } = await supabase
+        .from('chat_conversation_members')
+        .insert({ conversation_id: conversationData.id, user_id: user.id });
+      if (conversationMemberError) throw conversationMemberError;
 
       setNewGroupName('');
+      setNewGroupDescription('');
       setCreateGroupOpen(false);
-
       await loadGroups();
-
-      router.push(
-        `/chat/group/${groupId}` as never,
-      );
-    };
+      router.push(`/chat/group/${groupId}` as never);
+    } catch (error: any) {
+      console.error('CREATE GROUP ERROR:', error);
+      setCreateGroupError(error?.message || 'Could not create group.');
+    } finally {
+      setCreatingGroup(false);
+    }
+  };
 
   /* =========================================================
      LOAD FRIEND REQUESTS
@@ -1023,6 +1437,13 @@ export default function ChatScreen() {
       setRequestsLoading(false);
     }, []);
 
+  useEffect(() => {
+    const requested = params.filter;
+    if (requested === 'All' || requested === 'Unread' || requested === 'Groups') {
+      setFilter(requested);
+    }
+  }, [params.filter]);
+
   /* =========================================================
      INITIAL LOAD
   ========================================================= */
@@ -1033,12 +1454,14 @@ export default function ChatScreen() {
     loadGroups();
     loadSidekickPreview();
     loadIncomingGroupInvites();
+    loadChatTags();
   }, [
     loadFriends,
     loadIncomingRequests,
     loadGroups,
     loadSidekickPreview,
     loadIncomingGroupInvites,
+    loadChatTags,
   ]);
 
   /* =========================================================
@@ -1109,30 +1532,33 @@ export default function ChatScreen() {
               ),
         );
 
-      switch (filter) {
-        case 'All':
-          return byName;
+      const byBaseFilter =
+        filter === 'Unread'
+          ? byName.filter(
+              (chat) => !!chat.unread,
+            )
+          : filter === 'Groups'
+            ? byName.filter(
+                (chat) =>
+                  chat.category === 'groups',
+              )
+            : byName;
 
-        case 'Unread':
-          return byName.filter(
-            (chat) =>
-              !!chat.unread,
-          );
-
-        case 'Groups':
-          return byName.filter(
-            (chat) =>
-              chat.category ===
-              'groups',
-          );
-
-        default:
-          return byName;
+      if (selectedTagIds.length === 0) {
+        return byBaseFilter;
       }
+
+      return byBaseFilter.filter((chat) =>
+        selectedTagIds.every((tagId) =>
+          isChatTagged(chat, tagId),
+        ),
+      );
     }, [
       allChats,
       query,
       filter,
+      selectedTagIds,
+      chatTagAssignments,
     ]);
 
   /* =========================================================
@@ -1275,17 +1701,20 @@ export default function ChatScreen() {
          *
          * This matches chat/[id].tsx.
          */
-        const messages = selectedRecipients.map(
-          (recipientId) => ({
-            conversation_id: `direct:${recipientId}`,
-            sender_id: user.id,
-            content: streakMessage,
-          }),
-        );
-
-        const { error: sendError } = await supabase
-          .from('social_messages')
-          .insert(messages);
+        let sendError: any = null;
+        for (const recipientId of selectedRecipients) {
+          const { id: conversationId, error: conversationError } =
+            await ensureDirectConversation(user.id, recipientId);
+          if (conversationError || !conversationId) {
+            sendError = conversationError || new Error('Could not open direct conversation.');
+            break;
+          }
+          const result = await sendChatMessage(conversationId, user.id, streakMessage);
+          if (result.error) {
+            sendError = result.error;
+            break;
+          }
+        }
 
         if (sendError) {
           console.error(
@@ -1722,7 +2151,7 @@ export default function ChatScreen() {
      OPEN NORMAL CHAT
   ========================================================= */
 
-  const openChat = (
+  const openChat = async (
     chat: ChatItem,
   ) => {
     if (flexMode) {
@@ -1741,22 +2170,45 @@ export default function ChatScreen() {
       return;
     }
 
+    const sourceFilter = filter ?? 'All';
+
+    if (chat.category === 'groups') {
+      const groupId = chat.id.replace(/^group-/, '');
+      if (myUserId) {
+        const groupConversation = await ensureGroupConversation(groupId, myUserId);
+        if (groupConversation.id) {
+          const readNow = new Date().toISOString();
+          setReadChatAt((previous) => ({ ...previous, [groupConversation.id!]: readNow }));
+          void markConversationRead(groupConversation.id, myUserId);
+        }
+      }
+    } else if (chat.category === 'direct' && chat.profileId && myUserId) {
+      const { id: conversationKey } = await ensureDirectConversation(myUserId, chat.profileId);
+      if (conversationKey) {
+        const readNow = new Date().toISOString();
+        setReadChatAt((previous) => ({ ...previous, [conversationKey]: readNow }));
+        void markConversationRead(conversationKey, myUserId);
+      }
+    }
+
     if (
       chat.category ===
         'direct' &&
       chat.profileId
     ) {
       router.push(
-        `/chat/${chat.profileId}` as never,
+        { pathname: `/chat/${chat.profileId}`, params: { from: sourceFilter } } as never,
       );
 
       return;
     }
 
     if (chat.route) {
-      router.push(
-        chat.route as never,
-      );
+      if (chat.category === 'groups') {
+        router.push({ pathname: chat.route, params: { from: sourceFilter } } as never);
+      } else {
+        router.push(chat.route as never);
+      }
     }
   };
 
@@ -1767,6 +2219,7 @@ export default function ChatScreen() {
   const openCreateGroup = () => {
     setCreateGroupOpen(true);
     setNewGroupName('');
+    setNewGroupDescription('');
     setCreateGroupError(null);
   };
 
@@ -2092,8 +2545,10 @@ export default function ChatScreen() {
                 <Pressable
                   key={item}
                   onPress={() =>
-                    setFilter(
-                      item,
+                    setFilter((previous) =>
+                      previous === item
+                        ? null
+                        : item,
                     )
                   }
                   style={[
@@ -2132,6 +2587,84 @@ export default function ChatScreen() {
                 </Pressable>
               ),
             )}
+
+            {chatTags.map((tag) => {
+              const selected =
+                selectedTagIds.includes(tag.id);
+
+              return (
+                <Pressable
+                  key={tag.id}
+                  onPress={() =>
+                    toggleTagFilter(tag.id)
+                  }
+                  onLongPress={() => handleTagLongPress(tag)}
+                  style={[
+                    styles.filter,
+                    {
+                      backgroundColor:
+                        C.input,
+                      borderColor:
+                        C.inputBorder,
+                    },
+                    selected && {
+                      backgroundColor:
+                        accentForeground,
+                      borderColor:
+                        accentForeground,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.filterText,
+                      {
+                        color:
+                          C.muted,
+                      },
+                      selected && {
+                        color:
+                          '#FFFFFF',
+                      },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {tag.name}
+                  </Text>
+                </Pressable>
+              );
+            })}
+
+            <Pressable
+              onPress={openAddTag}
+              style={[
+                styles.filter,
+                styles.addTagFilter,
+                {
+                  borderColor:
+                    accentForeground,
+                  backgroundColor:
+                    C.input,
+                },
+              ]}
+            >
+              <Plus
+                color={accentForeground}
+                size={14}
+                strokeWidth={2.5}
+              />
+              <Text
+                style={[
+                  styles.filterText,
+                  {
+                    color:
+                      accentForeground,
+                  },
+                ]}
+              >
+                Add tag
+              </Text>
+            </Pressable>
           </ScrollView>
         </View>
       )}
@@ -2908,12 +3441,11 @@ export default function ChatScreen() {
                         }
                       </Text>
 
-                      {chat.unread ? (
+                      {chat.time && !chat.unread ? (
                         <CheckCheck
-                          color={
-                            accentForeground
-                          }
+                          color={accentForeground}
                           size={15}
+                          strokeWidth={2.2}
                         />
                       ) : null}
                     </View>
@@ -2970,8 +3502,8 @@ export default function ChatScreen() {
                   ]}
                 >
                   No conversations
-                  match that
-                  filter.
+                  match your
+                  filters.
                 </Text>
               )}
           </>
@@ -3080,6 +3612,294 @@ export default function ChatScreen() {
           </Pressable>
         </View>
       ) : null}
+
+      {/* =====================================================
+          ADD TAG MODAL
+      ===================================================== */}
+
+      <Modal
+        visible={showAddTagModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => { setShowAddTagModal(false); setEditingTagId(null); }}
+      >
+        <Pressable
+          style={styles.friendModalShade}
+          onPress={() =>
+            setShowAddTagModal(false)
+          }
+        />
+
+        <View
+          style={[
+            styles.friendSheet,
+            {
+              backgroundColor: C.card,
+            },
+          ]}
+        >
+          <View
+            style={styles.friendSheetHeader}
+          >
+            <Text
+              style={[
+                styles.friendSheetTitle,
+                {
+                  color: C.text,
+                },
+              ]}
+            >
+              {editingTagId ? 'Edit tag' : 'Add tag'}
+            </Text>
+
+            <Pressable
+              onPress={() =>
+                setShowAddTagModal(false)
+              }
+              hitSlop={12}
+            >
+              <X
+                color={C.muted}
+                size={22}
+              />
+            </Pressable>
+          </View>
+
+          <View
+            style={[
+              styles.search,
+              {
+                backgroundColor: C.input,
+                borderColor: C.inputBorder,
+              },
+            ]}
+          >
+            <TextInput
+              value={newTagName}
+              onChangeText={(text) => {
+                setNewTagName(text.slice(0, 20));
+                if (addTagError) {
+                  setAddTagError(null);
+                }
+              }}
+              placeholder="Tag name"
+              placeholderTextColor={C.muted}
+              style={[
+                styles.searchInput,
+                {
+                  color: C.text,
+                },
+              ]}
+              maxLength={20}
+              autoFocus
+              autoCapitalize="sentences"
+              autoCorrect={false}
+              onSubmitEditing={createChatTag}
+            />
+          </View>
+
+          <View
+            style={styles.tagCharacterRow}
+          >
+            <Text
+              style={[
+                styles.tagCharacterCount,
+                {
+                  color: C.muted,
+                },
+              ]}
+            >
+              {newTagName.length}/20
+            </Text>
+          </View>
+
+          {addTagError ? (
+            <Text style={styles.friendError}>
+              {addTagError}
+            </Text>
+          ) : null}
+
+          <Pressable
+            onPress={createChatTag}
+            disabled={addingTag || !newTagName.trim()}
+            style={[
+              styles.createGroupBtn,
+              {
+                backgroundColor: accentForeground,
+              },
+              (addingTag || !newTagName.trim()) && {
+                opacity: 0.5,
+              },
+            ]}
+          >
+            {addingTag ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.createGroupBtnText}>
+                {editingTagId ? 'Save changes' : 'Add tag'}
+              </Text>
+            )}
+
+          </Pressable>
+        </View>
+      </Modal>
+
+      {/* =====================================================
+          CHAT TAG ASSIGNMENT MODAL
+      ===================================================== */}
+
+      <Modal
+        visible={!!tagChat}
+        transparent
+        animationType="slide"
+        onRequestClose={closeTagChat}
+      >
+        <Pressable
+          style={styles.friendModalShade}
+          onPress={closeTagChat}
+        />
+
+        <View
+          style={[
+            styles.friendSheet,
+            {
+              backgroundColor: C.card,
+            },
+          ]}
+        >
+          <View
+            style={styles.friendSheetHeader}
+          >
+            <View style={{ flex: 1, marginRight: 12 }}>
+              <Text
+                style={[
+                  styles.friendSheetTitle,
+                  { color: C.text },
+                ]}
+                numberOfLines={1}
+              >
+                Tags
+              </Text>
+              {tagChat ? (
+                <Text
+                  style={[
+                    styles.tagModalSubtitle,
+                    { color: C.muted },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {tagChat.name}
+                </Text>
+              ) : null}
+            </View>
+
+            <Pressable
+              onPress={closeTagChat}
+              hitSlop={12}
+            >
+              <X
+                color={C.muted}
+                size={22}
+              />
+            </Pressable>
+          </View>
+
+          {chatTags.length === 0 ? (
+            <Text
+              style={[
+                styles.friendHint,
+                { color: C.muted },
+              ]}
+            >
+              You haven't created any tags yet.
+            </Text>
+          ) : (
+            <View>
+              {chatTags.map((tag) => {
+                const assigned =
+                  tagChat
+                    ? isChatTagged(tagChat, tag.id)
+                    : false;
+
+                return (
+                  <Pressable
+                    key={tag.id}
+                    onPress={() =>
+                      tagChat &&
+                      setChatTagAssignment(
+                        tagChat,
+                        tag,
+                        !assigned,
+                      )
+                    }
+                    style={[
+                      styles.tagAssignmentRow,
+                      {
+                        borderBottomColor: C.divider,
+                      },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.tagCheckbox,
+                        {
+                          borderColor: assigned
+                            ? accentForeground
+                            : C.inputBorder,
+                          backgroundColor: assigned
+                            ? accentForeground
+                            : 'transparent',
+                        },
+                      ]}
+                    >
+                      {assigned ? (
+                        <Check
+                          color="#FFFFFF"
+                          size={14}
+                          strokeWidth={2.5}
+                        />
+                      ) : null}
+                    </View>
+
+                    <Text
+                      style={[
+                        styles.tagAssignmentText,
+                        { color: C.text },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {tag.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+
+          {tagModalError ? (
+            <Text style={styles.friendError}>
+              {tagModalError}
+            </Text>
+          ) : null}
+
+          <Pressable
+            onPress={() => {
+              closeTagChat();
+              openAddTag();
+            }}
+            style={[
+              styles.createGroupBtn,
+              {
+                backgroundColor: accentForeground,
+              },
+            ]}
+          >
+            <Text style={styles.createGroupBtnText}>
+              + Create tag
+            </Text>
+          </Pressable>
+        </View>
+      </Modal>
 
       {/* =====================================================
           ADD GROUP FAB
@@ -3496,6 +4316,26 @@ export default function ChatScreen() {
             />
           </View>
 
+          <View
+            style={[
+              styles.search,
+              {
+                backgroundColor: C.input,
+                borderColor: C.inputBorder,
+              },
+            ]}
+          >
+            <TextInput
+              value={newGroupDescription}
+              onChangeText={setNewGroupDescription}
+              placeholder="Group description (optional)"
+              placeholderTextColor={C.muted}
+              style={[styles.searchInput, { color: C.text }]}
+              multiline
+              maxLength={200}
+            />
+          </View>
+
           {createGroupError ? (
             <Text
               style={
@@ -3552,16 +4392,16 @@ export default function ChatScreen() {
               },
             ]}
           >
-            You'll be the
-            admin. Invite
-            friends and add
-            subgroups once
-            it's created.
+            You'll be the admin. You can rename the group and edit its description after it is created.
           </Text>
         </View>
       </Modal>
     </SafeAreaView>
   );
+}
+
+function formatChatTime(value: string) {
+  return new Date(value).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
 /* =========================================================
@@ -3591,7 +4431,7 @@ const styles =
     },
 
     hero: {
-      paddingTop: 28,
+      paddingTop: 38,
       paddingBottom: 14,
     },
 
@@ -3658,6 +4498,51 @@ const styles =
       fontFamily:
         FONT_MED,
       fontSize: 12,
+    },
+
+    addTagFilter: {
+      flexDirection: 'row',
+      gap: 5,
+      paddingHorizontal: 13,
+    },
+
+    tagCharacterRow: {
+      alignItems: 'flex-end',
+      marginTop: 5,
+    },
+
+    tagCharacterCount: {
+      fontFamily: FONT,
+      fontSize: 10,
+    },
+
+    tagModalSubtitle: {
+      fontFamily: FONT,
+      fontSize: 11,
+      marginTop: 2,
+    },
+
+    tagAssignmentRow: {
+      minHeight: 48,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      borderBottomWidth: 1,
+    },
+
+    tagCheckbox: {
+      width: 22,
+      height: 22,
+      borderRadius: 7,
+      borderWidth: 1.5,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+
+    tagAssignmentText: {
+      flex: 1,
+      fontFamily: FONT_MED,
+      fontSize: 13,
     },
 
     chatScrollContent: {

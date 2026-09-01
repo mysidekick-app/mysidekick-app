@@ -1,55 +1,67 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import * as DocumentPicker from 'expo-document-picker';
 import { router, useLocalSearchParams } from 'expo-router';
+import { Audio } from 'expo-av';
 import {
-  Check,
   ChevronLeft,
-  Info,
-  MessageCircle,
-  Plus,
+  MoreVertical,
+  Paperclip,
+  Search,
   Send,
   Shield,
   UserPlus,
   X,
+  File,
+  Image as ImageIcon,
+  Mic,
+  Pause,
+  Play,
 } from 'lucide-react-native';
 import { useApp } from '@/components/AppProvider';
 import { supabase } from '@/lib/supabase';
+import { ensureGroupConversation, loadChatMessages, sendChatMessage } from '../chatHelpers';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type Group = { id: string; name: string };
-
-type Member = {
-  profile_id: string;
-  role: 'member' | 'admin';
-  display_name: string;
-  username: string;
-};
-
-type Subgroup = {
+type Group = {
   id: string;
   name: string;
-  isMember: boolean;
-  hasPendingRequest: boolean;
+  description: string;
 };
 
-type PendingRequest = {
+type Member = {
+  user_id: string;
+  profile_id: string;
+  role: 'member' | 'admin' | 'owner';
+  display_name: string;
+  username: string;
+  title?: string | null;
+  tag?: string | null;
+  profile_title?: string | null;
+};
+
+type Friend = {
   id: string;
-  subgroup_id: string;
-  subgroup_name: string;
-  requester_id: string;
-  requester_name: string;
+  display_name: string;
+  username: string;
+  title?: string | null;
+  tag?: string | null;
+  profile_title?: string | null;
 };
 
 type Message = {
@@ -58,238 +70,456 @@ type Message = {
   sender_id: string;
   content: string;
   created_at: string;
+  attachment_url?: string | null;
+  attachment_name?: string | null;
+  attachment_type?: string | null;
 };
+
+type MenuAction = 'clear' | 'delete' | 'exit' | 'edit';
 
 const FONT = 'Poppins-Regular';
 const FONT_MED = 'Poppins-Medium';
 const FONT_SEMI = 'Poppins-SemiBold';
 const FONT_BOLD = 'Poppins-Bold';
 
-// ─── Component ────────────────────────────────────────────────────────────────
+const ATTACHMENT_BUCKET = 'chat-attachments';
+
+// ─── Component ───────────────────────────────────────────────────────────────
 
 export default function GroupScreen() {
   const { id: groupId } = useLocalSearchParams<{ id: string }>();
   const { isDark, accentForeground, onAccent } = useApp();
 
   const colors = isDark
-    ? { bg: '#090909', card: '#151515', border: '#2A2A2A', text: '#F4F2EE', muted: '#AAA59D' }
-    : { bg: '#FBFAF8', card: '#FFF', border: '#ECE9E4', text: '#27241F', muted: '#8F8A82' };
+    ? {
+        bg: '#090909',
+        card: '#151515',
+        border: '#2A2A2A',
+        text: '#F4F2EE',
+        muted: '#AAA59D',
+        input: '#1B1B1B',
+        danger: '#E06B6B',
+        overlay: 'rgba(0,0,0,0.65)',
+      }
+    : {
+        bg: '#FBFAF8',
+        card: '#FFFFFF',
+        border: '#ECE9E4',
+        text: '#27241F',
+        muted: '#8F8A82',
+        input: '#F7F5F1',
+        danger: '#C84D4D',
+        overlay: 'rgba(0,0,0,0.45)',
+      };
 
-  const conversationId = `group:${groupId}`;
+  const [conversationId, setConversationId] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const recordingRef = useRef<Audio.Recording | null>(null);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const soundRef = useRef<Audio.Sound | null>(null);
+  const [editingGroup, setEditingGroup] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+
+  // ── Main state ────────────────────────────────────────────────────────────
 
   const [myId, setMyId] = useState<string | null>(null);
   const [view, setView] = useState<'chat' | 'info'>('chat');
 
   const [group, setGroup] = useState<Group | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
-  const [subgroups, setSubgroups] = useState<Subgroup[]>([]);
-  const [pendingRequests, setPendingRequests] = useState<PendingRequest[]>([]);
+  const [friends, setFriends] = useState<Friend[]>([]);
+
   const [infoLoading, setInfoLoading] = useState(true);
+  const [messagesLoading, setMessagesLoading] = useState(true);
 
-  const [newSubgroupName, setNewSubgroupName] = useState('');
-  const [creatingSubgroup, setCreatingSubgroup] = useState(false);
-  const [subgroupActionId, setSubgroupActionId] = useState<string | null>(null);
-  const [memberActionId, setMemberActionId] = useState<string | null>(null);
+  // ── Menu ─────────────────────────────────────────────────────────────────
 
-  const [friends, setFriends] = useState<{ id: string; display_name: string; username: string }[]>([]);
-  const [pendingInviteIds, setPendingInviteIds] = useState<Set<string>>(new Set());
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // ── Invite state ──────────────────────────────────────────────────────────
+
+  const [pendingInviteIds, setPendingInviteIds] = useState<Set<string>>(
+    new Set(),
+  );
   const [inviteSearch, setInviteSearch] = useState('');
   const [invitingId, setInvitingId] = useState<string | null>(null);
 
+  // ── Messages ──────────────────────────────────────────────────────────────
+
   const [messages, setMessages] = useState<Message[]>([]);
-  const [messagesLoading, setMessagesLoading] = useState(true);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+
+  const [selectedAttachment, setSelectedAttachment] = useState<{
+    uri: string;
+    name: string;
+    mimeType: string;
+    size?: number;
+  } | null>(null);
+
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+
   const listRef = useRef<FlatList<Message>>(null);
 
   const myRole = members.find((m) => m.profile_id === myId)?.role;
-  const isAdmin = myRole === 'admin';
+  const isAdmin = myRole === 'admin' || myRole === 'owner';
+  const MAX_MEMBERS = 100;
 
-  /* ── Loaders ────────────────────────────────────────────────────────── */
+  // ── Load group ────────────────────────────────────────────────────────────
 
   const loadGroup = useCallback(async () => {
-    const { data } = await supabase
-      .from('social_groups')
-      .select('id, name')
+    if (!groupId) return;
+
+    const { data, error } = await supabase
+      .from('chat_groups')
+      .select('id, name, description')
       .eq('id', groupId)
       .maybeSingle();
-    setGroup(data as Group | null);
+
+    if (error) {
+      console.error('LOAD GROUP ERROR:', error);
+      return;
+    }
+
+    setGroup(
+      data
+        ? {
+            id: data.id,
+            name: data.name ?? 'Group',
+            description: data.description ?? '',
+          }
+        : null,
+    );
   }, [groupId]);
 
+  // ── Load members ──────────────────────────────────────────────────────────
+
   const loadMembers = useCallback(async () => {
-    const { data: memberRows } = await supabase
-      .from('social_group_members')
-      .select('profile_id, role')
+    if (!groupId) return;
+
+    const { data: memberRows, error: memberError } = await supabase
+      .from('chat_group_members')
+      .select('user_id, role')
       .eq('group_id', groupId);
 
-    const ids = (memberRows ?? []).map((r) => r.profile_id);
-    if (!ids.length) { setMembers([]); return; }
+    if (memberError) {
+      console.error('LOAD GROUP MEMBERS ERROR:', memberError);
+      setMembers([]);
+      return;
+    }
 
-    const { data: profileRows } = await supabase
+    const ids = (memberRows ?? []).map((r) => r.user_id);
+
+    if (!ids.length) {
+      setMembers([]);
+      return;
+    }
+
+    const { data: profileRows, error: profileError } = await supabase
       .from('social_profiles')
-      .select('user_id, display_name, username')
+      .select('*')
       .in('user_id', ids);
 
-    const nameById = new Map(
-      (profileRows ?? []).map((p) => [p.user_id, { display_name: p.display_name, username: p.username }])
+    if (profileError) {
+      console.error('LOAD GROUP MEMBER PROFILES ERROR:', profileError);
+      setMembers([]);
+      return;
+    }
+
+    const profileMap = new Map(
+      (profileRows ?? []).map((p: any) => [
+        p.user_id,
+        {
+          display_name: p.display_name ?? 'Member',
+          username: p.username ?? '',
+          title: p.title ?? null,
+          tag: p.tag ?? null,
+          profile_title: p.profile_title ?? null,
+        },
+      ]),
     );
 
     setMembers(
       (memberRows ?? []).map((r) => ({
-        profile_id: r.profile_id,
+        user_id: r.user_id,
+        profile_id: r.user_id,
         role: r.role,
-        display_name: nameById.get(r.profile_id)?.display_name ?? 'Member',
-        username: nameById.get(r.profile_id)?.username ?? '',
-      }))
+        display_name:
+          profileMap.get(r.user_id)?.display_name ?? 'Member',
+        username: profileMap.get(r.user_id)?.username ?? '',
+        title: profileMap.get(r.user_id)?.title ?? null,
+        tag: profileMap.get(r.user_id)?.tag ?? null,
+        profile_title: profileMap.get(r.user_id)?.profile_title ?? null,
+      })),
     );
   }, [groupId]);
 
-  const loadSubgroups = useCallback(async () => {
-    if (!myId) return;
-    const { data: subgroupRows } = await supabase
-      .from('social_subgroups')
-      .select('id, name')
-      .eq('group_id', groupId)
-      .order('created_at', { ascending: true });
-
-    const subgroupIds = (subgroupRows ?? []).map((s) => s.id);
-    if (!subgroupIds.length) { setSubgroups([]); return; }
-
-    const { data: myMemberships } = await supabase
-      .from('social_subgroup_members')
-      .select('subgroup_id')
-      .eq('profile_id', myId)
-      .in('subgroup_id', subgroupIds);
-
-    const { data: myPending } = await supabase
-      .from('social_subgroup_join_requests')
-      .select('subgroup_id')
-      .eq('requester_id', myId)
-      .eq('status', 'pending')
-      .in('subgroup_id', subgroupIds);
-
-    const memberSet = new Set((myMemberships ?? []).map((m) => m.subgroup_id));
-    const pendingSet = new Set((myPending ?? []).map((p) => p.subgroup_id));
-
-    setSubgroups(
-      (subgroupRows ?? []).map((s) => ({
-        id: s.id,
-        name: s.name,
-        isMember: memberSet.has(s.id),
-        hasPendingRequest: pendingSet.has(s.id),
-      }))
-    );
-  }, [groupId, myId]);
-
-  const loadPendingRequests = useCallback(async () => {
-    if (!isAdmin) { setPendingRequests([]); return; }
-
-    const { data: subgroupRows } = await supabase
-      .from('social_subgroups')
-      .select('id, name')
-      .eq('group_id', groupId);
-
-    const subgroupIds = (subgroupRows ?? []).map((s) => s.id);
-    if (!subgroupIds.length) { setPendingRequests([]); return; }
-
-    const subgroupNameById = new Map((subgroupRows ?? []).map((s) => [s.id, s.name]));
-
-    const { data: requestRows } = await supabase
-      .from('social_subgroup_join_requests')
-      .select('id, subgroup_id, requester_id')
-      .in('subgroup_id', subgroupIds)
-      .eq('status', 'pending');
-
-    const requesterIds = (requestRows ?? []).map((r) => r.requester_id);
-    if (!requesterIds.length) { setPendingRequests([]); return; }
-
-    const { data: profileRows } = await supabase
-      .from('social_profiles')
-      .select('user_id, display_name')
-      .in('user_id', requesterIds);
-
-    const nameById = new Map((profileRows ?? []).map((p) => [p.user_id, p.display_name]));
-
-    setPendingRequests(
-      (requestRows ?? []).map((r) => ({
-        id: r.id,
-        subgroup_id: r.subgroup_id,
-        subgroup_name: subgroupNameById.get(r.subgroup_id) ?? 'Subgroup',
-        requester_id: r.requester_id,
-        requester_name: nameById.get(r.requester_id) ?? 'Member',
-      }))
-    );
-  }, [groupId, isAdmin]);
-
-  const loadMessages = useCallback(async () => {
-    setMessagesLoading(true);
-    const { data } = await supabase
-      .from('social_messages')
-      .select('id, conversation_id, sender_id, content, created_at')
-      .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: true });
-    setMessages((data ?? []) as Message[]);
-    setMessagesLoading(false);
-    setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 60);
-  }, [conversationId]);
+  // ── Load friends ──────────────────────────────────────────────────────────
 
   const loadFriends = useCallback(async () => {
     if (!myId) return;
-    const { data: friendRows } = await supabase
+
+    const { data: friendshipRows, error: friendshipError } = await supabase
       .from('friendships')
       .select('user_id, friend_user_id')
       .or(`user_id.eq.${myId},friend_user_id.eq.${myId}`);
 
-    const friendIds = [...new Set((friendRows ?? []).map((r) =>
-      r.user_id === myId ? r.friend_user_id : r.user_id
-    ))];
-    if (!friendIds.length) { setFriends([]); return; }
+    if (friendshipError) {
+      console.error('LOAD FRIENDSHIPS ERROR:', friendshipError);
+      setFriends([]);
+      return;
+    }
 
-    const { data: profileRows } = await supabase
+    const friendIds = [
+      ...new Set(
+        (friendshipRows ?? []).map((r) =>
+          r.user_id === myId ? r.friend_user_id : r.user_id,
+        ),
+      ),
+    ];
+
+    if (!friendIds.length) {
+      setFriends([]);
+      return;
+    }
+
+    const { data: profileRows, error: profileError } = await supabase
       .from('social_profiles')
-      .select('user_id, display_name, username')
+      .select('*')
       .in('user_id', friendIds);
+
+    if (profileError) {
+      console.error('LOAD FRIEND PROFILES ERROR:', profileError);
+      setFriends([]);
+      return;
+    }
 
     setFriends(
       (profileRows ?? []).map((p) => ({
         id: p.user_id,
         display_name: p.display_name ?? 'Friend',
         username: p.username ?? '',
-      }))
+        title: p.title ?? null,
+        tag: p.tag ?? null,
+        profile_title: p.profile_title ?? null,
+      })),
     );
   }, [myId]);
 
+  // ── Load pending group invites ────────────────────────────────────────────
+
   const loadPendingInvites = useCallback(async () => {
-    const { data } = await supabase
-      .from('social_group_invites')
+    if (!groupId) return;
+
+    const { data, error } = await supabase
+      .from('chat_group_invitations')
       .select('invitee_id')
       .eq('group_id', groupId)
       .eq('status', 'pending');
-    setPendingInviteIds(new Set((data ?? []).map((r) => r.invitee_id)));
+
+    if (error) {
+      console.error('LOAD GROUP INVITES ERROR:', error);
+      return;
+    }
+
+    setPendingInviteIds(
+      new Set((data ?? []).map((row) => row.invitee_id)),
+    );
   }, [groupId]);
 
+  // ── Load messages ─────────────────────────────────────────────────────────
+  const loadMessages = useCallback(async () => {
+    if (!conversationId) { setMessages([]); setMessagesLoading(false); return; }
+    setMessagesLoading(true);
+    const result = await loadChatMessages(conversationId);
+    if (result.error) {
+      console.error('LOAD GROUP MESSAGES ERROR:', result.error);
+      setMessages([]);
+    } else {
+      setMessages(result.messages as Message[]);
+    }
+    setMessagesLoading(false);
+    setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 80);
+  }, [conversationId]);
+
+  // ── Initial loading ───────────────────────────────────────────────────────
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => setMyId(user?.id ?? null));
-    loadGroup();
-    loadMessages();
-  }, [loadGroup, loadMessages]);
+    let mounted = true;
+    const initialize = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!mounted || !user || !groupId) return;
+      setMyId(user.id);
+      await loadGroup();
+      const result = await ensureGroupConversation(groupId, user.id);
+      if (!mounted) return;
+      if (result.error || !result.id) {
+        console.error('ENSURE GROUP CONVERSATION ERROR:', result.error);
+      } else {
+        setConversationId(result.id);
+      }
+    };
+    void initialize();
+    return () => { mounted = false; };
+  }, [groupId, loadGroup]);
+
+  useEffect(() => {
+    if (conversationId) void loadMessages();
+  }, [conversationId, loadMessages]);
 
   useEffect(() => {
     if (!myId) return;
+
     setInfoLoading(true);
-    Promise.all([loadMembers(), loadSubgroups(), loadFriends(), loadPendingInvites()]).finally(() =>
-      setInfoLoading(false)
+
+    Promise.all([
+      loadMembers(),
+      loadFriends(),
+      loadPendingInvites(),
+    ]).finally(() => {
+      setInfoLoading(false);
+    });
+  }, [myId, loadMembers, loadFriends, loadPendingInvites]);
+
+  // ── Filtered friends ──────────────────────────────────────────────────────
+
+  const invitableFriends = useMemo(() => {
+    const memberIds = new Set(members.map((m) => m.profile_id));
+    const query = inviteSearch.trim().toLowerCase();
+
+    return friends.filter((friend) => {
+      if (memberIds.has(friend.id)) return false;
+
+      if (!query) return true;
+
+      return (
+        friend.display_name.toLowerCase().includes(query) ||
+        friend.username.toLowerCase().includes(query)
+      );
+    });
+  }, [friends, members, inviteSearch]);
+
+  // ── Invite friend ─────────────────────────────────────────────────────────
+
+  const handleInviteFriend = async (friendId: string) => {
+    if (!myId || !groupId || invitingId === friendId || !isAdmin) return;
+    if (members.length >= MAX_MEMBERS) { Alert.alert('Group is full', 'A group can have up to 100 members.'); return; }
+
+    setInvitingId(friendId);
+
+    const { error } = await supabase
+      .from('chat_group_invitations')
+      .insert({
+        group_id: groupId,
+        inviter_id: myId,
+        invitee_id: friendId,
+        status: 'pending',
+      });
+
+    if (error) {
+      console.error('INVITE FRIEND ERROR:', error);
+
+      Alert.alert(
+        'Could not invite friend',
+        error.message || 'Please try again.',
+      );
+    } else {
+      setPendingInviteIds((previous) => {
+        const next = new Set(previous);
+        next.add(friendId);
+        return next;
+      });
+    }
+
+    setInvitingId(null);
+  };
+
+  // ── Promote member ────────────────────────────────────────────────────────
+
+  const handlePromote = async (profileId: string) => {
+    if (!isAdmin || profileId === myId) return;
+
+    Alert.alert(
+      'Make admin?',
+      'This member will become an admin of the group.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Make Admin',
+          onPress: async () => {
+            const { error } = await supabase
+              .from('chat_group_members')
+              .update({ role: 'admin' })
+              .eq('group_id', groupId)
+              .eq('user_id', profileId);
+
+            if (error) {
+              console.error('PROMOTE MEMBER ERROR:', error);
+
+              Alert.alert(
+                'Could not update member',
+                error.message || 'Please try again.',
+              );
+
+              return;
+            }
+
+            await loadMembers();
+          },
+        },
+      ],
     );
-  }, [myId, loadMembers, loadSubgroups, loadFriends, loadPendingInvites]);
+  };
 
-  useEffect(() => { loadPendingRequests(); }, [loadPendingRequests, members]);
+  const handleRemoveMember = (profileId: string, name: string) => {
+    if (!isAdmin || profileId === myId) return;
+    Alert.alert('Remove member?', `Remove ${name} from this group?`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Remove', style: 'destructive', onPress: async () => {
+        const { error } = await supabase.from('chat_group_members').delete().eq('group_id', groupId).eq('user_id', profileId);
+        if (error) Alert.alert('Could not remove member', error.message);
+        else await loadMembers();
+      } },
+    ]);
+  };
 
-  /* ── Actions ────────────────────────────────────────────────────────── */
+  const openEditGroup = () => {
+    if (!isAdmin || !group) return;
+    setEditName(group.name);
+    setEditDescription(group.description);
+    setEditingGroup(true);
+    setMenuOpen(false);
+  };
+
+  const saveGroupEdits = async () => {
+    const name = editName.trim();
+    if (!name) return;
+    const { error } = await supabase.from('chat_groups').update({ name, description: editDescription.trim(), updated_at: new Date().toISOString() }).eq('id', groupId);
+    if (error) { Alert.alert('Could not update group', error.message); return; }
+    await supabase.from('chat_channels').update({ name, description: editDescription.trim(), updated_at: new Date().toISOString() }).eq('group_id', groupId).eq('is_default', true);
+    setGroup({ id: groupId!, name, description: editDescription.trim() });
+    setEditingGroup(false);
+  };
 
   const handleSend = async () => {
     const text = draft.trim();
-    if (!text || sending || !myId) return;
+
+    if (
+      !text ||
+      sending ||
+      uploadingAttachment ||
+      !conversationId ||
+      !myId
+    ) {
+      return;
+    }
+
     setSending(true);
+
     const optimistic: Message = {
       id: `local-${Date.now()}`,
       conversation_id: conversationId,
@@ -297,376 +527,1817 @@ export default function GroupScreen() {
       content: text,
       created_at: new Date().toISOString(),
     };
-    setMessages((prev) => [...prev, optimistic]);
+
+    setMessages((previous) => [...previous, optimistic]);
     setDraft('');
-    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 60);
-    const { error } = await supabase.from('social_messages').insert({
-      conversation_id: conversationId,
-      sender_id: myId,
-      content: text,
-    });
-    if (error) {
-      setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
-    } else {
-      await loadMessages();
+
+    try {
+      const result = await sendChatMessage(
+        conversationId,
+        myId,
+        text,
+      );
+
+      if (result.error || !result.message) {
+        console.error(
+          'SEND GROUP MESSAGE ERROR:',
+          result.error,
+        );
+
+        setMessages((previous) =>
+          previous.filter(
+            (message) => message.id !== optimistic.id,
+          ),
+        );
+
+        Alert.alert(
+          'Message not sent',
+          result.error?.message ||
+            'Could not send the message.',
+        );
+      } else {
+        setMessages((previous) =>
+          previous.map((message) =>
+            message.id === optimistic.id
+              ? (result.message as Message)
+              : message,
+          ),
+        );
+      }
+    } catch (error: any) {
+      console.error(
+        'SEND GROUP MESSAGE ERROR:',
+        error,
+      );
+
+      setMessages((previous) =>
+        previous.filter(
+          (message) => message.id !== optimistic.id,
+        ),
+      );
+
+      Alert.alert(
+        'Message not sent',
+        error?.message ||
+          'Could not send the message.',
+      );
+    } finally {
+      setSending(false);
     }
-    setSending(false);
   };
 
-  const handleCreateSubgroup = async () => {
-    const name = newSubgroupName.trim();
-    if (!name || creatingSubgroup || !myId) return;
-    setCreatingSubgroup(true);
-    const { error } = await supabase.from('social_subgroups').insert({
-      group_id: groupId,
-      name,
-      created_by: myId,
-    });
-    setCreatingSubgroup(false);
-    if (!error) {
-      setNewSubgroupName('');
-      await loadSubgroups();
+  // ── Attachments + voice notes ─────────────────────────────────────────────
+  const uploadGroupAttachment = async (uri: string, name: string, mimeType: string) => {
+    if (!myId) return null;
+    try {
+      const response = await fetch(uri);
+      const arrayBuffer = await response.arrayBuffer();
+      const safeName = name.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const path = `${groupId}/${myId}/${Date.now()}-${safeName}`;
+      const { error } = await supabase.storage.from(ATTACHMENT_BUCKET).upload(path, arrayBuffer, { contentType: mimeType, upsert: false });
+      if (error) throw error;
+      return supabase.storage.from(ATTACHMENT_BUCKET).getPublicUrl(path).data.publicUrl;
+    } catch (error: any) {
+      Alert.alert('Attachment upload failed', error?.message || 'Could not upload the attachment.');
+      return null;
     }
   };
 
-  const handleRequestJoin = async (subgroupId: string) => {
-    if (!myId) return;
-    setSubgroupActionId(subgroupId);
-    await supabase.from('social_subgroup_join_requests').insert({
-      subgroup_id: subgroupId,
-      requester_id: myId,
-    });
-    await loadSubgroups();
-    setSubgroupActionId(null);
-  };
-
-  const handleApproveRequest = async (requestId: string) => {
-    setSubgroupActionId(requestId);
-    await supabase.rpc('approve_subgroup_join_request', { request_id: requestId });
-    await Promise.all([loadPendingRequests(), loadSubgroups()]);
-    setSubgroupActionId(null);
-  };
-
-  const handleRejectRequest = async (requestId: string) => {
-    setSubgroupActionId(requestId);
-    await supabase
-      .from('social_subgroup_join_requests')
-      .update({ status: 'rejected', decided_by: myId, decided_at: new Date().toISOString() })
-      .eq('id', requestId);
-    await loadPendingRequests();
-    setSubgroupActionId(null);
-  };
-
-  const handlePromote = async (profileId: string) => {
-    setMemberActionId(profileId);
-    await supabase
-      .from('social_group_members')
-      .update({ role: 'admin' })
-      .eq('group_id', groupId)
-      .eq('profile_id', profileId);
-    await loadMembers();
-    setMemberActionId(null);
-  };
-
-  const handleInviteFriend = async (friendId: string) => {
-    if (!myId) return;
-    setInvitingId(friendId);
-    const { error } = await supabase.from('social_group_invites').insert({
-      group_id: groupId,
-      inviter_id: myId,
-      invitee_id: friendId,
-      status: 'pending',
-    });
-    if (!error) {
-      setPendingInviteIds((prev) => new Set(prev).add(friendId));
+  const handlePickAttachment = async () => {
+    if (!conversationId || uploadingAttachment || !myId) return;
+    try {
+      const result = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true, multiple: false });
+      if (result.canceled || !result.assets?.length) return;
+      const file = result.assets[0];
+      const mime = file.mimeType || 'application/octet-stream';
+      const url = await uploadGroupAttachment(file.uri, file.name || `file-${Date.now()}`, mime);
+      if (!url) return;
+      setUploadingAttachment(true);
+      const sendResult = await sendChatMessage(conversationId, myId, mime.startsWith('image/') ? '📷 Photo' : mime.startsWith('video/') ? '🎬 Video' : mime.startsWith('audio/') ? '🎵 Audio' : `📄 ${file.name}`, { url, name: file.name || 'Attachment', type: mime });
+      setUploadingAttachment(false);
+      if (sendResult.error) Alert.alert('Message not sent', sendResult.error.message);
+      else if (sendResult.message) setMessages(prev => [...prev, sendResult.message as Message]);
+    } catch (error: any) {
+      setUploadingAttachment(false);
+      Alert.alert('Could not select attachment', error?.message || 'Please try again.');
     }
-    setInvitingId(null);
   };
 
-  /* ── Render ─────────────────────────────────────────────────────────── */
+  const startRecording = async () => {
+    if (!conversationId || !myId || isRecording) return;
+    const permission = await Audio.requestPermissionsAsync();
+    if (!permission.granted) { Alert.alert('Microphone permission', 'Microphone access is needed for voice notes.'); return; }
+    try {
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      recordingRef.current = recording;
+      setIsRecording(true); setRecordingSeconds(0);
+      recordingTimerRef.current = setInterval(() => setRecordingSeconds(s => s + 1), 1000);
+    } catch (error) { console.error('START GROUP RECORDING ERROR:', error); }
+  };
+
+  const cancelRecording = async () => {
+    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    recordingTimerRef.current = null;
+    setIsRecording(false); setRecordingSeconds(0);
+    try { await recordingRef.current?.stopAndUnloadAsync(); } catch {}
+    recordingRef.current = null;
+  };
+
+  const stopRecordingAndSend = async () => {
+    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    recordingTimerRef.current = null;
+    const recording = recordingRef.current;
+    recordingRef.current = null;
+    setIsRecording(false); setRecordingSeconds(0);
+    if (!recording || !conversationId || !myId) return;
+    try {
+      await recording.stopAndUnloadAsync();
+      const uri = recording.getURI();
+      if (!uri) return;
+      const fileName = `voice-${Date.now()}.m4a`;
+      const url = await uploadGroupAttachment(uri, fileName, 'audio/m4a');
+      if (!url) return;
+      const result = await sendChatMessage(conversationId, myId, '🎤 Voice message', { url, name: fileName, type: 'audio/m4a' });
+      if (result.error) Alert.alert('Voice note not sent', result.error.message);
+      else if (result.message) setMessages(prev => [...prev, result.message as Message]);
+    } catch (error) { console.error('SEND GROUP VOICE ERROR:', error); }
+  };
+
+  // ── Clear chat ────────────────────────────────────────────────────────────
+
+  const handleClearChat = () => {
+    setMenuOpen(false);
+
+    Alert.alert(
+      'Clear chat?',
+      'This will permanently delete all messages in this group chat.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Clear Chat',
+          style: 'destructive',
+          onPress: async () => {
+            const { error } = await supabase
+              .from('chat_messages')
+              .delete()
+              .eq('conversation_id', conversationId);
+
+            if (error) {
+              console.error('CLEAR GROUP CHAT ERROR:', error);
+
+              Alert.alert(
+                'Could not clear chat',
+                error.message || 'Please try again.',
+              );
+
+              return;
+            }
+
+            setMessages([]);
+          },
+        },
+      ],
+    );
+  };
+
+  // ── Delete group ──────────────────────────────────────────────────────────
+
+  const handleDeleteGroup = () => {
+    setMenuOpen(false);
+
+    if (!isAdmin) return;
+
+    Alert.alert(
+      'Delete group?',
+      'This will permanently delete the group, its members, invites and chat history. This cannot be undone.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Delete Group',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Delete messages first.
+              const { error: messageError } = await supabase
+                .from('chat_messages')
+                .delete()
+                .eq('conversation_id', conversationId);
+
+              if (messageError) {
+                throw messageError;
+              }
+
+              // Delete group invites.
+              const { error: inviteError } = await supabase
+                .from('chat_group_invitations')
+                .delete()
+                .eq('group_id', groupId);
+
+              if (inviteError) {
+                throw inviteError;
+              }
+
+              // Delete group memberships.
+              const { error: memberError } = await supabase
+                .from('chat_group_members')
+                .delete()
+                .eq('group_id', groupId);
+
+              if (memberError) {
+                throw memberError;
+              }
+
+              // Finally delete the group.
+              const { error: groupError } = await supabase
+                .from('chat_groups')
+                .delete()
+                .eq('id', groupId);
+
+              if (groupError) {
+                throw groupError;
+              }
+
+              router.replace('/chat' as never);
+            } catch (error: any) {
+              console.error('DELETE GROUP ERROR:', error);
+
+              Alert.alert(
+                'Could not delete group',
+                error?.message ||
+                  'The group could not be deleted. Please try again.',
+              );
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  // ── Exit group ────────────────────────────────────────────────────────────
+
+  const handleExitGroup = () => {
+    setMenuOpen(false);
+
+    Alert.alert(
+      'Exit group?',
+      'You will leave this group and will no longer receive its messages.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Exit Group',
+          style: 'destructive',
+          onPress: async () => {
+            if (!myId) return;
+
+            // If the user is the only admin, warn them before leaving.
+            const adminCount = members.filter(
+              (member) => member.role === 'admin',
+            ).length;
+
+            if (isAdmin && adminCount === 1 && members.length > 1) {
+              Alert.alert(
+                'You are the only admin',
+                'Please make another member an admin before leaving the group.',
+              );
+
+              return;
+            }
+
+            const { error } = await supabase
+              .from('chat_group_members')
+              .delete()
+              .eq('group_id', groupId)
+              .eq('user_id', myId);
+
+            if (error) {
+              console.error('EXIT GROUP ERROR:', error);
+
+              Alert.alert(
+                'Could not leave group',
+                error.message || 'Please try again.',
+              );
+
+              return;
+            }
+
+            router.replace('/chat' as never);
+          },
+        },
+      ],
+    );
+  };
+
+  // ── Menu action ───────────────────────────────────────────────────────────
+
+  const handleMenuAction = (action: MenuAction) => {
+    if (action === 'clear') {
+      handleClearChat();
+      return;
+    }
+
+    if (action === 'delete') {
+      handleDeleteGroup();
+      return;
+    }
+
+    if (action === 'exit') { handleExitGroup(); return; }
+    if (action === 'edit') { openEditGroup(); }
+  };
+
+  // ── Message renderer ──────────────────────────────────────────────────────
 
   const renderMessage = ({ item }: { item: Message }) => {
     const isMine = item.sender_id === myId;
-    const author = members.find((m) => m.profile_id === item.sender_id)?.display_name ?? 'Member';
+
+    const author =
+      members.find(
+        (member) => member.user_id === item.sender_id,
+      )?.display_name ?? 'Member';
+
+    const isImage =
+      item.attachment_type?.startsWith('image/') ?? false;
+
+    const hasAttachment = Boolean(item.attachment_url);
+
     return (
-      <View style={[styles.bubbleRow, isMine && styles.bubbleRowMine]}>
+      <View
+        style={[
+          styles.bubbleRow,
+          isMine && styles.bubbleRowMine,
+        ]}
+      >
         <View
           style={[
             styles.bubble,
-            { backgroundColor: colors.card, borderColor: colors.border },
-            isMine && { backgroundColor: accentForeground, borderBottomRightRadius: 6 },
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+            isMine && {
+              backgroundColor: accentForeground,
+              borderBottomRightRadius: 6,
+            },
           ]}
         >
-          {!isMine && <Text style={[styles.bubbleAuthor, { color: colors.muted }]}>{author}</Text>}
-          <Text style={[styles.bubbleText, { color: isMine ? onAccent : colors.text }]}>{item.content}</Text>
+          {!isMine && (
+            <Text
+              style={[
+                styles.bubbleAuthor,
+                { color: colors.muted },
+              ]}
+            >
+              {author}
+            </Text>
+          )}
+
+          {item.content ? (
+            <Text
+              style={[
+                styles.bubbleText,
+                {
+                  color: isMine
+                    ? onAccent
+                    : colors.text,
+                },
+              ]}
+            >
+              {item.content}
+            </Text>
+          ) : null}
+
+          {hasAttachment && (
+            <View
+              style={[
+                styles.attachmentMessage,
+                {
+                  borderTopColor: isMine
+                    ? 'rgba(255,255,255,0.25)'
+                    : colors.border,
+                },
+              ]}
+            >
+              {isImage ? (
+                <ImageIcon size={20} color={isMine ? onAccent : accentForeground} />
+              ) : item.attachment_type?.startsWith('audio/') ? (
+                <Mic size={20} color={isMine ? onAccent : accentForeground} />
+              ) : (
+                <File size={20} color={isMine ? onAccent : accentForeground} />
+              )}
+
+              <Text
+                numberOfLines={2}
+                style={[
+                  styles.attachmentName,
+                  {
+                    color: isMine
+                      ? onAccent
+                      : colors.text,
+                  },
+                ]}
+              >
+                {item.attachment_name ||
+                  'Attachment'}
+              </Text>
+            </View>
+          )}
+
+          <Text
+            style={[
+              styles.messageTime,
+              {
+                color: isMine
+                  ? 'rgba(255,255,255,0.72)'
+                  : colors.muted,
+              },
+            ]}
+          >
+            {formatTime(item.created_at)}
+          </Text>
         </View>
       </View>
     );
   };
 
-  return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: colors.bg }]}>
-      <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <Pressable onPress={() => router.back()} style={[styles.headerBack, { backgroundColor: accentForeground }]} hitSlop={10}>
-          <ChevronLeft color="#FFFFFF" size={22} strokeWidth={2.4} />
-        </Pressable>
-        <Text style={[styles.headerTitle, { color: accentForeground }]} numberOfLines={1}>
+  // ── Header ────────────────────────────────────────────────────────────────
+
+  const renderHeader = () => (
+    <View
+      style={[
+        styles.header,
+        {
+          backgroundColor: colors.bg,
+          borderBottomColor: colors.border,
+        },
+      ]}
+    >
+      <Pressable
+        onPress={() => router.replace('/chat' as never)}
+        style={styles.headerSide}
+        hitSlop={10}
+      >
+        <ChevronLeft
+          color={colors.text}
+          size={24}
+          strokeWidth={2.2}
+        />
+      </Pressable>
+
+      <Pressable
+        onPress={() => {
+          setMenuOpen(false);
+          setView('info');
+        }}
+        style={styles.headerTitleButton}
+        hitSlop={6}
+      >
+        <Text
+          style={[
+            styles.headerTitle,
+            { color: accentForeground },
+          ]}
+          numberOfLines={1}
+        >
           {group?.name ?? 'Group'}
         </Text>
-        <Pressable
-          onPress={() => setView((v) => (v === 'chat' ? 'info' : 'chat'))}
-          style={styles.headerToggle}
-          hitSlop={10}
-        >
-          {view === 'chat' ? (
-            <Info color={colors.text} size={22} />
-          ) : (
-            <MessageCircle color={colors.text} size={22} />
-          )}
-        </Pressable>
-      </View>
 
-      {view === 'chat' ? (
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          {messagesLoading ? (
-            <View style={styles.centerState}>
-              <ActivityIndicator color={accentForeground} />
-            </View>
-          ) : (
-            <FlatList
-              ref={listRef}
-              data={messages}
-              keyExtractor={(m) => m.id}
-              renderItem={renderMessage}
-              contentContainerStyle={styles.messageList}
-              onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
-            />
-          )}
-          <View style={[styles.composer, { borderTopColor: colors.border, backgroundColor: colors.bg }]}>
-            <TextInput
-              value={draft}
-              onChangeText={setDraft}
-              placeholder="Message the group..."
-              placeholderTextColor={colors.muted}
-              style={[styles.composerInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]}
-              multiline
-            />
-            <Pressable
-              onPress={handleSend}
-              disabled={sending || !draft.trim()}
-              style={[styles.sendBtn, { backgroundColor: accentForeground }, (sending || !draft.trim()) && { opacity: 0.5 }]}
-            >
-              <Send color="#FFFFFF" size={18} />
+        <Text
+          style={[
+            styles.headerSubtitle,
+            { color: colors.muted },
+          ]}
+        >
+          {members.length} {members.length === 1 ? 'member' : 'members'}
+        </Text>
+      </Pressable>
+
+      <Pressable
+        onPress={() => setMenuOpen((previous) => !previous)}
+        style={styles.headerSide}
+        hitSlop={10}
+      >
+        <MoreVertical
+          color={colors.text}
+          size={22}
+        />
+      </Pressable>
+
+      {menuOpen && (
+        <View
+          style={[
+            styles.menu,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          {isAdmin && (
+            <Pressable onPress={() => handleMenuAction('edit')} style={styles.menuItem}>
+              <Text style={[styles.menuText, { color: colors.text }]}>Edit group</Text>
             </Pressable>
+          )}
+
+          <Pressable
+            onPress={() => handleMenuAction('clear')}
+            style={styles.menuItem}
+          >
+            <Text
+              style={[
+                styles.menuText,
+                { color: colors.text },
+              ]}
+            >
+              Clear chat
+            </Text>
+          </Pressable>
+
+          {isAdmin && (
+            <Pressable
+              onPress={() => handleMenuAction('delete')}
+              style={styles.menuItem}
+            >
+              <Text
+                style={[
+                  styles.menuText,
+                  { color: colors.danger },
+                ]}
+              >
+                Delete group
+              </Text>
+            </Pressable>
+          )}
+
+          <Pressable
+            onPress={() => handleMenuAction('exit')}
+            style={styles.menuItem}
+          >
+            <Text
+              style={[
+                styles.menuText,
+                { color: colors.danger },
+              ]}
+            >
+              Exit group
+            </Text>
+          </Pressable>
+        </View>
+      )}
+    </View>
+  );
+
+  // ── Info screen ───────────────────────────────────────────────────────────
+
+  const renderInfo = () => {
+    const firstFiveFriends = invitableFriends.slice(0, 5);
+    const remainingFriends = invitableFriends.slice(5);
+
+    return (
+      <View style={styles.infoContainer}>
+        <View
+          style={[
+            styles.infoHeader,
+            { borderBottomColor: colors.border },
+          ]}
+        >
+          <Pressable
+            onPress={() => setView('chat')}
+            style={styles.infoBack}
+            hitSlop={10}
+          >
+            <ChevronLeft
+              color={colors.text}
+              size={24}
+            />
+          </Pressable>
+
+          <Text
+            style={[
+              styles.infoTitle,
+              { color: colors.text },
+            ]}
+          >
+            Group Info
+          </Text>
+
+          <View style={styles.infoBack} />
+        </View>
+
+        {infoLoading ? (
+          <View style={styles.centerState}>
+            <ActivityIndicator
+              color={accentForeground}
+            />
           </View>
-        </KeyboardAvoidingView>
-      ) : (
-        <FlatList
-          data={[{ key: 'info' }]}
-          keyExtractor={(i) => i.key}
-          renderItem={() => (
-            <View style={styles.infoBody}>
-              {infoLoading ? (
-                <ActivityIndicator color={accentForeground} style={{ marginTop: 24 }} />
+        ) : (
+          <ScrollView
+            style={styles.infoScroll}
+            contentContainerStyle={styles.infoBody}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            {/* Group name + description */}
+
+            <View style={styles.groupIntro}>
+              <View
+                style={[
+                  styles.groupAvatar,
+                  {
+                    backgroundColor:
+                      accentForeground,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.groupAvatarText,
+                    { color: onAccent },
+                  ]}
+                >
+                  {(group?.name || 'G')
+                    .slice(0, 1)
+                    .toUpperCase()}
+                </Text>
+              </View>
+
+              <Text
+                style={[
+                  styles.groupInfoName,
+                  { color: colors.text },
+                ]}
+              >
+                {group?.name ?? 'Group'}
+              </Text>
+
+              {group?.description ? (
+                <Text
+                  style={[
+                    styles.groupDescription,
+                    { color: colors.muted },
+                  ]}
+                >
+                  {group.description}
+                </Text>
+              ) : (
+                <Text
+                  style={[
+                    styles.groupDescriptionEmpty,
+                    { color: colors.muted },
+                  ]}
+                >
+                  No group description yet.
+                </Text>
+              )}
+            </View>
+
+            {/* Invite friends */}
+
+            <View style={styles.section}>
+              <Text
+                style={[
+                  styles.sectionLabel,
+                  { color: colors.muted },
+                ]}
+              >
+                INVITE FRIENDS
+              </Text>
+
+              <View
+                style={[
+                  styles.searchBox,
+                  {
+                    backgroundColor: colors.input,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <Search
+                  color={colors.muted}
+                  size={18}
+                />
+
+                <TextInput
+                  value={inviteSearch}
+                  onChangeText={setInviteSearch}
+                  placeholder="Search friends..."
+                  placeholderTextColor={colors.muted}
+                  style={[
+                    styles.searchInput,
+                    { color: colors.text },
+                  ]}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
+
+              {!friends.length ? (
+                <Text
+                  style={[
+                    styles.emptyText,
+                    { color: colors.muted },
+                  ]}
+                >
+                  You don't have any friends to invite yet.
+                </Text>
+              ) : !invitableFriends.length ? (
+                <Text
+                  style={[
+                    styles.emptyText,
+                    { color: colors.muted },
+                  ]}
+                >
+                  No friends match your search.
+                </Text>
               ) : (
                 <>
-                  {/* ── Pending requests (admin only) ── */}
-                  {isAdmin && pendingRequests.length > 0 && (
-                    <View style={styles.section}>
-                      <Text style={[styles.sectionLabel, { color: colors.muted }]}>PENDING REQUESTS</Text>
-                      {pendingRequests.map((r) => (
-                        <View key={r.id} style={[styles.requestRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                          <View style={{ flex: 1 }}>
-                            <Text style={[styles.rowTitle, { color: colors.text }]}>{r.requester_name}</Text>
-                            <Text style={[styles.rowSub, { color: colors.muted }]}>wants to join {r.subgroup_name}</Text>
-                          </View>
-                          <Pressable
-                            onPress={() => handleApproveRequest(r.id)}
-                            disabled={subgroupActionId === r.id}
-                            style={[styles.iconBtn, { backgroundColor: accentForeground }]}
-                          >
-                            <Check color="#FFFFFF" size={16} />
-                          </Pressable>
-                          <Pressable
-                            onPress={() => handleRejectRequest(r.id)}
-                            disabled={subgroupActionId === r.id}
-                            style={[styles.iconBtn, { backgroundColor: colors.border }]}
-                          >
-                            <X color={colors.text} size={16} />
-                          </Pressable>
-                        </View>
-                      ))}
+                  {firstFiveFriends.map(renderFriendRow)}
+
+                  {remainingFriends.length > 0 && (
+                    <View
+                      style={[
+                        styles.friendOverflow,
+                        {
+                          borderColor: colors.border,
+                          backgroundColor: colors.bg,
+                        },
+                      ]}
+                    >
+                      <ScrollView
+                        nestedScrollEnabled
+                        showsVerticalScrollIndicator
+                        style={styles.friendOverflowScroll}
+                      >
+                        {remainingFriends.map(
+                          renderFriendRow,
+                        )}
+                      </ScrollView>
                     </View>
                   )}
-
-                  {/* ── Subgroups ── */}
-                  <View style={styles.section}>
-                    <Text style={[styles.sectionLabel, { color: colors.muted }]}>SUBGROUPS</Text>
-                    {subgroups.length === 0 && (
-                      <Text style={[styles.emptyText, { color: colors.muted }]}>No subgroups yet.</Text>
-                    )}
-                    {subgroups.map((s) => (
-                      <View key={s.id} style={[styles.requestRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                        <Text style={[styles.rowTitle, { color: colors.text, flex: 1 }]}>{s.name}</Text>
-                        {s.isMember ? (
-                          <View style={[styles.pill, { borderColor: accentForeground }]}>
-                            <Text style={[styles.pillText, { color: accentForeground }]}>Joined</Text>
-                          </View>
-                        ) : s.hasPendingRequest ? (
-                          <View style={[styles.pill, { borderColor: colors.border }]}>
-                            <Text style={[styles.pillText, { color: colors.muted }]}>Pending</Text>
-                          </View>
-                        ) : (
-                          <Pressable
-                            onPress={() => handleRequestJoin(s.id)}
-                            disabled={subgroupActionId === s.id}
-                            style={[styles.smallBtn, { borderColor: accentForeground }]}
-                          >
-                            <Text style={[styles.smallBtnText, { color: accentForeground }]}>Request to Join</Text>
-                          </Pressable>
-                        )}
-                      </View>
-                    ))}
-
-                    <View style={[styles.newSubgroupRow, { borderColor: colors.border }]}>
-                      <TextInput
-                        value={newSubgroupName}
-                        onChangeText={setNewSubgroupName}
-                        placeholder="New subgroup name"
-                        placeholderTextColor={colors.muted}
-                        style={[styles.newSubgroupInput, { color: colors.text }]}
-                        onSubmitEditing={handleCreateSubgroup}
-                      />
-                      <Pressable
-                        onPress={handleCreateSubgroup}
-                        disabled={creatingSubgroup || !newSubgroupName.trim()}
-                        style={[styles.iconBtn, { backgroundColor: accentForeground }, (creatingSubgroup || !newSubgroupName.trim()) && { opacity: 0.5 }]}
-                      >
-                        <Plus color="#FFFFFF" size={16} />
-                      </Pressable>
-                    </View>
-                  </View>
-
-                  {/* ── Invite Friends ── */}
-                  <View style={styles.section}>
-                    <Text style={[styles.sectionLabel, { color: colors.muted }]}>INVITE FRIENDS</Text>
-                    <View style={[styles.newSubgroupRow, { borderColor: colors.border }]}>
-                      <TextInput
-                        value={inviteSearch}
-                        onChangeText={setInviteSearch}
-                        placeholder="Search friends by name..."
-                        placeholderTextColor={colors.muted}
-                        style={[styles.newSubgroupInput, { color: colors.text }]}
-                        autoCapitalize="none"
-                      />
-                    </View>
-                    {(() => {
-                      const memberIds = new Set(members.map((m) => m.profile_id));
-                      const invitable = friends.filter(
-                        (f) =>
-                          !memberIds.has(f.id) &&
-                          f.display_name.toLowerCase().includes(inviteSearch.trim().toLowerCase())
-                      );
-                      if (!friends.length) {
-                        return <Text style={[styles.emptyText, { color: colors.muted }]}>No friends to invite yet.</Text>;
-                      }
-                      if (!invitable.length) {
-                        return <Text style={[styles.emptyText, { color: colors.muted }]}>No matches.</Text>;
-                      }
-                      return invitable.map((f) => {
-                        const alreadyInvited = pendingInviteIds.has(f.id);
-                        return (
-                          <View key={f.id} style={[styles.requestRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                            <View style={{ flex: 1 }}>
-                              <Text style={[styles.rowTitle, { color: colors.text }]}>{f.display_name}</Text>
-                              <Text style={[styles.rowSub, { color: colors.muted }]}>@{f.username}</Text>
-                            </View>
-                            {alreadyInvited ? (
-                              <View style={[styles.pill, { borderColor: colors.border }]}>
-                                <Text style={[styles.pillText, { color: colors.muted }]}>Invited</Text>
-                              </View>
-                            ) : (
-                              <Pressable
-                                onPress={() => handleInviteFriend(f.id)}
-                                disabled={invitingId === f.id}
-                                style={[styles.smallBtn, { borderColor: accentForeground, flexDirection: 'row', alignItems: 'center', gap: 4 }]}
-                              >
-                                <UserPlus color={accentForeground} size={14} />
-                                <Text style={[styles.smallBtnText, { color: accentForeground }]}>Invite</Text>
-                              </Pressable>
-                            )}
-                          </View>
-                        );
-                      });
-                    })()}
-                  </View>
-
-                  {/* ── Members ── */}
-                  <View style={styles.section}>
-                    <Text style={[styles.sectionLabel, { color: colors.muted }]}>MEMBERS · {members.length}</Text>
-                    {members.map((m) => (
-                      <View key={m.profile_id} style={[styles.requestRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                        <View style={{ flex: 1 }}>
-                          <Text style={[styles.rowTitle, { color: colors.text }]}>{m.display_name}</Text>
-                          <Text style={[styles.rowSub, { color: colors.muted }]}>@{m.username}</Text>
-                        </View>
-                        {m.role === 'admin' ? (
-                          <View style={[styles.pill, { borderColor: accentForeground }]}>
-                            <Shield color={accentForeground} size={12} />
-                            <Text style={[styles.pillText, { color: accentForeground }]}>Admin</Text>
-                          </View>
-                        ) : (
-                          isAdmin && (
-                            <Pressable
-                              onPress={() => handlePromote(m.profile_id)}
-                              disabled={memberActionId === m.profile_id}
-                              style={[styles.smallBtn, { borderColor: accentForeground }]}
-                            >
-                              <Text style={[styles.smallBtnText, { color: accentForeground }]}>Make Admin</Text>
-                            </Pressable>
-                          )
-                        )}
-                      </View>
-                    ))}
-                  </View>
                 </>
               )}
             </View>
+
+            {/* Members */}
+
+            <View style={styles.section}>
+              <Text
+                style={[
+                  styles.sectionLabel,
+                  { color: colors.muted },
+                ]}
+              >
+                MEMBERS · {members.length}
+              </Text>
+
+              {members.map((member) => (
+                <View
+                  key={member.user_id}
+                  style={[
+                    styles.memberRow,
+                    {
+                      backgroundColor: colors.card,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.memberAvatar,
+                      {
+                        backgroundColor:
+                          accentForeground,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.memberAvatarText,
+                        { color: onAccent },
+                      ]}
+                    >
+                      {(member.display_name || 'M')
+                        .slice(0, 1)
+                        .toUpperCase()}
+                    </Text>
+                  </View>
+
+                  <View style={styles.memberDetails}>
+                    <Text
+                      style={[
+                        styles.rowTitle,
+                        { color: colors.text },
+                      ]}
+                    >
+                      {member.display_name}
+                      {member.user_id === myId
+                        ? ' (You)'
+                        : ''}
+                    </Text>
+
+                    {!!member.username && (
+                      <Text style={[styles.rowSub, { color: colors.muted }]}>@{member.username}</Text>
+                    )}
+                    {(member as any).title || (member as any).tag || (member as any).profile_title ? (
+                      <Text style={[styles.rowSub, { color: accentForeground }]}>{(member as any).title || (member as any).tag || (member as any).profile_title}</Text>
+                    ) : null}
+                  </View>
+
+                  {member.role === 'admin' || member.role === 'owner' ? (
+                    <View
+                      style={[
+                        styles.adminPill,
+                        {
+                          borderColor:
+                            accentForeground,
+                        },
+                      ]}
+                    >
+                      <Shield
+                        color={accentForeground}
+                        size={12}
+                      />
+
+                      <Text
+                        style={[
+                          styles.adminPillText,
+                          {
+                            color:
+                              accentForeground,
+                          },
+                        ]}
+                      >
+                        Admin
+                      </Text>
+                    </View>
+                  ) : isAdmin ? (
+                    <Pressable
+                      onPress={() =>
+                        handlePromote(
+                          member.user_id,
+                        )
+                      }
+                      style={[
+                        styles.makeAdminButton,
+                        {
+                          borderColor:
+                            accentForeground,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.makeAdminText,
+                          {
+                            color:
+                              accentForeground,
+                          },
+                        ]}
+                      >
+                        Make Admin
+                      </Text>
+                    </Pressable>
+                  ) : null}
+
+                  {isAdmin && member.profile_id !== myId ? (
+                    <Pressable onPress={() => handleRemoveMember(member.profile_id, member.display_name)} style={[styles.makeAdminButton, { borderColor: colors.danger }]}>
+                      <Text style={[styles.makeAdminText, { color: colors.danger }]}>Remove</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              ))}
+            </View>
+          </ScrollView>
+        )}
+      </View>
+    );
+  };
+
+  // ── Friend row ────────────────────────────────────────────────────────────
+
+  function renderFriendRow(friend: Friend) {
+    const alreadyInvited = pendingInviteIds.has(friend.id);
+    const isInviting = invitingId === friend.id;
+
+    return (
+      <View
+        key={friend.id}
+        style={[
+          styles.friendRow,
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+          },
+        ]}
+      >
+        <View
+          style={[
+            styles.friendAvatar,
+            {
+              backgroundColor:
+                accentForeground,
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.friendAvatarText,
+              { color: onAccent },
+            ]}
+          >
+            {(friend.display_name || 'F')
+              .slice(0, 1)
+              .toUpperCase()}
+          </Text>
+        </View>
+
+        <View style={styles.friendDetails}>
+          <Text
+            style={[
+              styles.rowTitle,
+              { color: colors.text },
+            ]}
+            numberOfLines={1}
+          >
+            {friend.display_name}
+          </Text>
+
+          {!!friend.username && (
+            <Text
+              style={[
+                styles.rowSub,
+                { color: colors.muted },
+              ]}
+              numberOfLines={1}
+            >
+              @{friend.username}
+            </Text>
           )}
+        </View>
+
+        {alreadyInvited ? (
+          <View
+            style={[
+              styles.invitedPill,
+              { borderColor: colors.border },
+            ]}
+          >
+            <Text
+              style={[
+                styles.invitedText,
+                { color: colors.muted },
+              ]}
+            >
+              Invited
+            </Text>
+          </View>
+        ) : (
+          <Pressable
+            onPress={() =>
+              handleInviteFriend(friend.id)
+            }
+            disabled={isInviting}
+            style={[
+              styles.inviteButton,
+              {
+                backgroundColor:
+                  accentForeground,
+              },
+              isInviting && {
+                opacity: 0.55,
+              },
+            ]}
+          >
+            {isInviting ? (
+              <ActivityIndicator
+                size="small"
+                color={onAccent}
+              />
+            ) : (
+              <>
+                <UserPlus
+                  color={onAccent}
+                  size={14}
+                />
+
+                <Text
+                  style={[
+                    styles.inviteButtonText,
+                    { color: onAccent },
+                  ]}
+                >
+                  Invite
+                </Text>
+              </>
+            )}
+          </Pressable>
+        )}
+      </View>
+    );
+  }
+
+  // ── Chat ──────────────────────────────────────────────────────────────────
+
+  const renderChat = () => (
+    <KeyboardAvoidingView
+      style={styles.chatContainer}
+      behavior={
+        Platform.OS === 'ios'
+          ? 'padding'
+          : undefined
+      }
+    >
+      {messagesLoading ? (
+        <View style={styles.centerState}>
+          <ActivityIndicator
+            color={accentForeground}
+          />
+        </View>
+      ) : (
+        <FlatList
+          ref={listRef}
+          data={messages}
+          keyExtractor={(message) => message.id}
+          renderItem={renderMessage}
+          contentContainerStyle={[
+            styles.messageList,
+            messages.length === 0 &&
+              styles.messageListEmpty,
+          ]}
+          onContentSizeChange={() => {
+            listRef.current?.scrollToEnd({
+              animated: false,
+            });
+          }}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={
+            <View style={styles.emptyChat}>
+              <Text
+                style={[
+                  styles.emptyChatTitle,
+                  { color: colors.text },
+                ]}
+              >
+                No messages yet
+              </Text>
+
+              <Text
+                style={[
+                  styles.emptyChatText,
+                  { color: colors.muted },
+                ]}
+              >
+                Start the conversation.
+              </Text>
+            </View>
+          }
         />
       )}
+
+      {selectedAttachment && (
+        <View
+          style={[
+            styles.attachmentPreview,
+            {
+              backgroundColor: colors.card,
+              borderTopColor: colors.border,
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.attachmentPreviewIcon,
+              {
+                backgroundColor:
+                  accentForeground,
+              },
+            ]}
+          >
+            {selectedAttachment.mimeType.startsWith(
+              'image/',
+            ) ? (
+              <ImageIcon
+                size={18}
+                color={onAccent}
+              />
+            ) : (
+              <File
+                size={18}
+                color={onAccent}
+              />
+            )}
+          </View>
+
+          <View style={styles.attachmentPreviewDetails}>
+            <Text
+              numberOfLines={1}
+              style={[
+                styles.attachmentPreviewName,
+                { color: colors.text },
+              ]}
+            >
+              {selectedAttachment.name}
+            </Text>
+
+            {selectedAttachment.size ? (
+              <Text
+                style={[
+                  styles.attachmentPreviewSize,
+                  { color: colors.muted },
+                ]}
+              >
+                {formatFileSize(
+                  selectedAttachment.size,
+                )}
+              </Text>
+            ) : null}
+          </View>
+
+          <Pressable
+            onPress={() =>
+              setSelectedAttachment(null)
+            }
+            hitSlop={10}
+          >
+            <X
+              color={colors.muted}
+              size={20}
+            />
+          </Pressable>
+        </View>
+      )}
+
+      <View
+        style={[styles.composer, { backgroundColor: colors.bg, borderTopColor: colors.border }]}
+      >
+        <Pressable onPress={handlePickAttachment} disabled={uploadingAttachment || sending} style={[styles.attachButton, { borderColor: colors.border, backgroundColor: colors.card }]}>
+          {uploadingAttachment ? <ActivityIndicator size="small" color={accentForeground} /> : <Paperclip color={colors.text} size={19} />}
+        </Pressable>
+
+        {isRecording ? (
+          <>
+            <View style={[styles.recordingRow, { borderColor: colors.border, backgroundColor: colors.card }]}>
+              <View style={styles.recordingDot} />
+              <Text style={[styles.recordingText, { color: colors.text }]}>Recording {recordingSeconds}s</Text>
+              <Pressable onPress={cancelRecording} style={styles.recordingCancelBtn}><X color={colors.muted} size={18} /></Pressable>
+            </View>
+            <Pressable onPress={stopRecordingAndSend} style={[styles.sendButton, { backgroundColor: accentForeground }]}><Send color={onAccent} size={18} /></Pressable>
+          </>
+        ) : (
+          <>
+            <TextInput value={draft} onChangeText={setDraft} placeholder="Message the group..." placeholderTextColor={colors.muted} style={[styles.composerInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]} multiline maxLength={5000} />
+            <Pressable
+              onPress={draft.trim() ? handleSend : startRecording}
+              disabled={sending || uploadingAttachment}
+              style={[styles.sendButton, { backgroundColor: accentForeground }, (sending || uploadingAttachment) && { opacity: 0.45 }]}
+            >
+              {sending || uploadingAttachment ? <ActivityIndicator size="small" color={onAccent} /> : draft.trim() ? <Send color={onAccent} size={18} /> : <Mic color={onAccent} size={19} />}
+            </Pressable>
+          </>
+        )}
+      </View>
+    </KeyboardAvoidingView>
+  );
+
+  // ── Edit group modal ───────────────────────────────────────────────────────
+  const editGroupModal = editingGroup ? (
+    <Modal visible transparent animationType="fade" onRequestClose={() => setEditingGroup(false)}>
+      <View style={styles.subShade}>
+        <View style={[styles.subSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.infoTitle, { color: colors.text, marginBottom: 14 }]}>Edit group</Text>
+          <TextInput value={editName} onChangeText={setEditName} placeholder="Group name" placeholderTextColor={colors.muted} style={[styles.searchInput, { color: colors.text, borderColor: colors.border, borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 10 }]} />
+          <TextInput value={editDescription} onChangeText={setEditDescription} placeholder="Description" placeholderTextColor={colors.muted} multiline style={[styles.searchInput, { color: colors.text, borderColor: colors.border, borderWidth: 1, borderRadius: 12, padding: 12, minHeight: 90 }]} />
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 14 }}>
+            <Pressable onPress={() => setEditingGroup(false)}><Text style={[styles.menuText, { color: colors.muted }]}>Cancel</Text></Pressable>
+            <Pressable onPress={saveGroupEdits}><Text style={[styles.menuText, { color: accentForeground }]}>Save</Text></Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  ) : null;
+
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      soundRef.current?.unloadAsync();
+      recordingRef.current?.stopAndUnloadAsync().catch(() => {});
+    };
+  }, []);
+
+  // ── Main render ───────────────────────────────────────────────────────────
+
+  return (
+    <SafeAreaView
+      style={[
+        styles.safe,
+        { backgroundColor: colors.bg },
+      ]}
+    >
+      {view === 'chat' ? (
+        <>
+          {renderHeader()}
+          {renderChat()}
+        </>
+      ) : (
+        renderInfo()
+      )}
+      {editGroupModal}
     </SafeAreaView>
   );
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function formatTime(value: string) {
+  const date = new Date(value);
+
+  return date.toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// ─── Styles ──────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  safe: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 28, paddingVertical: 12, borderBottomWidth: 1 },
-  headerBack: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { flex: 1, marginHorizontal: 12, fontFamily: FONT_BOLD, fontSize: 16 },
-  headerToggle: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
-  centerState: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  messageList: { padding: 16, gap: 8 },
-  bubbleRow: { flexDirection: 'row' },
-  bubbleRowMine: { justifyContent: 'flex-end' },
-  bubble: { maxWidth: '78%', borderRadius: 16, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 8 },
-  bubbleAuthor: { fontFamily: FONT_SEMI, fontSize: 11, marginBottom: 2 },
-  bubbleText: { fontFamily: FONT, fontSize: 15, lineHeight: 20 },
-  composer: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, padding: 10, borderTopWidth: 1 },
-  composerInput: { flex: 1, borderWidth: 1, borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10, fontFamily: FONT, fontSize: 14, maxHeight: 100 },
-  sendBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-  infoBody: { padding: 16, gap: 20 },
-  section: { gap: 8 },
-  sectionLabel: { fontFamily: FONT_SEMI, fontSize: 11, letterSpacing: 1.5 },
-  emptyText: { fontFamily: FONT, fontSize: 13 },
-  requestRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 },
-  rowTitle: { fontFamily: FONT_MED, fontSize: 14 },
-  rowSub: { fontFamily: FONT, fontSize: 12, marginTop: 1 },
-  iconBtn: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  pill: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderRadius: 12, paddingHorizontal: 8, paddingVertical: 4 },
-  pillText: { fontFamily: FONT_MED, fontSize: 11 },
-  smallBtn: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6 },
-  smallBtnText: { fontFamily: FONT_MED, fontSize: 12 },
-  newSubgroupRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6, marginTop: 4 },
-  newSubgroupInput: { flex: 1, fontFamily: FONT, fontSize: 14, paddingVertical: 4 },
+  safe: {
+    flex: 1,
+  },
+
+  // Header
+
+  header: {
+    height: 70,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    borderBottomWidth: 1,
+    position: 'relative',
+    zIndex: 20,
+  },
+
+  headerSide: {
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  headerTitleButton: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+
+  headerTitle: {
+    fontFamily: FONT_SEMI,
+    fontSize: 16,
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+
+  headerSubtitle: {
+    fontFamily: FONT,
+    fontSize: 10,
+    marginTop: 1,
+  },
+
+  // Three-dot menu
+
+  menu: {
+    position: 'absolute',
+    right: 12,
+    top: 60,
+    width: 190,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingVertical: 6,
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+  },
+
+  menuItem: {
+    minHeight: 46,
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+  },
+
+  menuText: {
+    fontFamily: FONT_MED,
+    fontSize: 14,
+  },
+
+  // Chat
+
+  chatContainer: {
+    flex: 1,
+  },
+
+  centerState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  messageList: {
+    paddingHorizontal: 14,
+    paddingVertical: 16,
+    gap: 8,
+  },
+
+  messageListEmpty: {
+    flexGrow: 1,
+  },
+
+  emptyChat: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 40,
+  },
+
+  emptyChatTitle: {
+    fontFamily: FONT_SEMI,
+    fontSize: 16,
+  },
+
+  emptyChatText: {
+    fontFamily: FONT,
+    fontSize: 13,
+    marginTop: 4,
+  },
+
+  bubbleRow: {
+    flexDirection: 'row',
+    paddingVertical: 2,
+  },
+
+  bubbleRowMine: {
+    justifyContent: 'flex-end',
+  },
+
+  bubble: {
+    maxWidth: '80%',
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingTop: 9,
+    paddingBottom: 7,
+  },
+
+  bubbleAuthor: {
+    fontFamily: FONT_SEMI,
+    fontSize: 11,
+    marginBottom: 3,
+  },
+
+  bubbleText: {
+    fontFamily: FONT,
+    fontSize: 15,
+    lineHeight: 21,
+  },
+
+  messageTime: {
+    fontFamily: FONT,
+    fontSize: 9,
+    marginTop: 5,
+    textAlign: 'right',
+  },
+
+  // Message attachment
+
+  attachmentMessage: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+
+  attachmentName: {
+    flex: 1,
+    fontFamily: FONT_MED,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+
+  // Composer
+
+  composer: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    borderTopWidth: 1,
+  },
+
+  attachButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  composerInput: {
+    flex: 1,
+    minHeight: 40,
+    maxHeight: 110,
+    borderWidth: 1,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingTop: 9,
+    paddingBottom: 9,
+    fontFamily: FONT,
+    fontSize: 14,
+  },
+
+  sendButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // Attachment preview
+
+  attachmentPreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    gap: 10,
+    borderTopWidth: 1,
+  },
+
+  attachmentPreviewIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  attachmentPreviewDetails: {
+    flex: 1,
+  },
+
+  attachmentPreviewName: {
+    fontFamily: FONT_MED,
+    fontSize: 12,
+  },
+
+  attachmentPreviewSize: {
+    fontFamily: FONT,
+    fontSize: 10,
+    marginTop: 2,
+  },
+
+  // Info screen
+
+  infoContainer: {
+    flex: 1,
+  },
+
+  infoHeader: {
+    height: 70,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+  },
+
+  infoBack: {
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  infoTitle: {
+    fontFamily: FONT_SEMI,
+    fontSize: 17,
+  },
+
+  infoScroll: {
+    flex: 1,
+  },
+
+  infoBody: {
+    padding: 16,
+    paddingBottom: 40,
+    gap: 26,
+  },
+
+  // Group intro
+
+  groupIntro: {
+    alignItems: 'center',
+    paddingTop: 8,
+  },
+
+  groupAvatar: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+
+  groupAvatarText: {
+    fontFamily: FONT_BOLD,
+    fontSize: 30,
+  },
+
+  groupInfoName: {
+    fontFamily: FONT_BOLD,
+    fontSize: 22,
+    textAlign: 'center',
+  },
+
+  groupDescription: {
+    fontFamily: FONT,
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+    marginTop: 6,
+    maxWidth: 340,
+  },
+
+  groupDescriptionEmpty: {
+    fontFamily: FONT,
+    fontSize: 12,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    marginTop: 6,
+  },
+
+  // Sections
+
+  section: {
+    gap: 8,
+  },
+
+  sectionLabel: {
+    fontFamily: FONT_SEMI,
+    fontSize: 10,
+    letterSpacing: 1.5,
+    marginBottom: 2,
+  },
+
+  // Search
+
+  searchBox: {
+    height: 46,
+    borderWidth: 1,
+    borderRadius: 13,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 13,
+    gap: 9,
+    marginBottom: 3,
+  },
+
+  searchInput: {
+    flex: 1,
+    fontFamily: FONT,
+    fontSize: 13,
+    paddingVertical: 0,
+  },
+
+  // Friends
+
+  friendRow: {
+    minHeight: 58,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 13,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+  },
+
+  friendAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  friendAvatarText: {
+    fontFamily: FONT_SEMI,
+    fontSize: 14,
+  },
+
+  friendDetails: {
+    flex: 1,
+  },
+
+  rowTitle: {
+    fontFamily: FONT_MED,
+    fontSize: 13,
+  },
+
+  rowSub: {
+    fontFamily: FONT,
+    fontSize: 11,
+    marginTop: 1,
+  },
+
+  inviteButton: {
+    minWidth: 76,
+    height: 32,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+  },
+
+  inviteButtonText: {
+    fontFamily: FONT_MED,
+    fontSize: 11,
+  },
+
+  invitedPill: {
+    height: 30,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  invitedText: {
+    fontFamily: FONT_MED,
+    fontSize: 11,
+  },
+
+  friendOverflow: {
+    height: 260,
+    borderWidth: 1,
+    borderRadius: 13,
+    overflow: 'hidden',
+  },
+
+  friendOverflowScroll: {
+    flex: 1,
+  },
+
+  // Members
+
+  memberRow: {
+    minHeight: 62,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 13,
+    paddingHorizontal: 11,
+    paddingVertical: 9,
+  },
+
+  memberAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  memberAvatarText: {
+    fontFamily: FONT_SEMI,
+    fontSize: 14,
+  },
+
+  memberDetails: {
+    flex: 1,
+  },
+
+  adminPill: {
+    height: 28,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+
+  adminPillText: {
+    fontFamily: FONT_MED,
+    fontSize: 10,
+  },
+
+  makeAdminButton: {
+    height: 30,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  makeAdminText: {
+    fontFamily: FONT_MED,
+    fontSize: 10,
+  },
+
+  // Recording
+
+  recordingRow: {
+    minHeight: 44,
+    borderWidth: 1,
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+
+  recordingDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+  },
+
+  recordingText: {
+    flex: 1,
+    fontFamily: FONT_MED,
+    fontSize: 13,
+  },
+
+  recordingCancelBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // Secondary bottom-sheet overlay
+
+  subShade: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    justifyContent: 'flex-end',
+  },
+
+  subSheet: {
+    width: '100%',
+    maxHeight: '82%',
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 24,
+  },
+
+  // Empty states
+
+  emptyText: {
+    fontFamily: FONT,
+    fontSize: 12,
+    paddingVertical: 5,
+  },
 });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -18,17 +18,11 @@ import { useApp } from '@/components/AppProvider';
 type Board = string[];
 type Move = { from: number; to: number };
 type GameStatus = 'playing' | 'white_wins' | 'black_wins' | 'draw';
+type SessionState = { board: Board; isWhiteTurn: boolean };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-// We render pieces as text. In dark theme: player A = solid white, player B = outline white.
-// In light theme: player A = solid black, player B = solid white.
-// We use the "filled" unicode glyphs for solid and "outline" glyphs for outline.
 const PIECE_FILLED: Record<string, string> = {
-  K: '♔', Q: '♕', R: '♖', B: '♗', N: '♘', P: '♙',
-  k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟',
-};
-const PIECE_OUTLINE: Record<string, string> = {
   K: '♔', Q: '♕', R: '♖', B: '♗', N: '♘', P: '♙',
   k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟',
 };
@@ -145,7 +139,6 @@ function computeAIMove(board: Board, difficulty: string = 'medium'): Move | null
     return { move: m, score };
   });
   scored.sort((a, b) => b.score - a.score);
-  // Easy: pick from top half randomly. Medium: pick from top 3. Hard: always best.
   if (difficulty === 'easy') {
     const pool = scored.slice(0, Math.max(3, Math.ceil(scored.length / 2)));
     return pool[Math.floor(Math.random() * pool.length)].move;
@@ -178,9 +171,6 @@ function checkGameStatus(board: Board, whiteMoved: boolean): GameStatus {
 
 export default function ChessGame() {
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
-  // Reserve space for the header + status bar so the board never
-  // overflows vertically, and cap it so it doesn't become huge on
-  // tablets/desktop. Never shrink below a usable minimum either.
   const RESERVED_VERTICAL = 140;
   const MAX_BOARD_SIZE = 560;
   const MIN_BOARD_SIZE = 280;
@@ -191,18 +181,14 @@ export default function ChessGame() {
   const cellSize = boardSize / 8;
   const { isDark, accentForeground, onAccent } = useApp();
 
-  // Board square colors: accent + theme color checkered
-  const lightSquare = accentForeground;
-  const darkSquare = isDark ? '#1A1A1A' : '#F0EEEA';
+  // Board: clean black/white checkerboard (per design request).
+  const lightSquare = '#FFFFFF';
+  const darkSquare = '#000000';
 
-  // Piece colors by theme
-  // Dark theme: solid white for white pieces, outline white for black pieces
-  // Light theme: solid black for white pieces, solid white for black pieces
-  const whitePieceColor = isDark ? '#FFFFFF' : '#1A1A1A';
-  const blackPieceColor = isDark ? '#FFFFFF' : '#FFFFFF';
-  // For outline effect in dark theme, we use a different approach: render filled for white, outline for black
-  // Since RN Text doesn't support text-outline easily, we use color + opacity to differentiate
-  const blackPieceOpacity = isDark ? 0.45 : 1;
+  // Pieces: mine = solid global accent color, opponent's = solid grey.
+  // No outline/opacity effect — both are fully solid.
+  const myPieceColor = accentForeground;
+  const opponentPieceColor = '#9A9A9A';
 
   const colors = {
     background: isDark ? '#090909' : '#FBFAF8',
@@ -215,9 +201,9 @@ export default function ChessGame() {
   };
 
   const params = useLocalSearchParams<{ sessionId?: string; opponent?: string; difficulty?: string }>();
-  const sessionId = params.sessionId ?? 'chess-local';
-  const opponent = (params.opponent ?? 'computer').toLowerCase();
-  const isVsComputer = opponent !== 'friend';
+  const sessionId = params.sessionId && params.sessionId !== 'undefined' ? params.sessionId : null;
+  const opponentParam = (params.opponent ?? 'computer').toLowerCase();
+  const isVsComputer = opponentParam !== 'friend';
   const difficulty = (params.difficulty ?? 'medium').toLowerCase();
 
   const [board, setBoard] = useState<Board>([...INITIAL_BOARD]);
@@ -230,25 +216,102 @@ export default function ChessGame() {
   const [showModal, setShowModal] = useState(false);
   const [scoreSaved, setScoreSaved] = useState(false);
 
-  const saveScore = useCallback(async (result: 'win' | 'loss' | 'draw', pts: number) => {
-    if (scoreSaved) return;
-    setScoreSaved(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    const playerId = user?.id;
+  // ─── Multiplayer (friend) session state ─────────────────────────────────
+  const [myId, setMyId] = useState<string | null>(null);
+  const [createdBy, setCreatedBy] = useState<string | null>(null);
+  const [opponentId, setOpponentId] = useState<string | null>(null);
+  const [sessionLoaded, setSessionLoaded] = useState(false);
+  const myColor: 'white' | 'black' = myId && createdBy && myId === createdBy ? 'white' : 'black';
+
+  // Load my user id once.
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setMyId(data.user?.id ?? null));
+  }, []);
+
+  // Load / subscribe to the shared session row for friend games.
+  useEffect(() => {
+    if (isVsComputer || !sessionId || !myId) return;
+
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let cancelled = false;
+
+    async function applyRow(rowData: any) {
+      if (!rowData || cancelled) return;
+      setCreatedBy(rowData.created_by ?? null);
+      setOpponentId(rowData.opponent_id ?? null);
+      const state: SessionState | null = rowData.state ?? null;
+      if (state) {
+        setBoard(state.board);
+        setIsWhiteTurn(state.isWhiteTurn);
+      }
+      if (rowData.status === 'completed' && rowData.result) {
+        setStatus(rowData.result as GameStatus);
+      }
+    }
+
+    async function init() {
+      const { data: rowData } = await supabase
+        .from('game_sessions')
+        .select('created_by, opponent_id, state, status, result')
+        .eq('id', sessionId)
+        .maybeSingle();
+
+      if (!rowData) { setSessionLoaded(true); return; }
+
+      // First-time setup: only the session creator seeds the initial
+      // board state, so we never race two clients writing it.
+      if (!rowData.state && rowData.created_by === myId) {
+        const initState: SessionState = { board: [...INITIAL_BOARD], isWhiteTurn: true };
+        const { data: seeded } = await supabase
+          .from('game_sessions')
+          .update({ state: initState, turn_user_id: rowData.created_by, status: 'active' })
+          .eq('id', sessionId)
+          .select('created_by, opponent_id, state, status, result')
+          .maybeSingle();
+        await applyRow(seeded ?? { ...rowData, state: initState });
+      } else {
+        await applyRow(rowData);
+      }
+      setSessionLoaded(true);
+
+      channel = supabase
+        .channel(`chess_session_${sessionId}`)
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'game_sessions', filter: `id=eq.${sessionId}` },
+          (payload) => applyRow(payload.new)
+        )
+        .subscribe();
+    }
+
+    init();
+
+    return () => {
+      cancelled = true;
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, [isVsComputer, sessionId, myId]);
+
+  const saveScore = useCallback(async (result: 'win' | 'loss' | 'draw', pts: number, forPlayerId?: string) => {
+    const playerId = forPlayerId ?? myId;
     if (!playerId) return;
     await supabase.from('game_scores').insert({
-      session_id: sessionId && sessionId !== 'chess-local' ? sessionId : null,
+      session_id: sessionId,
       player_id: playerId,
       game: 'chess',
-      mode: 'multiplayer',
+      mode: isVsComputer ? 'solo' : 'multiplayer',
       result,
       points: pts,
-      difficulty: opponent === 'computer' ? difficulty : null,
+      difficulty: isVsComputer ? difficulty : null,
     });
-  }, [scoreSaved, sessionId, opponent, difficulty]);
+  }, [sessionId, isVsComputer, difficulty, myId]);
 
+  // vs-computer: local scoring, unchanged behavior.
   useEffect(() => {
+    if (!isVsComputer) return;
     if (status === 'playing') return;
+    if (scoreSaved) return;
+    setScoreSaved(true);
     let result: 'win' | 'loss' | 'draw';
     let pts = 0;
     if (status === 'white_wins') { result = 'win'; pts = 100; }
@@ -257,7 +320,17 @@ export default function ChessGame() {
     setGamePoints(pts);
     saveScore(result, pts);
     setShowModal(true);
-  }, [status, saveScore]);
+  }, [isVsComputer, status, scoreSaved, saveScore]);
+
+  // Friend mode: show modal whenever a completed status arrives (from
+  // either the local move or the realtime subscription).
+  useEffect(() => {
+    if (isVsComputer) return;
+    if (status === 'playing') return;
+    setShowModal(true);
+    if (myColor === 'white') setGamePoints(status === 'white_wins' ? 100 : status === 'draw' ? 10 : 0);
+    else setGamePoints(status === 'black_wins' ? 100 : status === 'draw' ? 10 : 0);
+  }, [isVsComputer, status, myColor]);
 
   const doComputerMove = useCallback((currentBoard: Board) => {
     setIsComputerThinking(true);
@@ -271,30 +344,85 @@ export default function ChessGame() {
       const newStatus = checkGameStatus(nextBoard, false);
       if (newStatus !== 'playing') { setStatus(newStatus); }
     }, 400);
-  }, []);
+  }, [difficulty]);
+
+  // Apply a move to the shared session (friend mode). Uses a
+  // status='active' guard on the update so only one client's move can
+  // ever close out the game — this is what prevents double-scoring
+  // when a winning move triggers on both devices at once.
+  const applyFriendMove = useCallback(async (nextBoard: Board, nextIsWhiteTurn: boolean, newStatus: GameStatus) => {
+    if (!sessionId || !createdBy) return;
+    const nextTurnUser = nextIsWhiteTurn ? createdBy : opponentId;
+    const nextState: SessionState = { board: nextBoard, isWhiteTurn: nextIsWhiteTurn };
+
+    if (newStatus === 'playing') {
+      await supabase
+        .from('game_sessions')
+        .update({ state: nextState, turn_user_id: nextTurnUser })
+        .eq('id', sessionId)
+        .eq('status', 'active');
+      setBoard(nextBoard);
+      setIsWhiteTurn(nextIsWhiteTurn);
+      return;
+    }
+
+    const winnerId = newStatus === 'white_wins' ? createdBy : newStatus === 'black_wins' ? opponentId : null;
+    const { data: closed } = await supabase
+      .from('game_sessions')
+      .update({ state: nextState, status: 'completed', result: newStatus, winner_id: winnerId, turn_user_id: null })
+      .eq('id', sessionId)
+      .eq('status', 'active')
+      .select('id')
+      .maybeSingle();
+
+    setBoard(nextBoard);
+    setIsWhiteTurn(nextIsWhiteTurn);
+    setStatus(newStatus);
+
+    // Only the client that actually flipped status active→completed
+    // records the score, so a completion is never counted twice.
+    if (closed && createdBy && opponentId) {
+      if (newStatus === 'draw') {
+        await saveScore('draw', 10, createdBy);
+        await saveScore('draw', 10, opponentId);
+      } else {
+        await saveScore('win', 100, winnerId ?? undefined);
+        const loserId = winnerId === createdBy ? opponentId : createdBy;
+        await saveScore('loss', 0, loserId);
+      }
+    }
+  }, [sessionId, createdBy, opponentId, saveScore]);
+
+  const canMoveFriend = !isVsComputer
+    && sessionLoaded
+    && status === 'playing'
+    && ((myColor === 'white') === isWhiteTurn);
 
   const handleCellPress = useCallback((index: number) => {
     if (status !== 'playing') return;
-    if (isComputerThinking) return;
+    if (isVsComputer) {
+      if (isComputerThinking) return;
+    } else {
+      if (!canMoveFriend) return;
+    }
     const piece = board[index];
 
     if (selected !== null) {
       if (validMoves.includes(index)) {
         const move: Move = { from: selected, to: index };
         const nextBoard = applyMove(board, move);
-        setBoard(nextBoard);
         setSelected(null);
         setValidMoves([]);
         if (isVsComputer) {
+          setBoard(nextBoard);
           setIsWhiteTurn(false);
           const newStatus = checkGameStatus(nextBoard, true);
           if (newStatus !== 'playing') { setStatus(newStatus); return; }
           doComputerMove(nextBoard);
         } else {
-          const nextWhite = !isWhiteTurn;
-          setIsWhiteTurn(nextWhite);
+          const nextTurn = !isWhiteTurn;
           const newStatus = checkGameStatus(nextBoard, isWhiteTurn);
-          if (newStatus !== 'playing') { setStatus(newStatus); }
+          applyFriendMove(nextBoard, nextTurn, newStatus);
         }
         return;
       }
@@ -305,14 +433,16 @@ export default function ChessGame() {
 
     const canSelectWhite = isWhiteTurn && isWhite(piece);
     const canSelectBlack = !isWhiteTurn && isBlack(piece);
-    if (canSelectWhite || canSelectBlack) {
+    const canSelectMine = isVsComputer ? canSelectWhite : (myColor === 'white' ? canSelectWhite : canSelectBlack);
+    if (canSelectMine) {
       const moves = getValidMoves(board, index);
       setSelected(index);
       setValidMoves(moves);
     }
-  }, [board, selected, validMoves, isWhiteTurn, isVsComputer, isComputerThinking, status, doComputerMove]);
+  }, [board, selected, validMoves, isWhiteTurn, isVsComputer, isComputerThinking, status, doComputerMove, canMoveFriend, applyFriendMove, myColor]);
 
   const handlePlayAgain = () => {
+    if (!isVsComputer) { router.back(); return; }
     setBoard([...INITIAL_BOARD]);
     setSelected(null);
     setValidMoves([]);
@@ -330,13 +460,19 @@ export default function ChessGame() {
       if (isComputerThinking) return 'Computer thinking...';
       return 'Your turn';
     }
-    return isWhiteTurn ? "White's turn" : "Black's turn";
+    if (!sessionLoaded) return 'Loading game…';
+    return canMoveFriend ? 'Your turn' : "Waiting for opponent…";
   };
 
   const resultText = () => {
-    if (status === 'white_wins') return isVsComputer ? 'You Win!' : 'White Wins!';
-    if (status === 'black_wins') return isVsComputer ? 'Computer Wins!' : 'Black Wins!';
-    return 'Draw!';
+    if (isVsComputer) {
+      if (status === 'white_wins') return 'You Win!';
+      if (status === 'black_wins') return 'Computer Wins!';
+      return 'Draw!';
+    }
+    if (status === 'draw') return 'Draw!';
+    const iWon = (status === 'white_wins' && myColor === 'white') || (status === 'black_wins' && myColor === 'black');
+    return iWon ? 'You Win!' : 'You Lose!';
   };
 
   // ─── Render ───────────────────────────────────────────────────────────────
@@ -360,7 +496,6 @@ export default function ChessGame() {
       </View>
 
       <View style={styles.boardWrap}>
-        {/* Board — edge to edge, no coordinate labels */}
         <View style={[styles.board, { width: boardSize }]}>
             {Array.from({ length: 8 }, (_, r) =>
               Array.from({ length: 8 }, (_, c) => {
@@ -374,9 +509,8 @@ export default function ChessGame() {
                 let bgColor = isLight ? lightSquare : darkSquare;
                 if (isSelected) bgColor = colors.accent;
 
-                const isWhitePiece = piece !== '' && isWhite(piece);
-                const pieceColor = isWhitePiece ? whitePieceColor : blackPieceColor;
-                const pieceOpacity = isWhitePiece ? 1 : blackPieceOpacity;
+                const pieceIsMine = piece !== '' && (isVsComputer ? isWhite(piece) : (myColor === 'white' ? isWhite(piece) : isBlack(piece)));
+                const pieceColor = pieceIsMine ? myPieceColor : opponentPieceColor;
 
                 return (
                   <Pressable
@@ -391,7 +525,7 @@ export default function ChessGame() {
                       <View style={[styles.captureRing, { width: cellSize - 4, height: cellSize - 4, borderRadius: 2, borderColor: isLight ? darkSquare : lightSquare }]} />
                     )}
                     {piece !== '' && (
-                      <Text style={[styles.piece, { fontSize: cellSize * 0.6, color: pieceColor, opacity: pieceOpacity }]}>
+                      <Text style={[styles.piece, { fontSize: cellSize * 0.6, color: pieceColor }]}>
                         {PIECE_FILLED[piece] ?? piece}
                       </Text>
                     )}
@@ -409,15 +543,17 @@ export default function ChessGame() {
               <Text style={[styles.modalResult, { color: colors.text }]}>{resultText()}</Text>
               {gamePoints > 0 && <Text style={[styles.modalPoints, { color: colors.accent }]}>+{gamePoints} pts</Text>}
               <Text style={[styles.modalSub, { color: colors.muted }]}>
-                {status === 'white_wins' && isVsComputer ? 'Excellent play! You defeated the computer.' : status === 'draw' ? 'A well-fought match.' : 'Great game!'}
+                {status === 'draw' ? 'A well-fought match.' : 'Great game!'}
               </Text>
               <View style={styles.modalButtons}>
                 <Pressable style={[styles.modalBtnPrimary, { backgroundColor: colors.accent }]} onPress={handlePlayAgain}>
-                  <Text style={[styles.modalBtnPrimaryText, { color: colors.onAccent }]}>Play Again</Text>
+                  <Text style={[styles.modalBtnPrimaryText, { color: colors.onAccent }]}>{isVsComputer ? 'Play Again' : 'Back to Games'}</Text>
                 </Pressable>
-                <Pressable style={[styles.modalBtnSecondary, { borderColor: colors.border }]} onPress={() => router.back()}>
-                  <Text style={[styles.modalBtnSecondaryText, { color: colors.muted }]}>Exit</Text>
-                </Pressable>
+                {isVsComputer && (
+                  <Pressable style={[styles.modalBtnSecondary, { borderColor: colors.border }]} onPress={() => router.back()}>
+                    <Text style={[styles.modalBtnSecondaryText, { color: colors.muted }]}>Exit</Text>
+                  </Pressable>
+                )}
               </View>
             </View>
           </View>

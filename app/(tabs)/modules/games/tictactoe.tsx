@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+
 import {
   Modal,
   Pressable,
@@ -8,6 +9,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+
 import { ChevronLeft } from 'lucide-react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -18,44 +20,87 @@ import { useApp } from '@/components/AppProvider';
 type Opponent = 'computer' | 'friend';
 type Cell = 'X' | 'O' | null;
 
-// Difficulty-based board config: easy=3x3, medium=5x5, hard=7x7.
-// Board size and win-length still scale with difficulty; point
-// values are flat per your scoring rule (win=100, draw=10).
-function configForDifficulty(difficulty: string): { size: number; win: number } {
+type SessionState = {
+  board: Cell[];
+  xIsNext: boolean;
+};
+
+type SessionResult = 'x_wins' | 'o_wins' | 'draw';
+
+// ─── Constants ───────────────────────────────────────────────────────────────
+
+const WIN_POINTS = 100;
+const DRAW_POINTS = 10;
+
+// ─── Difficulty ──────────────────────────────────────────────────────────────
+
+function configForDifficulty(
+  difficulty: string,
+): { size: number; win: number } {
   if (difficulty === 'easy') return { size: 3, win: 3 };
   if (difficulty === 'medium') return { size: 5, win: 4 };
   return { size: 7, win: 5 };
 }
 
-const WIN_POINTS = 100;
-const DRAW_POINTS = 10;
-
-// ─── Board Helpers ─────────────────────────────────────────────────────────────
+// ─── Board Helpers ────────────────────────────────────────────────────────────
 
 function makeBoard(size: number): Cell[] {
   return Array(size * size).fill(null);
 }
 
-function checkWinner(board: Cell[], size: number, winLen: number): { winner: Cell; cells: number[] } | null {
+function checkWinner(
+  board: Cell[],
+  size: number,
+  winLen: number,
+): { winner: Cell; cells: number[] } | null {
   const idx = (r: number, c: number) => r * size + c;
-  const directions = [[0, 1], [1, 0], [1, 1], [1, -1]];
+
+  const directions = [
+    [0, 1],
+    [1, 0],
+    [1, 1],
+    [1, -1],
+  ];
 
   for (let r = 0; r < size; r++) {
     for (let c = 0; c < size; c++) {
       const cell = board[idx(r, c)];
+
       if (!cell) continue;
+
       for (const [dr, dc] of directions) {
         const cells: number[] = [idx(r, c)];
+
         for (let k = 1; k < winLen; k++) {
-          const nr = r + dr * k; const nc = c + dc * k;
-          if (nr < 0 || nr >= size || nc < 0 || nc >= size) break;
-          if (board[idx(nr, nc)] !== cell) break;
+          const nr = r + dr * k;
+          const nc = c + dc * k;
+
+          if (
+            nr < 0 ||
+            nr >= size ||
+            nc < 0 ||
+            nc >= size
+          ) {
+            break;
+          }
+
+          if (board[idx(nr, nc)] !== cell) {
+            break;
+          }
+
           cells.push(idx(nr, nc));
         }
-        if (cells.length === winLen) return { winner: cell, cells };
+
+        if (cells.length === winLen) {
+          return {
+            winner: cell,
+            cells,
+          };
+        }
       }
     }
   }
+
   return null;
 }
 
@@ -63,269 +108,1716 @@ function isDraw(board: Cell[]): boolean {
   return board.every((c) => c !== null);
 }
 
-// ─── Minimax (3x3 only) ───────────────────────────────────────────────────────
+// ─── Minimax (3x3 only) ──────────────────────────────────────────────────────
 
-function minimax(board: Cell[], depth: number, isMaximizing: boolean, size: number, winLen: number): number {
+function minimax(
+  board: Cell[],
+  depth: number,
+  isMaximizing: boolean,
+  size: number,
+  winLen: number,
+): number {
   const result = checkWinner(board, size, winLen);
-  if (result) return result.winner === 'O' ? 10 - depth : depth - 10;
-  if (isDraw(board)) return 0;
+
+  if (result) {
+    return result.winner === 'O'
+      ? 10 - depth
+      : depth - 10;
+  }
+
+  if (isDraw(board)) {
+    return 0;
+  }
 
   if (isMaximizing) {
     let best = -Infinity;
+
     for (let i = 0; i < board.length; i++) {
-      if (!board[i]) { board[i] = 'O'; best = Math.max(best, minimax(board, depth + 1, false, size, winLen)); board[i] = null; }
+      if (!board[i]) {
+        board[i] = 'O';
+
+        best = Math.max(
+          best,
+          minimax(
+            board,
+            depth + 1,
+            false,
+            size,
+            winLen,
+          ),
+        );
+
+        board[i] = null;
+      }
     }
-    return best;
-  } else {
-    let best = Infinity;
-    for (let i = 0; i < board.length; i++) {
-      if (!board[i]) { board[i] = 'X'; best = Math.min(best, minimax(board, depth + 1, true, size, winLen)); board[i] = null; }
-    }
+
     return best;
   }
+
+  let best = Infinity;
+
+  for (let i = 0; i < board.length; i++) {
+    if (!board[i]) {
+      board[i] = 'X';
+
+      best = Math.min(
+        best,
+        minimax(
+          board,
+          depth + 1,
+          true,
+          size,
+          winLen,
+        ),
+      );
+
+      board[i] = null;
+    }
+  }
+
+  return best;
 }
 
-function bestMinimax(board: Cell[], size: number, winLen: number): number {
-  let bestVal = -Infinity; let bestIdx = -1; const copy = [...board];
+function bestMinimax(
+  board: Cell[],
+  size: number,
+  winLen: number,
+): number {
+  let bestVal = -Infinity;
+  let bestIdx = -1;
+
+  const copy = [...board];
+
   for (let i = 0; i < copy.length; i++) {
-    if (!copy[i]) { copy[i] = 'O'; const val = minimax(copy, 0, false, size, winLen); copy[i] = null; if (val > bestVal) { bestVal = val; bestIdx = i; } }
+    if (!copy[i]) {
+      copy[i] = 'O';
+
+      const val = minimax(
+        copy,
+        0,
+        false,
+        size,
+        winLen,
+      );
+
+      copy[i] = null;
+
+      if (val > bestVal) {
+        bestVal = val;
+        bestIdx = i;
+      }
+    }
   }
+
   return bestIdx;
 }
 
-// ─── Heuristic AI (larger boards) ─────────────────────────────────────────────
+// ─── Heuristic AI (larger boards) ────────────────────────────────────────────
 
-function countLine(board: Cell[], size: number, winLen: number, player: Cell): Map<number, number> {
+function countLine(
+  board: Cell[],
+  size: number,
+  winLen: number,
+  player: Cell,
+): Map<number, number> {
   const scores = new Map<number, number>();
+
   const idx = (r: number, c: number) => r * size + c;
-  const directions = [[0, 1], [1, 0], [1, 1], [1, -1]];
+
+  const directions = [
+    [0, 1],
+    [1, 0],
+    [1, 1],
+    [1, -1],
+  ];
 
   for (let r = 0; r < size; r++) {
     for (let c = 0; c < size; c++) {
       for (const [dr, dc] of directions) {
         const window: number[] = [];
         let valid = true;
+
         for (let k = 0; k < winLen; k++) {
-          const nr = r + dr * k; const nc = c + dc * k;
-          if (nr < 0 || nr >= size || nc < 0 || nc >= size) { valid = false; break; }
+          const nr = r + dr * k;
+          const nc = c + dc * k;
+
+          if (
+            nr < 0 ||
+            nr >= size ||
+            nc < 0 ||
+            nc >= size
+          ) {
+            valid = false;
+            break;
+          }
+
           window.push(idx(nr, nc));
         }
+
         if (!valid) continue;
-        const playerCount = window.filter((i) => board[i] === player).length;
-        const emptyCount = window.filter((i) => board[i] === null).length;
-        const blocked = window.some((i) => board[i] !== null && board[i] !== player);
+
+        const playerCount = window.filter(
+          (i) => board[i] === player,
+        ).length;
+
+        const emptyCount = window.filter(
+          (i) => board[i] === null,
+        ).length;
+
+        const blocked = window.some(
+          (i) =>
+            board[i] !== null &&
+            board[i] !== player,
+        );
+
         if (!blocked && emptyCount > 0) {
-          for (const i of window) { if (board[i] === null) scores.set(i, (scores.get(i) ?? 0) + playerCount); }
+          for (const i of window) {
+            if (board[i] === null) {
+              scores.set(
+                i,
+                (scores.get(i) ?? 0) + playerCount,
+              );
+            }
+          }
         }
       }
     }
   }
+
   return scores;
 }
 
-function heuristicMove(board: Cell[], size: number, winLen: number): number {
-  const empty = board.map((c, i) => (c === null ? i : -1)).filter((i) => i >= 0);
+function heuristicMove(
+  board: Cell[],
+  size: number,
+  winLen: number,
+): number {
+  const empty = board
+    .map((c, i) => (c === null ? i : -1))
+    .filter((i) => i >= 0);
 
-  for (const i of empty) { const copy = [...board]; copy[i] = 'O'; if (checkWinner(copy, size, winLen)) return i; }
-  for (const i of empty) { const copy = [...board]; copy[i] = 'X'; if (checkWinner(copy, size, winLen)) return i; }
+  // Win if possible.
+  for (const i of empty) {
+    const copy = [...board];
 
-  const myScores = countLine(board, size, winLen, 'O');
-  const oppScores = countLine(board, size, winLen, 'X');
-  let bestIdx = -1; let bestScore = -Infinity;
+    copy[i] = 'O';
+
+    if (checkWinner(copy, size, winLen)) {
+      return i;
+    }
+  }
+
+  // Block the player if necessary.
+  for (const i of empty) {
+    const copy = [...board];
+
+    copy[i] = 'X';
+
+    if (checkWinner(copy, size, winLen)) {
+      return i;
+    }
+  }
+
+  const myScores = countLine(
+    board,
+    size,
+    winLen,
+    'O',
+  );
+
+  const oppScores = countLine(
+    board,
+    size,
+    winLen,
+    'X',
+  );
+
+  let bestIdx = -1;
+  let bestScore = -Infinity;
 
   for (const i of empty) {
-    const score = (myScores.get(i) ?? 0) * 2 + (oppScores.get(i) ?? 0);
-    const row = Math.floor(i / size); const col = i % size;
-    const centerBonus = 1 / (1 + Math.abs(row - (size - 1) / 2) + Math.abs(col - (size - 1) / 2));
+    const score =
+      (myScores.get(i) ?? 0) * 2 +
+      (oppScores.get(i) ?? 0);
+
+    const boardRow = Math.floor(i / size);
+    const boardCol = i % size;
+
+    const centerBonus =
+      1 /
+      (1 +
+        Math.abs(
+          boardRow - (size - 1) / 2,
+        ) +
+        Math.abs(
+          boardCol - (size - 1) / 2,
+        ));
+
     const total = score + centerBonus;
-    if (total > bestScore) { bestScore = total; bestIdx = i; }
+
+    if (total > bestScore) {
+      bestScore = total;
+      bestIdx = i;
+    }
   }
-  return bestIdx !== -1 ? bestIdx : empty[Math.floor(Math.random() * empty.length)];
+
+  return bestIdx !== -1
+    ? bestIdx
+    : empty[
+        Math.floor(
+          Math.random() * empty.length,
+        )
+      ];
 }
 
-function computeMove(board: Cell[], size: number, winLen: number): number {
-  if (size <= 3) return bestMinimax(board, size, winLen);
-  return heuristicMove(board, size, winLen);
+function computeMove(
+  board: Cell[],
+  size: number,
+  winLen: number,
+): number {
+  if (size <= 3) {
+    return bestMinimax(
+      board,
+      size,
+      winLen,
+    );
+  }
+
+  return heuristicMove(
+    board,
+    size,
+    winLen,
+  );
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+// ─── Component ───────────────────────────────────────────────────────────────
 
 export default function TicTacToe() {
-  const { sessionId, opponent = 'computer', difficulty = 'easy' } = useLocalSearchParams<{ sessionId: string; opponent: Opponent; difficulty: string }>();
-  const { width, height } = useWindowDimensions();
-  const { isDark, accentForeground, onAccent } = useApp();
+  const params =
+    useLocalSearchParams<{
+      sessionId?: string;
+      opponent?: Opponent;
+      difficulty?: string;
+    }>();
+
+  const sessionId =
+    params.sessionId &&
+    params.sessionId !== 'undefined'
+      ? params.sessionId
+      : null;
+
+  const { width, height } =
+    useWindowDimensions();
+
+  const {
+    isDark,
+    accentForeground,
+    onAccent,
+  } = useApp();
 
   const colors = {
-    bg: isDark ? '#090909' : '#FBFAF8',
-    card: isDark ? '#151515' : '#FFFFFF',
-    border: isDark ? '#2A2A2A' : '#ECE9E4',
-    text: isDark ? '#F4F2EE' : '#27241F',
-    muted: isDark ? '#AAA59D' : '#8F8A82',
+    bg: isDark
+      ? '#090909'
+      : '#FBFAF8',
+
+    card: isDark
+      ? '#151515'
+      : '#FFFFFF',
+
+    border: isDark
+      ? '#2A2A2A'
+      : '#ECE9E4',
+
+    text: isDark
+      ? '#F4F2EE'
+      : '#27241F',
+
+    muted: isDark
+      ? '#AAA59D'
+      : '#8F8A82',
+
     accent: accentForeground,
     onAccent,
   };
 
-  const opp: Opponent = opponent === 'friend' ? 'friend' : 'computer';
-  const config = configForDifficulty(difficulty);
-  const [difficultyLevel] = useState(difficulty);
+  const opp: Opponent =
+    params.opponent === 'friend'
+      ? 'friend'
+      : 'computer';
 
-  const [board, setBoard] = useState<Cell[]>(() => makeBoard(config.size));
-  const [xIsNext, setXIsNext] = useState(true);
-  const [winResult, setWinResult] = useState<{ winner: Cell; cells: number[] } | null>(null);
-  const [draw, setDraw] = useState(false);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [scoreSaved, setScoreSaved] = useState(false);
-  const isComputerTurn = opp === 'computer' && !xIsNext && !winResult && !draw;
+  const isVsComputer =
+    opp === 'computer';
 
-  // Board sizing — scale to fill available space (bounded by
-  // both width and height so it never overflows vertically),
-  // capped so it doesn't become oversized on tablets/desktop.
-  const RESERVED_VERTICAL = 180;
-  const MAX_BOARD_DIM = 520;
-  const MIN_BOARD_DIM = 260;
-  const availableWidth = width - 32;
-  const availableHeight = height - RESERVED_VERTICAL;
-  const maxBoardDim = Math.max(
-    MIN_BOARD_DIM,
-    Math.min(availableWidth, availableHeight, MAX_BOARD_DIM)
-  );
-  const cellSize = Math.floor(maxBoardDim / config.size);
-  const actualBoardWidth = cellSize * config.size;
+  // ─── Multiplayer state ────────────────────────────────────────────────────
 
-  const saveScore = useCallback(async (result: 'win' | 'loss' | 'draw') => {
-    if (scoreSaved) return;
-    setScoreSaved(true);
-    const pts = result === 'win' ? WIN_POINTS : result === 'draw' ? DRAW_POINTS : 0;
-    const { data: { user } } = await supabase.auth.getUser();
-    const playerId = user?.id;
-    if (!playerId) return;
-    await supabase.from('game_scores').insert({
-      session_id: sessionId && sessionId !== 'undefined' ? sessionId : null,
-      player_id: playerId,
-      game: 'tictactoe',
-      mode: 'multiplayer',
-      result,
-      points: pts,
-      difficulty: difficultyLevel,
-    });
-  }, [scoreSaved, sessionId, difficultyLevel]);
+  const [myId, setMyId] =
+    useState<string | null>(null);
+
+  const [createdBy, setCreatedBy] =
+    useState<string | null>(null);
+
+  const [opponentId, setOpponentId] =
+    useState<string | null>(null);
+
+  const [sessionLoaded, setSessionLoaded] =
+    useState(false);
+
+  const [sessionDifficulty, setSessionDifficulty] =
+    useState<string | null>(null);
+
+  const difficultyLevel =
+    isVsComputer
+      ? params.difficulty ?? 'easy'
+      : sessionDifficulty ??
+        params.difficulty ??
+        'easy';
+
+  const config =
+    configForDifficulty(
+      difficultyLevel,
+    );
+
+  const iAmX =
+    myId && createdBy
+      ? myId === createdBy
+      : true;
+
+  // ─── Game state ──────────────────────────────────────────────────────────
+
+  const [board, setBoard] =
+    useState<Cell[]>(() =>
+      makeBoard(config.size),
+    );
+
+  const [xIsNext, setXIsNext] =
+    useState(true);
+
+  const [winResult, setWinResult] =
+    useState<{
+      winner: Cell;
+      cells: number[];
+    } | null>(null);
+
+  const [draw, setDraw] =
+    useState(false);
+
+  const [modalVisible, setModalVisible] =
+    useState(false);
+
+  const [scoreSaved, setScoreSaved] =
+    useState(false);
+
+  // NEW: exit confirmation popup.
+  const [exitModalVisible, setExitModalVisible] =
+    useState(false);
+
+  const isComputerTurn =
+    opp === 'computer' &&
+    !xIsNext &&
+    !winResult &&
+    !draw;
+
+  // ─── Load current user ───────────────────────────────────────────────────
 
   useEffect(() => {
-    const result = checkWinner(board, config.size, config.win);
+    supabase.auth
+      .getUser()
+      .then(({ data }) => {
+        setMyId(
+          data.user?.id ?? null,
+        );
+      });
+  }, []);
+
+  // ─── Load / subscribe to multiplayer session ─────────────────────────────
+
+  useEffect(() => {
+    if (
+      isVsComputer ||
+      !sessionId ||
+      !myId
+    ) {
+      return;
+    }
+
+    let channel:
+      | ReturnType<
+          typeof supabase.channel
+        >
+      | null = null;
+
+    let cancelled = false;
+
+    function applyRow(rowData: any) {
+      if (
+        !rowData ||
+        cancelled
+      ) {
+        return;
+      }
+
+      setCreatedBy(
+        rowData.created_by ?? null,
+      );
+
+      setOpponentId(
+        rowData.opponent_id ?? null,
+      );
+
+      if (rowData.difficulty) {
+        setSessionDifficulty(
+          rowData.difficulty,
+        );
+      }
+
+      const state:
+        | SessionState
+        | null =
+        rowData.state ?? null;
+
+      if (state) {
+        setBoard(state.board);
+        setXIsNext(
+          state.xIsNext,
+        );
+      }
+
+      if (
+        rowData.status ===
+          'completed' &&
+        rowData.result
+      ) {
+        const result:
+          | SessionResult =
+          rowData.result;
+
+        if (result === 'draw') {
+          setDraw(true);
+        } else {
+          setWinResult({
+            winner:
+              result ===
+              'x_wins'
+                ? 'X'
+                : 'O',
+
+            cells:
+              rowData.winning_cells ??
+              [],
+          });
+        }
+      }
+    }
+
+    async function init() {
+      const { data: rowData } =
+        await supabase
+          .from('game_sessions')
+          .select(
+            'created_by, opponent_id, difficulty, state, status, result, winning_cells',
+          )
+          .eq('id', sessionId)
+          .maybeSingle();
+
+      if (!rowData) {
+        setSessionLoaded(true);
+        return;
+      }
+
+      const size =
+        configForDifficulty(
+          rowData.difficulty ??
+            difficultyLevel,
+        ).size;
+
+      if (
+        !rowData.state &&
+        rowData.created_by === myId
+      ) {
+        const initState:
+          SessionState = {
+            board:
+              makeBoard(size),
+            xIsNext: true,
+          };
+
+        const {
+          data: seeded,
+        } = await supabase
+          .from('game_sessions')
+          .update({
+            state: initState,
+            turn_user_id:
+              rowData.created_by,
+            status: 'active',
+          })
+          .eq(
+            'id',
+            sessionId,
+          )
+          .select(
+            'created_by, opponent_id, difficulty, state, status, result, winning_cells',
+          )
+          .maybeSingle();
+
+        applyRow(
+          seeded ?? {
+            ...rowData,
+            state: initState,
+          },
+        );
+      } else {
+        applyRow(rowData);
+      }
+
+      setSessionLoaded(true);
+
+      channel =
+        supabase
+          .channel(
+            `tictactoe_session_${sessionId}`,
+          )
+          .on(
+            'postgres_changes',
+            {
+              event: 'UPDATE',
+              schema: 'public',
+              table: 'game_sessions',
+              filter: `id=eq.${sessionId}`,
+            },
+            (payload) =>
+              applyRow(
+                payload.new,
+              ),
+          )
+          .subscribe();
+    }
+
+    init();
+
+    return () => {
+      cancelled = true;
+
+      if (channel) {
+        supabase.removeChannel(
+          channel,
+        );
+      }
+    };
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    isVsComputer,
+    sessionId,
+    myId,
+  ]);
+
+  // ─── Save score ──────────────────────────────────────────────────────────
+
+  const saveScore =
+    useCallback(
+      async (
+        result:
+          | 'win'
+          | 'loss'
+          | 'draw',
+        pts: number,
+        forPlayerId?: string,
+      ) => {
+        const playerId =
+          forPlayerId ?? myId;
+
+        if (!playerId) {
+          return false;
+        }
+
+        const { error } =
+          await supabase
+            .from('game_scores')
+            .insert({
+              session_id:
+                sessionId,
+
+              player_id:
+                playerId,
+
+              game:
+                'tictactoe',
+
+              mode:
+                isVsComputer
+                  ? 'solo'
+                  : 'multiplayer',
+
+              result,
+
+              points: pts,
+
+              difficulty:
+                difficultyLevel,
+            });
+
+        if (error) {
+          console.error(
+            'TIC-TAC-TOE SCORE SAVE ERROR:',
+            error,
+          );
+
+          return false;
+        }
+
+        console.log(
+          'TIC-TAC-TOE SCORE SAVED:',
+          {
+            playerId,
+            result,
+            points: pts,
+            game: 'tictactoe',
+          },
+        );
+
+        return true;
+      },
+      [
+        sessionId,
+        isVsComputer,
+        difficultyLevel,
+        myId,
+      ],
+    );
+
+  // ─── Solo scoring ─────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!isVsComputer) {
+      return;
+    }
+
+    const result =
+      checkWinner(
+        board,
+        config.size,
+        config.win,
+      );
+
     if (result) {
       setWinResult(result);
       setModalVisible(true);
-      saveScore(result.winner === 'X' ? 'win' : 'loss');
+
+      if (!scoreSaved) {
+        setScoreSaved(true);
+
+        const playerWon =
+          result.winner === 'X';
+
+        saveScore(
+          playerWon
+            ? 'win'
+            : 'loss',
+          playerWon
+            ? WIN_POINTS
+            : 0,
+        );
+      }
+
       return;
     }
-    if (isDraw(board)) { setDraw(true); setModalVisible(true); saveScore('draw'); }
-  }, [board, config.size, config.win, saveScore]);
+
+    if (isDraw(board)) {
+      setDraw(true);
+      setModalVisible(true);
+
+      if (!scoreSaved) {
+        setScoreSaved(true);
+
+        saveScore(
+          'draw',
+          DRAW_POINTS,
+        );
+      }
+    }
+  }, [
+    isVsComputer,
+    board,
+    config.size,
+    config.win,
+    scoreSaved,
+    saveScore,
+  ]);
+
+  // ─── Multiplayer completed state ─────────────────────────────────────────
 
   useEffect(() => {
-    if (!isComputerTurn) return;
-    const timer = setTimeout(() => {
-      const idx = computeMove(board, config.size, config.win);
-      if (idx === -1) return;
-      const next = [...board]; next[idx] = 'O'; setBoard(next); setXIsNext(true);
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [isComputerTurn, board, config.size, config.win]);
+    if (isVsComputer) {
+      return;
+    }
 
-  const handleCellPress = (index: number) => {
-    if (board[index] || winResult || draw) return;
-    if (opp === 'computer' && !xIsNext) return;
-    const next = [...board]; next[index] = xIsNext ? 'X' : 'O'; setBoard(next); setXIsNext(!xIsNext);
-  };
+    if (winResult || draw) {
+      setModalVisible(true);
+    }
+  }, [
+    isVsComputer,
+    winResult,
+    draw,
+  ]);
 
-  const handlePlayAgain = () => {
-    setBoard(makeBoard(config.size));
-    setXIsNext(true);
-    setWinResult(null);
-    setDraw(false);
-    setModalVisible(false);
-    setScoreSaved(false);
-  };
+  // ─── Computer move ───────────────────────────────────────────────────────
 
-  const statusText = (() => {
-    if (winResult) return winResult.winner === 'X' ? 'You won!' : opp === 'computer' ? 'Computer wins!' : 'O wins!';
-    if (draw) return "It's a draw!";
-    if (opp === 'computer') return xIsNext ? 'Your turn (X)' : 'Computer thinking...';
-    return xIsNext ? 'Your turn (X)' : "O's turn";
-  })();
+  useEffect(() => {
+    if (!isComputerTurn) {
+      return;
+    }
+
+    const timer =
+      setTimeout(() => {
+        const move =
+          computeMove(
+            board,
+            config.size,
+            config.win,
+          );
+
+        if (move === -1) {
+          return;
+        }
+
+        const next = [
+          ...board,
+        ];
+
+        next[move] = 'O';
+
+        setBoard(next);
+        setXIsNext(true);
+      }, 250);
+
+    return () =>
+      clearTimeout(timer);
+  }, [
+    isComputerTurn,
+    board,
+    config.size,
+    config.win,
+  ]);
+
+  // ─── Multiplayer move ────────────────────────────────────────────────────
+
+  const applyFriendMove =
+    useCallback(
+      async (
+        nextBoard: Cell[],
+        nextXIsNext: boolean,
+      ) => {
+        if (
+          !sessionId ||
+          !createdBy
+        ) {
+          return;
+        }
+
+        const nextTurnUser =
+          nextXIsNext
+            ? createdBy
+            : opponentId;
+
+        const nextState:
+          SessionState = {
+            board: nextBoard,
+            xIsNext:
+              nextXIsNext,
+          };
+
+        const winner =
+          checkWinner(
+            nextBoard,
+            config.size,
+            config.win,
+          );
+
+        const drawn =
+          !winner &&
+          isDraw(nextBoard);
+
+        // Normal move.
+        if (
+          !winner &&
+          !drawn
+        ) {
+          await supabase
+            .from('game_sessions')
+            .update({
+              state: nextState,
+              turn_user_id:
+                nextTurnUser,
+            })
+            .eq(
+              'id',
+              sessionId,
+            )
+            .eq(
+              'status',
+              'active',
+            );
+
+          setBoard(nextBoard);
+          setXIsNext(
+            nextXIsNext,
+          );
+
+          return;
+        }
+
+        const result:
+          SessionResult =
+          drawn
+            ? 'draw'
+            : winner!.winner ===
+                'X'
+              ? 'x_wins'
+              : 'o_wins';
+
+        const winnerId =
+          drawn
+            ? null
+            : winner!.winner ===
+                'X'
+              ? createdBy
+              : opponentId;
+
+        const {
+          data: closed,
+        } = await supabase
+          .from('game_sessions')
+          .update({
+            state: nextState,
+            status: 'completed',
+            result,
+            winner_id:
+              winnerId,
+            winning_cells:
+              winner?.cells ??
+              null,
+            turn_user_id:
+              null,
+          })
+          .eq(
+            'id',
+            sessionId,
+          )
+          .eq(
+            'status',
+            'active',
+          )
+          .select('id')
+          .maybeSingle();
+
+        setBoard(nextBoard);
+        setXIsNext(
+          nextXIsNext,
+        );
+
+        if (drawn) {
+          setDraw(true);
+        } else {
+          setWinResult(
+            winner!,
+          );
+        }
+
+        // Only the client that successfully closes
+        // the active session records the scores.
+        if (
+          closed &&
+          createdBy &&
+          opponentId
+        ) {
+          if (drawn) {
+            await saveScore(
+              'draw',
+              DRAW_POINTS,
+              createdBy,
+            );
+
+            await saveScore(
+              'draw',
+              DRAW_POINTS,
+              opponentId,
+            );
+          } else {
+            await saveScore(
+              'win',
+              WIN_POINTS,
+              winnerId ??
+                undefined,
+            );
+
+            const loserId =
+              winnerId ===
+              createdBy
+                ? opponentId
+                : createdBy;
+
+            await saveScore(
+              'loss',
+              0,
+              loserId,
+            );
+          }
+        }
+      },
+      [
+        sessionId,
+        createdBy,
+        opponentId,
+        config.size,
+        config.win,
+        saveScore,
+      ],
+    );
+
+  // ─── Turn permissions ────────────────────────────────────────────────────
+
+  const myMark: Cell =
+    isVsComputer
+      ? 'X'
+      : iAmX
+        ? 'X'
+        : 'O';
+
+  const canMoveFriend =
+    !isVsComputer &&
+    sessionLoaded &&
+    !winResult &&
+    !draw &&
+    ((xIsNext && iAmX) ||
+      (!xIsNext && !iAmX));
+
+  // ─── Cell press ──────────────────────────────────────────────────────────
+
+  const handleCellPress =
+    (index: number) => {
+      if (
+        board[index] ||
+        winResult ||
+        draw
+      ) {
+        return;
+      }
+
+      if (isVsComputer) {
+        if (!xIsNext) {
+          return;
+        }
+
+        const next = [
+          ...board,
+        ];
+
+        next[index] = 'X';
+
+        setBoard(next);
+        setXIsNext(false);
+
+        return;
+      }
+
+      if (!canMoveFriend) {
+        return;
+      }
+
+      const next = [
+        ...board,
+      ];
+
+      next[index] =
+        myMark;
+
+      applyFriendMove(
+        next,
+        !xIsNext,
+      );
+    };
+
+  // ─── Game over actions ───────────────────────────────────────────────────
+
+  const handlePlayAgain =
+    () => {
+      if (!isVsComputer) {
+        router.back();
+        return;
+      }
+
+      setBoard(
+        makeBoard(
+          config.size,
+        ),
+      );
+
+      setXIsNext(true);
+      setWinResult(null);
+      setDraw(false);
+      setModalVisible(false);
+      setScoreSaved(false);
+    };
+
+  // ─── Exit confirmation ───────────────────────────────────────────────────
+
+  const handleExitPress =
+    () => {
+      // Don't immediately leave.
+      // Always ask the player first.
+      setExitModalVisible(
+        true,
+      );
+    };
+
+  const handleCancelExit =
+    () => {
+      setExitModalVisible(
+        false,
+      );
+    };
+
+  const handleConfirmExit =
+    () => {
+      // Closing the local game without completing it means
+      // no score is awarded.
+      setExitModalVisible(
+        false,
+      );
+
+      setModalVisible(
+        false,
+      );
+
+      router.push(
+        '/modules',
+      );
+    };
+
+  // ─── Status ──────────────────────────────────────────────────────────────
+
+  const statusText =
+    (() => {
+      if (winResult) {
+        if (isVsComputer) {
+          return winResult.winner ===
+            'X'
+            ? 'You won!'
+            : 'Computer wins!';
+        }
+
+        return winResult.winner ===
+          myMark
+          ? 'You won!'
+          : 'You lost!';
+      }
+
+      if (draw) {
+        return "It's a draw!";
+      }
+
+      if (isVsComputer) {
+        return xIsNext
+          ? 'Your turn (X)'
+          : 'Computer thinking...';
+      }
+
+      if (!sessionLoaded) {
+        return 'Loading game…';
+      }
+
+      return canMoveFriend
+        ? `Your turn (${myMark})`
+        : 'Waiting for opponent…';
+    })();
+
+  // ─── Render ──────────────────────────────────────────────────────────────
+
+  const RESERVED_VERTICAL =
+    180;
+
+  const MAX_BOARD_DIM =
+    520;
+
+  const MIN_BOARD_DIM =
+    260;
+
+  const availableWidth =
+    width - 32;
+
+  const availableHeight =
+    height -
+    RESERVED_VERTICAL;
+
+  const maxBoardDim =
+    Math.max(
+      MIN_BOARD_DIM,
+      Math.min(
+        availableWidth,
+        availableHeight,
+        MAX_BOARD_DIM,
+      ),
+    );
+
+  const cellSize =
+    Math.floor(
+      maxBoardDim /
+        config.size,
+    );
+
+  const actualBoardWidth =
+    cellSize *
+    config.size;
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: colors.bg }]}>
+    <SafeAreaView
+      style={[
+        styles.safe,
+        {
+          backgroundColor:
+            colors.bg,
+        },
+      ]}
+    >
       {/* Header */}
-      <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <Pressable onPress={() => router.push('/modules')} style={[styles.headerBack, { backgroundColor: colors.accent }]} hitSlop={8}>
-          <ChevronLeft color="#FFFFFF" size={22} strokeWidth={2.4} />
+      <View
+        style={[
+          styles.header,
+          {
+            borderBottomColor:
+              colors.border,
+          },
+        ]}
+      >
+        <Pressable
+          onPress={
+            handleExitPress
+          }
+          style={[
+            styles.headerBack,
+            {
+              backgroundColor:
+                colors.accent,
+            },
+          ]}
+          hitSlop={8}
+        >
+          <ChevronLeft
+            color="#FFFFFF"
+            size={22}
+            strokeWidth={2.4}
+          />
         </Pressable>
-        <Text style={[styles.headerTitle, { color: colors.accent }]}>TIC-TAC-TOE</Text>
-        <View style={[styles.levelBadge, { backgroundColor: colors.accent }]}>
-          <Text style={[styles.levelLabel, { color: colors.onAccent }]}>{difficultyLevel.toUpperCase()}</Text>
+
+        <Text
+          style={[
+            styles.headerTitle,
+            {
+              color:
+                colors.accent,
+            },
+          ]}
+        >
+          TIC-TAC-TOE
+        </Text>
+
+        <View
+          style={[
+            styles.levelBadge,
+            {
+              backgroundColor:
+                colors.accent,
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.levelLabel,
+              {
+                color:
+                  colors.onAccent,
+              },
+            ]}
+          >
+            {difficultyLevel.toUpperCase()}
+          </Text>
         </View>
       </View>
 
       {/* Status */}
-      <View style={[styles.statusBar, { borderBottomColor: colors.border }]}>
-        <Text style={[styles.statusText, { color: colors.text }]}>{statusText}</Text>
+      <View
+        style={[
+          styles.statusBar,
+          {
+            borderBottomColor:
+              colors.border,
+          },
+        ]}
+      >
+        <Text
+          style={[
+            styles.statusText,
+            {
+              color:
+                colors.text,
+            },
+          ]}
+        >
+          {statusText}
+        </Text>
       </View>
 
       {/* Board */}
-      <View style={styles.boardContainer}>
-        <View style={[styles.board, { width: actualBoardWidth, height: actualBoardWidth }]}>
-          {Array.from({ length: config.size }, (_, row) => (
-            <View key={row} style={styles.boardRow}>
-              {Array.from({ length: config.size }, (_, col) => {
-                const index = row * config.size + col;
-                const cell = board[index];
-                const isWinCell = winResult?.cells.includes(index) ?? false;
-                return (
-                  <Pressable
-                    key={col}
-                    onPress={() => handleCellPress(index)}
-                    style={[styles.cell, { borderColor: colors.border }, isWinCell && { backgroundColor: colors.accent }]}
-                  >
-                    {cell === 'X' && <Text style={[styles.cellText, { color: colors.accent, fontSize: cellSize * 0.45 }]} numberOfLines={1}>X</Text>}
-                    {cell === 'O' && <Text style={[styles.cellText, { color: colors.text, fontSize: cellSize * 0.45 }]} numberOfLines={1}>O</Text>}
-                  </Pressable>
-                );
-              })}
-            </View>
-          ))}
+      <View
+        style={
+          styles.boardContainer
+        }
+      >
+        <View
+          style={[
+            styles.board,
+            {
+              width:
+                actualBoardWidth,
+              height:
+                actualBoardWidth,
+            },
+          ]}
+        >
+          {Array.from(
+            {
+              length:
+                config.size,
+            },
+            (_, boardRow) => (
+              <View
+                key={boardRow}
+                style={
+                  styles.boardRow
+                }
+              >
+                {Array.from(
+                  {
+                    length:
+                      config.size,
+                  },
+                  (_, boardCol) => {
+                    const index =
+                      boardRow *
+                        config.size +
+                      boardCol;
+
+                    const cell =
+                      board[index];
+
+                    const isWinCell =
+                      winResult?.cells.includes(
+                        index,
+                      ) ?? false;
+
+                    return (
+                      <Pressable
+                        key={
+                          boardCol
+                        }
+                        onPress={() =>
+                          handleCellPress(
+                            index,
+                          )
+                        }
+                        style={[
+                          styles.cell,
+                          {
+                            borderColor:
+                              colors.border,
+                          },
+                          isWinCell && {
+                            backgroundColor:
+                              colors.accent,
+                          },
+                        ]}
+                      >
+                        {cell ===
+                          'X' && (
+                          <Text
+                            style={[
+                              styles.cellText,
+                              {
+                                color:
+                                  colors.accent,
+                                fontSize:
+                                  cellSize *
+                                  0.45,
+                              },
+                            ]}
+                            numberOfLines={
+                              1
+                            }
+                          >
+                            X
+                          </Text>
+                        )}
+
+                        {cell ===
+                          'O' && (
+                          <Text
+                            style={[
+                              styles.cellText,
+                              {
+                                color:
+                                  colors.text,
+                                fontSize:
+                                  cellSize *
+                                  0.45,
+                              },
+                            ]}
+                            numberOfLines={
+                              1
+                            }
+                          >
+                            O
+                          </Text>
+                        )}
+                      </Pressable>
+                    );
+                  },
+                )}
+              </View>
+            ),
+          )}
         </View>
       </View>
 
-      {/* Game Over Modal */}
-      <Modal transparent visible={modalVisible} animationType="fade" onRequestClose={() => {}}>
-        <View style={styles.overlay}>
-          <View style={[styles.modal, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      {/* ───────────────────────────────────────────────────────────────────
+          GAME OVER MODAL
+      ──────────────────────────────────────────────────────────────────── */}
+
+      <Modal
+        transparent
+        visible={
+          modalVisible
+        }
+        animationType="fade"
+        onRequestClose={() => {}}
+      >
+        <View
+          style={
+            styles.overlay
+          }
+        >
+          <View
+            style={[
+              styles.modal,
+              {
+                backgroundColor:
+                  colors.card,
+                borderColor:
+                  colors.border,
+              },
+            ]}
+          >
             {draw ? (
               <>
-                <Text style={styles.modalEmoji}>🤝</Text>
-                <Text style={[styles.modalTitle, { color: colors.text }]}>It's a Draw!</Text>
-                <Text style={[styles.modalSub, { color: colors.muted }]}>+{DRAW_POINTS} points</Text>
+                <Text
+                  style={
+                    styles.modalEmoji
+                  }
+                >
+                  🤝
+                </Text>
+
+                <Text
+                  style={[
+                    styles.modalTitle,
+                    {
+                      color:
+                        colors.text,
+                    },
+                  ]}
+                >
+                  It's a Draw!
+                </Text>
+
+                <Text
+                  style={[
+                    styles.modalSub,
+                    {
+                      color:
+                        colors.muted,
+                    },
+                  ]}
+                >
+                  +{DRAW_POINTS}{' '}
+                  points
+                </Text>
               </>
-            ) : winResult?.winner === 'X' ? (
+            ) : (
+              isVsComputer
+                ? winResult?.winner ===
+                  'X'
+                : winResult?.winner ===
+                  myMark
+            ) ? (
               <>
-                <Text style={styles.modalEmoji}>🎉</Text>
-                <Text style={[styles.modalTitle, { color: colors.accent }]}>You Win!</Text>
-                <Text style={[styles.modalSub, { color: colors.muted }]}>+{WIN_POINTS} points · {difficultyLevel.toUpperCase()}</Text>
-                <Text style={[styles.modalNext, { color: colors.muted }]}>Try again for a higher score!</Text>
+                <Text
+                  style={
+                    styles.modalEmoji
+                  }
+                >
+                  🎉
+                </Text>
+
+                <Text
+                  style={[
+                    styles.modalTitle,
+                    {
+                      color:
+                        colors.accent,
+                    },
+                  ]}
+                >
+                  You Win!
+                </Text>
+
+                <Text
+                  style={[
+                    styles.modalSub,
+                    {
+                      color:
+                        colors.muted,
+                    },
+                  ]}
+                >
+                  +{WIN_POINTS}{' '}
+                  points ·{' '}
+                  {difficultyLevel.toUpperCase()}
+                </Text>
               </>
             ) : (
               <>
-                <Text style={styles.modalEmoji}>😔</Text>
-                <Text style={[styles.modalTitle, { color: colors.text }]}>{opp === 'computer' ? 'Computer Wins!' : 'O Wins!'}</Text>
-                <Text style={[styles.modalSub, { color: colors.muted }]}>Better luck next time</Text>
+                <Text
+                  style={
+                    styles.modalEmoji
+                  }
+                >
+                  😔
+                </Text>
+
+                <Text
+                  style={[
+                    styles.modalTitle,
+                    {
+                      color:
+                        colors.text,
+                    },
+                  ]}
+                >
+                  {isVsComputer
+                    ? 'Computer Wins!'
+                    : 'You Lost'}
+                </Text>
+
+                <Text
+                  style={[
+                    styles.modalSub,
+                    {
+                      color:
+                        colors.muted,
+                    },
+                  ]}
+                >
+                  Better luck next
+                  time
+                </Text>
               </>
             )}
-            <View style={styles.modalBtns}>
-              <Pressable onPress={handlePlayAgain} style={[styles.btnPrimary, { backgroundColor: colors.accent }]}>
-                <Text style={[styles.btnPrimaryText, { color: colors.onAccent }]}>Play Again</Text>
+
+            <View
+              style={
+                styles.modalBtns
+              }
+            >
+              <Pressable
+                onPress={
+                  handlePlayAgain
+                }
+                style={[
+                  styles.btnPrimary,
+                  {
+                    backgroundColor:
+                      colors.accent,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.btnPrimaryText,
+                    {
+                      color:
+                        colors.onAccent,
+                    },
+                  ]}
+                >
+                  {isVsComputer
+                    ? 'Play Again'
+                    : 'Back to Games'}
+                </Text>
               </Pressable>
-              <Pressable onPress={() => router.back()} style={[styles.btnSecondary, { backgroundColor: colors.border }]}>
-                <Text style={[styles.btnSecondaryText, { color: colors.text }]}>Exit</Text>
+
+              {isVsComputer && (
+                <Pressable
+                  onPress={
+                    handleExitPress
+                  }
+                  style={[
+                    styles.btnSecondary,
+                    {
+                      backgroundColor:
+                        colors.border,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.btnSecondaryText,
+                      {
+                        color:
+                          colors.text,
+                      },
+                    ]}
+                  >
+                    Exit
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ───────────────────────────────────────────────────────────────────
+          EXIT CONFIRMATION MODAL
+      ──────────────────────────────────────────────────────────────────── */}
+
+      <Modal
+        transparent
+        visible={
+          exitModalVisible
+        }
+        animationType="fade"
+        onRequestClose={
+          handleCancelExit
+        }
+      >
+        <View
+          style={
+            styles.overlay
+          }
+        >
+          <View
+            style={[
+              styles.exitModal,
+              {
+                backgroundColor:
+                  colors.card,
+                borderColor:
+                  colors.border,
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.exitTitle,
+                {
+                  color:
+                    colors.text,
+                },
+              ]}
+            >
+              Exit Game?
+            </Text>
+
+            <Text
+              style={[
+                styles.exitSub,
+                {
+                  color:
+                    colors.muted,
+                },
+              ]}
+            >
+              Are you sure you want to
+              exit this game?
+            </Text>
+
+            <Text
+              style={[
+                styles.exitWarning,
+                {
+                  color:
+                    colors.muted,
+                },
+              ]}
+            >
+              Your current game will be
+              cancelled and no points will
+              be awarded.
+            </Text>
+
+            <View
+              style={
+                styles.exitButtons
+              }
+            >
+              <Pressable
+                onPress={
+                  handleCancelExit
+                }
+                style={[
+                  styles.btnPrimary,
+                  {
+                    backgroundColor:
+                      colors.accent,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.btnPrimaryText,
+                    {
+                      color:
+                        colors.onAccent,
+                    },
+                  ]}
+                >
+                  Keep Playing
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={
+                  handleConfirmExit
+                }
+                style={[
+                  styles.btnSecondary,
+                  {
+                    backgroundColor:
+                      colors.border,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.btnSecondaryText,
+                    {
+                      color:
+                        colors.text,
+                    },
+                  ]}
+                >
+                  Exit Game
+                </Text>
               </Pressable>
             </View>
           </View>
@@ -335,31 +1827,225 @@ export default function TicTacToe() {
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
+// ─── Styles ──────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
-  safe: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 28, paddingVertical: 12, borderBottomWidth: 1 },
-  headerBack: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { fontFamily: 'Poppins-ExtraBold', fontSize: 16, letterSpacing: 1 },
-  levelBadge: { borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 },
-  levelLabel: { fontFamily: 'Poppins-Bold', fontSize: 11, letterSpacing: 0.5 },
-  statusBar: { alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1 },
-  statusText: { fontFamily: 'Poppins-Medium', fontSize: 14 },
-  boardContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16, paddingVertical: 8 },
-  board: { flexDirection: 'column' },
-  boardRow: { flexDirection: 'row', flex: 1, width: '100%' },
-  cell: { flex: 1, borderWidth: 1, borderRadius: 6, alignItems: 'center', justifyContent: 'center', margin: 1 },
-  cellText: { fontFamily: 'Poppins-Bold' },
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', alignItems: 'center', justifyContent: 'center', padding: 24 },
-  modal: { width: '100%', borderRadius: 20, padding: 28, alignItems: 'center', borderWidth: 1 },
-  modalEmoji: { fontSize: 48, marginBottom: 8 },
-  modalTitle: { fontFamily: 'Poppins-ExtraBold', fontSize: 26, marginBottom: 6, textAlign: 'center' },
-  modalSub: { fontFamily: 'Poppins-Medium', fontSize: 15, marginBottom: 4 },
-  modalNext: { fontFamily: 'Poppins-Regular', fontSize: 13, marginBottom: 24 },
-  modalBtns: { width: '100%', gap: 12 },
-  btnPrimary: { borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
-  btnPrimaryText: { fontFamily: 'Poppins-Bold', fontSize: 16 },
-  btnSecondary: { borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
-  btnSecondaryText: { fontFamily: 'Poppins-SemiBold', fontSize: 16 },
-});
+const styles =
+  StyleSheet.create({
+    safe: {
+      flex: 1,
+    },
+
+    header: {
+      flexDirection:
+        'row',
+      alignItems:
+        'center',
+      justifyContent:
+        'space-between',
+      paddingHorizontal: 16,
+      paddingTop: 28,
+      paddingVertical: 12,
+      borderBottomWidth: 1,
+    },
+
+    headerBack: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      alignItems:
+        'center',
+      justifyContent:
+        'center',
+    },
+
+    headerTitle: {
+      fontFamily:
+        'Poppins-ExtraBold',
+      fontSize: 16,
+      letterSpacing: 1,
+    },
+
+    levelBadge: {
+      borderRadius: 20,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+    },
+
+    levelLabel: {
+      fontFamily:
+        'Poppins-Bold',
+      fontSize: 11,
+      letterSpacing: 0.5,
+    },
+
+    statusBar: {
+      alignItems:
+        'center',
+      paddingVertical: 10,
+      borderBottomWidth: 1,
+    },
+
+    statusText: {
+      fontFamily:
+        'Poppins-Medium',
+      fontSize: 14,
+    },
+
+    boardContainer: {
+      flex: 1,
+      alignItems:
+        'center',
+      justifyContent:
+        'center',
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+    },
+
+    board: {
+      flexDirection:
+        'column',
+    },
+
+    boardRow: {
+      flexDirection:
+        'row',
+      flex: 1,
+      width: '100%',
+    },
+
+    cell: {
+      flex: 1,
+      borderWidth: 1,
+      borderRadius: 6,
+      alignItems:
+        'center',
+      justifyContent:
+        'center',
+      margin: 1,
+    },
+
+    cellText: {
+      fontFamily:
+        'Poppins-Bold',
+    },
+
+    overlay: {
+      flex: 1,
+      backgroundColor:
+        'rgba(0,0,0,0.75)',
+      alignItems:
+        'center',
+      justifyContent:
+        'center',
+      padding: 24,
+    },
+
+    modal: {
+      width: '100%',
+      borderRadius: 20,
+      padding: 28,
+      alignItems:
+        'center',
+      borderWidth: 1,
+    },
+
+    modalEmoji: {
+      fontSize: 48,
+      marginBottom: 8,
+    },
+
+    modalTitle: {
+      fontFamily:
+        'Poppins-ExtraBold',
+      fontSize: 26,
+      marginBottom: 6,
+      textAlign:
+        'center',
+    },
+
+    modalSub: {
+      fontFamily:
+        'Poppins-Medium',
+      fontSize: 15,
+      marginBottom: 4,
+      textAlign:
+        'center',
+    },
+
+    modalBtns: {
+      width: '100%',
+      gap: 12,
+      marginTop: 16,
+    },
+
+    btnPrimary: {
+      borderRadius: 12,
+      paddingVertical: 14,
+      alignItems:
+        'center',
+    },
+
+    btnPrimaryText: {
+      fontFamily:
+        'Poppins-Bold',
+      fontSize: 16,
+    },
+
+    btnSecondary: {
+      borderRadius: 12,
+      paddingVertical: 14,
+      alignItems:
+        'center',
+    },
+
+    btnSecondaryText: {
+      fontFamily:
+        'Poppins-SemiBold',
+      fontSize: 16,
+    },
+
+    // Exit confirmation popup.
+    exitModal: {
+      width: '100%',
+      maxWidth: 420,
+      borderRadius: 20,
+      padding: 28,
+      alignItems:
+        'center',
+      borderWidth: 1,
+    },
+
+    exitTitle: {
+      fontFamily:
+        'Poppins-ExtraBold',
+      fontSize: 25,
+      textAlign:
+        'center',
+      marginBottom: 8,
+    },
+
+    exitSub: {
+      fontFamily:
+        'Poppins-Medium',
+      fontSize: 15,
+      textAlign:
+        'center',
+      lineHeight: 22,
+    },
+
+    exitWarning: {
+      fontFamily:
+        'Poppins-Regular',
+      fontSize: 13,
+      textAlign:
+        'center',
+      lineHeight: 20,
+      marginTop: 8,
+    },
+
+    exitButtons: {
+      width: '100%',
+      gap: 12,
+      marginTop: 22,
+    },
+  });

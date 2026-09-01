@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -19,11 +20,11 @@ import {
 import { router, useLocalSearchParams } from 'expo-router';
 import { Audio } from 'expo-av';
 import * as DocumentPicker from 'expo-document-picker';
-import * as ImagePicker from 'expo-image-picker';
 
 import {
   BarChart3,
   Calendar,
+  CheckCheck,
   ChevronLeft,
   FileText,
   Image as ImageIcon,
@@ -34,11 +35,19 @@ import {
   Play,
   Send,
   Square,
+  Tag,
   X,
 } from 'lucide-react-native';
 
 import { useApp } from '@/components/AppProvider';
 import { supabase } from '@/lib/supabase';
+import {
+  ensureDirectConversation,
+  getConversationReadMap,
+  loadChatMessages,
+  markConversationRead,
+  sendChatMessage,
+} from './chatHelpers';
 
 const FONT = 'Poppins-Regular';
 const FONT_MED = 'Poppins-Medium';
@@ -49,9 +58,15 @@ type Profile = {
   user_id: string;
   display_name: string;
   username: string;
+  bio?: string | null;
+  badge?: string | null;
+  avatar_url?: string | null;
+  title?: string | null;
+  tag?: string | null;
+  profile_title?: string | null;
 } | null;
 
-type AttachmentType = 'image' | 'audio' | 'document';
+type AttachmentType = 'image' | 'video' | 'audio' | 'document';
 
 type Message = {
   id: string;
@@ -103,7 +118,7 @@ const SYSTEM_CHAT_TITLES: Record<string, string> = {
 };
 
 export default function ChatDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, from } = useLocalSearchParams<{ id: string; from?: string }>();
 
   const {
     isDark,
@@ -161,10 +176,8 @@ export default function ChatDetailScreen() {
   const soundRef = useRef<Audio.Sound | null>(null);
 
   const [menuOpen, setMenuOpen] = useState(false);
-  const [attachOpen, setAttachOpen] = useState(false);
 
   const [reportOpen, setReportOpen] = useState(false);
-  const [groupOpen, setGroupOpen] = useState(false);
 
   const [reportReason, setReportReason] = useState('');
   const [reportSubmitting, setReportSubmitting] = useState(false);
@@ -177,6 +190,9 @@ export default function ChatDetailScreen() {
   const [pollOpen, setPollOpen] = useState(false);
   const [eventOpen, setEventOpen] = useState(false);
   const [profileViewOpen, setProfileViewOpen] = useState(false);
+  const [tagModalOpen, setTagModalOpen] = useState(false);
+  const [chatTags, setChatTags] = useState<{ id: string; name: string }[]>([]);
+  const [assignedTagIds, setAssignedTagIds] = useState<string[]>([]);
 
   const [pollQuestion, setPollQuestion] = useState('');
   const [pollOptions, setPollOptions] = useState<string[]>(['', '']);
@@ -191,7 +207,7 @@ export default function ChatDetailScreen() {
 
   const listRef = useRef<FlatList<Message>>(null);
 
-  const conversationId = `direct:${id}`;
+  const [conversationId, setConversationId] = useState<string>('');
 
   const showToast = useCallback((message: string) => {
     setToast(message);
@@ -206,6 +222,30 @@ export default function ChatDetailScreen() {
       listRef.current?.scrollToEnd({ animated });
     }, 60);
   }, []);
+
+  const loadChatTags = useCallback(async () => {
+    if (!myId) return;
+    const [{ data: tags }, { data: assignments }] = await Promise.all([
+      supabase.from('social_chat_tags').select('id, name').eq('user_id', myId).order('created_at', { ascending: true }),
+      supabase.from('social_chat_tag_assignments').select('tag_id').eq('user_id', myId).eq('chat_id', id ?? ''),
+    ]);
+    setChatTags((tags ?? []) as { id: string; name: string }[]);
+    setAssignedTagIds((assignments ?? []).map((row: any) => row.tag_id));
+  }, [myId, id]);
+
+  const toggleChatTag = async (tagId: string) => {
+    if (!myId || !id) return;
+    const assigned = assignedTagIds.includes(tagId);
+    if (assigned) {
+      const { error } = await supabase.from('social_chat_tag_assignments').delete().eq('user_id', myId).eq('chat_id', id).eq('tag_id', tagId);
+      if (error) { showToast(error.message || 'Could not remove tag.'); return; }
+      setAssignedTagIds((previous) => previous.filter((value) => value !== tagId));
+    } else {
+      const { error } = await supabase.from('social_chat_tag_assignments').insert({ user_id: myId, chat_id: id, tag_id: tagId });
+      if (error && error.code !== '23505') { showToast(error.message || 'Could not add tag.'); return; }
+      setAssignedTagIds((previous) => previous.includes(tagId) ? previous : [...previous, tagId]);
+    }
+  };
 
   /*
    * Load the person being chatted with.
@@ -227,7 +267,7 @@ export default function ChatDetailScreen() {
 
     const { data, error } = await supabase
       .from('social_profiles')
-      .select('user_id, display_name, username')
+      .select('*')
       .eq('user_id', id)
       .maybeSingle();
 
@@ -255,33 +295,22 @@ export default function ChatDetailScreen() {
       return;
     }
 
-    if (!id) {
+    if (!conversationId) {
       setMessagesLoading(false);
       return;
     }
 
     setMessagesLoading(true);
     setMessagesError(null);
-
-    const { data, error } = await supabase
-      .from('social_messages')
-      .select(
-        'id, conversation_id, sender_id, content, created_at, attachment_url, attachment_type, attachment_name',
-      )
-      .eq('conversation_id', conversationId)
-      .order('created_at', {
-        ascending: true,
-      });
-
-    if (error) {
-      console.error('Messages load error:', error);
+    const result = await loadChatMessages(conversationId);
+    if (result.error) {
+      console.error('Messages load error:', result.error);
       setMessagesError('Could not load messages.');
     } else {
-      setMessages((data ?? []) as Message[]);
+      setMessages(result.messages as Message[]);
     }
-
     setMessagesLoading(false);
-  }, [conversationId, id, isSidekick]);
+  }, [conversationId, isSidekick]);
 
   /*
    * Load current authenticated user.
@@ -300,6 +329,24 @@ export default function ChatDetailScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!myId || !id || isSidekick) return;
+    let cancelled = false;
+    (async () => {
+      const result = await ensureDirectConversation(myId, id);
+      if (!cancelled) {
+        if (result.error || !result.id) {
+          setMessagesError(result.error?.message || 'Could not open conversation.');
+          setConversationId('');
+        } else {
+          setConversationId(result.id);
+          await markConversationRead(result.id, myId);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [myId, id, isSidekick]);
+
   /*
    * Load profile and messages.
    */
@@ -307,6 +354,10 @@ export default function ChatDetailScreen() {
     loadProfile();
     loadMessages();
   }, [loadProfile, loadMessages]);
+
+  useEffect(() => {
+    if (myId && !isSidekick) void loadChatTags();
+  }, [myId, isSidekick, loadChatTags]);
 
   useEffect(() => {
     if (messages.length > 0) {
@@ -428,12 +479,8 @@ export default function ChatDetailScreen() {
    * NORMAL CHAT
    */
   const handleSendNormalChat = async (text: string) => {
-    if (!text || sending || !myId) {
-      return;
-    }
-
+    if (!text || sending || !myId || !conversationId) return;
     setSending(true);
-
     const optimistic: Message = {
       id: `local-${Date.now()}`,
       conversation_id: conversationId,
@@ -441,38 +488,17 @@ export default function ChatDetailScreen() {
       content: text,
       created_at: new Date().toISOString(),
     };
-
-    setMessages((previous) => [
-      ...previous,
-      optimistic,
-    ]);
-
+    setMessages((previous) => [...previous, optimistic]);
     setDraft('');
     scrollToBottom();
-
-    const { error } = await supabase
-      .from('social_messages')
-      .insert({
-        conversation_id: conversationId,
-        sender_id: myId,
-        content: text,
-      });
-
-    if (error) {
-      console.error('Send message error:', error);
-
-      setMessages((previous) =>
-        previous.filter(
-          (message) =>
-            message.id !== optimistic.id,
-        ),
-      );
-
+    const result = await sendChatMessage(conversationId, myId, text);
+    if (result.error) {
+      console.error('Send message error:', result.error);
+      setMessages((previous) => previous.filter((message) => message.id !== optimistic.id));
       showToast('Failed to send message.');
-    } else {
-      await loadMessages();
+    } else if (result.message) {
+      setMessages((previous) => previous.map((message) => message.id === optimistic.id ? result.message as Message : message));
     }
-
     setSending(false);
   };
 
@@ -545,17 +571,8 @@ export default function ChatDetailScreen() {
     url: string,
     fileName: string,
   ) => {
-    if (!myId) {
-      return;
-    }
-
-    const fallbackContent =
-      type === 'image'
-        ? '📷 Photo'
-        : type === 'audio'
-          ? '🎤 Voice message'
-          : `📄 ${fileName}`;
-
+    if (!myId || !conversationId) return;
+    const fallbackContent = type === 'image' ? '📷 Photo' : type === 'video' ? '🎬 Video' : type === 'audio' ? '🎤 Voice message' : `📄 ${fileName}`;
     const optimistic: Message = {
       id: `local-${Date.now()}`,
       conversation_id: conversationId,
@@ -566,100 +583,16 @@ export default function ChatDetailScreen() {
       attachment_type: type,
       attachment_name: fileName,
     };
-
-    setMessages((previous) => [
-      ...previous,
-      optimistic,
-    ]);
-
+    setMessages((previous) => [...previous, optimistic]);
     scrollToBottom();
-
-    const { error } = await supabase
-      .from('social_messages')
-      .insert({
-        conversation_id: conversationId,
-        sender_id: myId,
-        content: fallbackContent,
-        attachment_url: url,
-        attachment_type: type,
-        attachment_name: fileName,
-      });
-
-    if (error) {
-      console.error(
-        'SEND ATTACHMENT MESSAGE ERROR:',
-        error,
-      );
-
-      setMessages((previous) =>
-        previous.filter(
-          (message) =>
-            message.id !== optimistic.id,
-        ),
-      );
-
+    const result = await sendChatMessage(conversationId, myId, fallbackContent, { url, name: fileName, type: type === 'image' ? 'image/jpeg' : type === 'video' ? 'video/mp4' : type === 'audio' ? 'audio/m4a' : 'application/octet-stream' });
+    if (result.error) {
+      console.error('SEND ATTACHMENT MESSAGE ERROR:', result.error);
+      setMessages((previous) => previous.filter((message) => message.id !== optimistic.id));
       showToast('Failed to send attachment.');
-    } else {
-      await loadMessages();
+    } else if (result.message) {
+      setMessages((previous) => previous.map((message) => message.id === optimistic.id ? result.message as Message : message));
     }
-  };
-
-  const handlePickImage = async () => {
-    const permission =
-      await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-    if (!permission.granted) {
-      showToast(
-        'Photo library access is needed to attach a photo.',
-      );
-
-      return;
-    }
-
-    const result =
-      await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.7,
-      });
-
-    if (
-      result.canceled ||
-      !result.assets?.length
-    ) {
-      return;
-    }
-
-    const asset = result.assets[0];
-
-    const fileName =
-      asset.fileName ??
-      `photo-${Date.now()}.jpg`;
-
-    const mimeType =
-      asset.mimeType ??
-      'image/jpeg';
-
-    setUploadingAttachment(true);
-
-    const url = await uploadAttachment(
-      asset.uri,
-      'image',
-      fileName,
-      mimeType,
-    );
-
-    setUploadingAttachment(false);
-
-    if (!url) {
-      showToast('Could not upload photo.');
-      return;
-    }
-
-    await sendAttachmentMessage(
-      'image',
-      url,
-      fileName,
-    );
   };
 
   const handlePickDocument = async (
@@ -941,39 +874,46 @@ export default function ChatDetailScreen() {
   }, []);
 
   /*
-   * ATTACHMENT MENU
+   * ATTACHMENTS
+   * Open the device file picker directly. No bottom attachment sheet.
    */
-  const handleAttachment = (
-    option: AttachmentOption,
-  ) => {
-    setAttachOpen(false);
+  const handlePickAttachment = async () => {
+    if (uploadingAttachment || !myId || !conversationId) return;
 
-    switch (option.key) {
-      case 'poll':
-        setPollQuestion('');
-        setPollOptions(['', '']);
-        setPollOpen(true);
-        break;
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: '*/*',
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
 
-      case 'event':
-        setEventTitle('');
-        setEventDate('');
-        setEventTime('');
-        setEventDesc('');
-        setEventOpen(true);
-        break;
+      if (result.canceled || !result.assets?.length) return;
 
-      case 'image':
-        handlePickImage();
-        break;
+      const asset = result.assets[0];
+      const fileName = asset.name ?? `file-${Date.now()}`;
+      const mimeType = asset.mimeType ?? 'application/octet-stream';
+      const type: AttachmentType = mimeType.startsWith('image/')
+        ? 'image'
+        : mimeType.startsWith('video/')
+          ? 'video'
+          : mimeType.startsWith('audio/')
+            ? 'audio'
+            : 'document';
 
-      case 'audio':
-        handlePickDocument(true);
-        break;
+      setUploadingAttachment(true);
+      const url = await uploadAttachment(asset.uri, type, fileName, mimeType);
+      setUploadingAttachment(false);
 
-      case 'document':
-        handlePickDocument(false);
-        break;
+      if (!url) {
+        showToast('Could not upload attachment.');
+        return;
+      }
+
+      await sendAttachmentMessage(type, url, fileName);
+    } catch (error) {
+      setUploadingAttachment(false);
+      console.error('PICK ATTACHMENT ERROR:', error);
+      showToast('Could not select attachment.');
     }
   };
 
@@ -1023,15 +963,7 @@ export default function ChatDetailScreen() {
 
     scrollToBottom();
 
-    const { error } =
-      await supabase
-        .from('social_messages')
-        .insert({
-          conversation_id:
-            conversationId,
-          sender_id: myId,
-          content,
-        });
+    const { error } = await sendChatMessage(conversationId, myId, content).then((r) => ({ error: r.error }));
 
     if (error) {
       console.error(
@@ -1102,15 +1034,7 @@ export default function ChatDetailScreen() {
 
     scrollToBottom();
 
-    const { error } =
-      await supabase
-        .from('social_messages')
-        .insert({
-          conversation_id:
-            conversationId,
-          sender_id: myId,
-          content,
-        });
+    const { error } = await sendChatMessage(conversationId, myId, content).then((r) => ({ error: r.error }));
 
     if (error) {
       console.error(
@@ -1233,6 +1157,19 @@ export default function ChatDetailScreen() {
     }, 700);
   };
 
+  const handleDeleteChat = async () => {
+    if (!myId || !conversationId || isSidekick) return;
+    setActionLoading('delete');
+    const { error } = await supabase
+      .from('chat_conversation_members')
+      .delete()
+      .eq('conversation_id', conversationId)
+      .eq('user_id', myId);
+    setActionLoading(null);
+    if (error) { showToast('Could not delete chat.'); return; }
+    router.replace('/chat' as never);
+  };
+
   /*
    * CLEAR CHAT
    */
@@ -1281,14 +1218,11 @@ export default function ChatDetailScreen() {
       return;
     }
 
-    const { error } =
-      await supabase
-        .from('social_messages')
-        .delete()
-        .eq(
-          'conversation_id',
-          conversationId,
-        );
+    const { error } = await supabase
+      .from('chat_messages')
+      .delete()
+      .eq('conversation_id', conversationId)
+      .eq('sender_id', myId);
 
     setActionLoading(null);
 
@@ -1313,122 +1247,58 @@ export default function ChatDetailScreen() {
    * CREATE GROUP
    */
   const handleCreateGroup = async () => {
-    const name =
-      groupName.trim();
-
-    if (
-      !name ||
-      groupSubmitting ||
-      !myId ||
-      !id ||
-      isSidekick
-    ) {
-      return;
-    }
-
+    const name = groupName.trim();
+    if (!name || groupSubmitting || !myId || !id || isSidekick) return;
     setGroupSubmitting(true);
 
-    const {
-      data: groupData,
-      error: groupError,
-    } = await supabase
-      .from('social_groups')
-      .insert({
-        name,
-        created_by: myId,
-      })
-      .select('id')
-      .single();
+    try {
+      const { data: groupData, error: groupError } = await supabase
+        .from('chat_groups')
+        .insert({ name, description: '', visibility: 'private', owner_id: myId })
+        .select('id')
+        .single();
+      if (groupError || !groupData) throw groupError ?? new Error('Could not create group.');
+      const groupId = groupData.id;
 
-    if (
-      groupError ||
-      !groupData
-    ) {
-      console.error(
-        'CREATE GROUP ERROR:',
-        groupError,
-      );
+      const { error: memberError } = await supabase
+        .from('chat_group_members')
+        .insert({ group_id: groupId, user_id: myId, role: 'owner' });
+      if (memberError) throw memberError;
 
+      const { data: channelData, error: channelError } = await supabase
+        .from('chat_channels')
+        .insert({ group_id: groupId, name, description: '', position: 0, is_default: true, created_by: myId })
+        .select('id')
+        .single();
+      if (channelError || !channelData) throw channelError ?? new Error('Could not create group channel.');
+
+      const { data: conversationData, error: conversationError } = await supabase
+        .from('chat_conversations')
+        .insert({ type: 'channel', group_id: groupId, channel_id: channelData.id, created_by: myId })
+        .select('id')
+        .single();
+      if (conversationError || !conversationData) throw conversationError ?? new Error('Could not create group conversation.');
+
+      const { error: conversationMemberError } = await supabase
+        .from('chat_conversation_members')
+        .insert({ conversation_id: conversationData.id, user_id: myId });
+      if (conversationMemberError) throw conversationMemberError;
+
+      const { data: inviteData, error: inviteError } = await supabase
+        .from('chat_group_invitations')
+        .insert({ group_id: groupId, inviter_id: myId, invitee_id: id, status: 'pending' })
+        .select('id')
+        .single();
+      if (inviteError) throw inviteError;
+
+      setGroupSuccess(`Group created${inviteData ? ` and invite sent to ${profile?.display_name ?? 'user'}` : ''}`);
+      setGroupName('');
+    } catch (error: any) {
+      console.error('CREATE GROUP ERROR:', error);
+      showToast(error?.message || 'Could not create group.');
+    } finally {
       setGroupSubmitting(false);
-
-      showToast(
-        'Could not create group.',
-      );
-
-      return;
     }
-
-    const groupId =
-      (
-        groupData as {
-          id: string;
-        }
-      ).id;
-
-    const {
-      error: memberError,
-    } = await supabase
-      .from('social_group_members')
-      .insert({
-        group_id: groupId,
-        profile_id: myId,
-        role: 'admin',
-      });
-
-    if (memberError) {
-      console.error(
-        'ADD GROUP MEMBER ERROR:',
-        memberError,
-      );
-
-      setGroupSubmitting(false);
-
-      showToast(
-        'Could not add you to group.',
-      );
-
-      return;
-    }
-
-    const {
-      error: inviteError,
-    } = await supabase
-      .from('social_group_invites')
-      .insert({
-        group_id: groupId,
-        inviter_id: myId,
-        invitee_id: id,
-        status: 'pending',
-      });
-
-    setGroupSubmitting(false);
-
-    if (inviteError) {
-      console.error(
-        'GROUP INVITE ERROR:',
-        inviteError,
-      );
-
-      showToast(
-        'Group created, but invite failed.',
-      );
-
-      return;
-    }
-
-    setGroupSuccess(
-      `Group invite sent to ${
-        profile?.display_name ??
-        'user'
-      }`,
-    );
-
-    setGroupName('');
-
-    setTimeout(() => {
-      setGroupSuccess(null);
-      setGroupOpen(false);
-    }, 1800);
   };
 
   /*
@@ -1526,6 +1396,17 @@ export default function ChatDetailScreen() {
               }
               resizeMode="cover"
             />
+          ) : null}
+
+          {item.attachment_type ===
+            'video' &&
+          item.attachment_url ? (
+            <Pressable
+              onPress={() => Linking.openURL(item.attachment_url!)}
+              style={[styles.docBubble, { borderColor: outgoing ? 'rgba(255,255,255,0.4)' : colors.border }]}
+            >
+              <Text style={[styles.docBubbleText, { color: outgoing ? onAccent : colors.text }]}>🎬 Video</Text>
+            </Pressable>
           ) : null}
 
           {item.attachment_type ===
@@ -1654,6 +1535,9 @@ export default function ChatDetailScreen() {
           >
             {time}
           </Text>
+          {outgoing ? (
+            <CheckCheck color={accentForeground} size={14} strokeWidth={2.2} style={{ marginLeft: 4 }} />
+          ) : null}
         </View>
       </View>
     );
@@ -1678,9 +1562,6 @@ export default function ChatDetailScreen() {
   const closeMenu = () =>
     setMenuOpen(false);
 
-  const closeAttach = () =>
-    setAttachOpen(false);
-
   return (
     <SafeAreaView
       style={[
@@ -1703,11 +1584,7 @@ export default function ChatDetailScreen() {
         ]}
       >
         <Pressable
-          onPress={() =>
-            router.replace(
-              '/chat' as never,
-            )
-          }
+          onPress={() => router.replace('/chat' as never)}
           hitSlop={12}
           style={styles.headerBtn}
         >
@@ -1767,13 +1644,10 @@ export default function ChatDetailScreen() {
                   <Text
                     style={[
                       styles.activeText,
-                      {
-                        color:
-                          colors.muted,
-                      },
+                      { color: colors.muted },
                     ]}
                   >
-                    Active now
+                    {profile?.title || profile?.tag || profile?.profile_title || 'Friend'}
                   </Text>
                 </View>
               ) : null}
@@ -1871,7 +1745,7 @@ export default function ChatDetailScreen() {
                     },
                   ]}
                 >
-                  Hi! I’m your Sidekick 👋
+                  Hi! I’m your Sidekick 👣
                 </Text>
 
                 <Text
@@ -1883,7 +1757,7 @@ export default function ChatDetailScreen() {
                     },
                   ]}
                 >
-                  How can I help you today?
+                  I'm here to help you improve your life, one atomic habit at a time!
                 </Text>
               </>
             ) : (
@@ -1929,136 +1803,39 @@ export default function ChatDetailScreen() {
       </View>
 
       {/* COMPOSER */}
-
       <KeyboardAvoidingView
-        behavior={
-          Platform.OS === 'ios'
-            ? 'padding'
-            : undefined
-        }
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={0}
       >
-        <View
-          style={[
-            styles.composer,
-            {
-              backgroundColor:
-                colors.card,
-              borderTopColor:
-                colors.border,
-            },
-          ]}
-        >
-          {!isSidekick &&
-          !isRecording ? (
+        <View style={[styles.composer, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
+          {!isSidekick && !isRecording ? (
             <Pressable
-              onPress={() =>
-                setAttachOpen(true)
-              }
+              onPress={handlePickAttachment}
+              disabled={uploadingAttachment || sending}
               hitSlop={8}
-              style={[
-                styles.attachBtn,
-                {
-                  backgroundColor:
-                    colors.card,
-                  borderColor:
-                    colors.border,
-                },
-              ]}
+              style={[styles.attachBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
             >
-              <Paperclip
-                color={
-                  colors.muted
-                }
-                size={20}
-              />
+              {uploadingAttachment ? <ActivityIndicator color={accentForeground} size="small" /> : <Paperclip color={colors.muted} size={20} />}
             </Pressable>
           ) : null}
 
           {isRecording ? (
-            <View
-              style={[
-                styles.recordingRow,
-                {
-                  borderColor:
-                    colors.border,
-                  backgroundColor:
-                    colors.bg,
-                },
-              ]}
-            >
-              <View
-                style={
-                  styles.recordingDot
-                }
-              />
-
-              <Text
-                style={[
-                  styles.recordingText,
-                  {
-                    color:
-                      colors.text,
-                  },
-                ]}
-              >
-                Recording…{' '}
-                {Math.floor(
-                  recordingSeconds /
-                    60,
-                )}
-                :
-                {String(
-                  recordingSeconds %
-                    60,
-                ).padStart(
-                  2,
-                  '0',
-                )}
+            <View style={[styles.recordingRow, { borderColor: colors.border, backgroundColor: colors.bg }]}>
+              <View style={styles.recordingDot} />
+              <Text style={[styles.recordingText, { color: colors.text }]}>
+                Recording… {Math.floor(recordingSeconds / 60)}:{String(recordingSeconds % 60).padStart(2, '0')}
               </Text>
-
-              <Pressable
-                onPress={
-                  cancelRecording
-                }
-                hitSlop={8}
-                style={
-                  styles.recordingCancelBtn
-                }
-              >
-                <X
-                  color={
-                    colors.muted
-                  }
-                  size={18}
-                />
+              <Pressable onPress={cancelRecording} hitSlop={8} style={styles.recordingCancelBtn}>
+                <X color={colors.muted} size={18} />
               </Pressable>
             </View>
           ) : (
             <TextInput
               value={draft}
-              onChangeText={
-                setDraft
-              }
-              placeholder={
-                isSidekick
-                  ? 'Message Sidekick…'
-                  : 'Type a message…'
-              }
-              placeholderTextColor={
-                colors.muted
-              }
-              style={[
-                styles.input,
-                {
-                  color:
-                    colors.text,
-                  backgroundColor:
-                    colors.bg,
-                  borderColor:
-                    colors.border,
-                },
-              ]}
+              onChangeText={setDraft}
+              placeholder={isSidekick ? 'Message Sidekick…' : 'Type a message…'}
+              placeholderTextColor={colors.muted}
+              style={[styles.input, { color: colors.text, backgroundColor: colors.bg, borderColor: colors.border }]}
               multiline
               maxLength={2000}
               scrollEnabled={false}
@@ -2067,93 +1844,16 @@ export default function ChatDetailScreen() {
           )}
 
           {isRecording ? (
-            <Pressable
-              onPress={
-                stopRecordingAndSend
-              }
-              hitSlop={8}
-              style={[
-                styles.sendBtn,
-                {
-                  backgroundColor:
-                    accentForeground,
-                },
-              ]}
-            >
-              {uploadingAttachment ? (
-                <ActivityIndicator
-                  color="#FFFFFF"
-                  size="small"
-                />
-              ) : (
-                <Square
-                  color="#FFFFFF"
-                  size={16}
-                />
-              )}
+            <Pressable onPress={stopRecordingAndSend} disabled={uploadingAttachment} hitSlop={8} style={[styles.sendBtn, { backgroundColor: accentForeground }]}>
+              {uploadingAttachment ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Square color="#FFFFFF" size={16} />}
             </Pressable>
-          ) : !isSidekick &&
-            !draft.trim() ? (
-            <Pressable
-              onPress={
-                startRecording
-              }
-              disabled={
-                uploadingAttachment
-              }
-              hitSlop={8}
-              style={[
-                styles.sendBtn,
-                {
-                  backgroundColor:
-                    accentForeground,
-                },
-                uploadingAttachment &&
-                  styles.sendBtnDisabled,
-              ]}
-            >
-              {uploadingAttachment ? (
-                <ActivityIndicator
-                  color="#FFFFFF"
-                  size="small"
-                />
-              ) : (
-                <Mic
-                  color="#FFFFFF"
-                  size={18}
-                />
-              )}
+          ) : !isSidekick && !draft.trim() ? (
+            <Pressable onPress={startRecording} disabled={uploadingAttachment} hitSlop={8} style={[styles.sendBtn, { backgroundColor: accentForeground }, uploadingAttachment && styles.sendBtnDisabled]}>
+              <Mic color="#FFFFFF" size={18} />
             </Pressable>
           ) : (
-            <Pressable
-              onPress={handleSend}
-              disabled={
-                !draft.trim() ||
-                sending
-              }
-              hitSlop={8}
-              style={[
-                styles.sendBtn,
-                {
-                  backgroundColor:
-                    accentForeground,
-                },
-                (!draft.trim() ||
-                  sending) &&
-                  styles.sendBtnDisabled,
-              ]}
-            >
-              {sending ? (
-                <ActivityIndicator
-                  color="#FFFFFF"
-                  size="small"
-                />
-              ) : (
-                <Send
-                  color="#FFFFFF"
-                  size={18}
-                />
-              )}
+            <Pressable onPress={handleSend} disabled={!draft.trim() || sending} hitSlop={8} style={[styles.sendBtn, { backgroundColor: accentForeground }, (!draft.trim() || sending) && styles.sendBtnDisabled]}>
+              {sending ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Send color="#FFFFFF" size={18} />}
             </Pressable>
           )}
         </View>
@@ -2193,327 +1893,68 @@ export default function ChatDetailScreen() {
         </View>
       ) : null}
 
-      {/* ATTACHMENT SHEET */}
-
-      <Modal
-        visible={attachOpen}
-        transparent
-        animationType="slide"
-        onRequestClose={
-          closeAttach
-        }
-      >
-        <Pressable
-          style={
-            styles.sheetShade
-          }
-          onPress={closeAttach}
-        />
-
-        <View
-          style={[
-            styles.sheet,
-            {
-              backgroundColor:
-                colors.card,
-              borderTopColor:
-                colors.border,
-            },
-          ]}
-        >
-          <View
-            style={[
-              styles.sheetHandle,
-              {
-                backgroundColor:
-                  colors.border,
-              },
-            ]}
-          />
-
-          <View
-            style={
-              styles.sheetHeader
-            }
-          >
-            <Text
-              style={[
-                styles.sheetTitle,
-                {
-                  color:
-                    colors.text,
-                },
-              ]}
-            >
-              Attach
-            </Text>
-
-            <Pressable
-              onPress={
-                closeAttach
-              }
-              hitSlop={12}
-            >
-              <X
-                color={
-                  colors.muted
-                }
-                size={22}
-              />
+      {/* CHAT OPTIONS — top-right dropdown */}
+      {menuOpen ? (
+        <Pressable style={styles.menuBackdrop} onPress={closeMenu}>
+          <View style={[styles.dropdownMenu, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            {!isSidekick ? (
+              <>
+                <Pressable style={styles.menuItem} onPress={() => { closeMenu(); setReportOpen(true); }}>
+                  <Text style={[styles.menuItemText, { color: colors.text }]}>Report</Text>
+                </Pressable>
+                <Pressable style={styles.menuItem} onPress={handleBlock} disabled={actionLoading === 'block'}>
+                  <Text style={[styles.menuItemText, { color: colors.text }]}>{actionLoading === 'block' ? 'Blocking…' : 'Block'}</Text>
+                </Pressable>
+                <Pressable style={styles.menuItem} onPress={() => { closeMenu(); setTagModalOpen(true); void loadChatTags(); }}>
+                  <Text style={[styles.menuItemText, { color: colors.text }]}>Add Tag</Text>
+                </Pressable>
+                <Pressable style={styles.menuItem} onPress={() => { closeMenu(); Alert.alert('Delete chat?', 'This removes the conversation from your chat list.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: handleDeleteChat }]); }}>
+                  <Text style={[styles.menuItemText, { color: '#C84D4D' }]}>Delete Chat</Text>
+                </Pressable>
+              </>
+            ) : null}
+            <Pressable style={styles.menuItem} onPress={handleClearChat} disabled={actionLoading === 'clear'}>
+              <Text style={[styles.menuItemText, { color: colors.text }]}>{actionLoading === 'clear' ? 'Clearing…' : 'Clear Chat'}</Text>
             </Pressable>
           </View>
+        </Pressable>
+      ) : null}
 
-          <View
-            style={
-              styles.attachGrid
-            }
-          >
-            {ATTACHMENT_OPTIONS.map(
-              (option) => {
-                const Icon =
-                  option.Icon;
-
-                return (
-                  <Pressable
-                    key={
-                      option.key
-                    }
-                    style={
-                      styles.attachItem
-                    }
-                    onPress={() =>
-                      handleAttachment(
-                        option,
-                      )
-                    }
-                  >
-                    <View
-                      style={[
-                        styles.attachIcon,
-                        {
-                          backgroundColor:
-                            accentWash,
-                        },
-                      ]}
-                    >
-                      <Icon
-                        color={
-                          accentForeground
-                        }
-                        size={22}
-                      />
-                    </View>
-
-                    <Text
-                      style={[
-                        styles.attachLabel,
-                        {
-                          color:
-                            colors.text,
-                        },
-                      ]}
-                    >
-                      {
-                        option.label
-                      }
-                    </Text>
-                  </Pressable>
-                );
-              },
-            )}
+      <Modal visible={tagModalOpen} transparent animationType="fade" onRequestClose={() => setTagModalOpen(false)}>
+        <View style={styles.subShade}>
+          <View style={[styles.subSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.subHeader}>
+              <Text style={[styles.subTitle, { color: colors.text }]}>Add Tag</Text>
+              <Pressable onPress={() => setTagModalOpen(false)} hitSlop={12}><X color={colors.muted} size={22} /></Pressable>
+            </View>
+            {chatTags.length === 0 ? (
+              <Text style={[styles.subHint, { color: colors.muted }]}>You haven't created any tags yet.</Text>
+            ) : chatTags.map((tag) => {
+              const selected = assignedTagIds.includes(tag.id);
+              return (
+                <Pressable key={tag.id} onPress={() => toggleChatTag(tag.id)} style={[styles.menuItem, { borderBottomColor: colors.border }]}>
+                  <Text style={[styles.menuItemText, { color: selected ? accentForeground : colors.text }]}>{selected ? '✓ ' : ''}{tag.name}</Text>
+                </Pressable>
+              );
+            })}
           </View>
         </View>
       </Modal>
 
-      {/* CHAT OPTIONS */}
-
-      <Modal
-        visible={menuOpen}
-        transparent
-        animationType="slide"
-        onRequestClose={
-          closeMenu
-        }
-      >
-        <Pressable
-          style={
-            styles.sheetShade
-          }
-          onPress={closeMenu}
-        />
-
-        <View
-          style={[
-            styles.sheet,
-            {
-              backgroundColor:
-                colors.card,
-              borderTopColor:
-                colors.border,
-            },
-          ]}
-        >
-          <View
-            style={[
-              styles.sheetHandle,
-              {
-                backgroundColor:
-                  colors.border,
-              },
-            ]}
-          />
-
-          <View
-            style={
-              styles.sheetHeader
-            }
-          >
-            <Text
-              style={[
-                styles.sheetTitle,
-                {
-                  color:
-                    colors.text,
-                },
-              ]}
-            >
-              Chat options
-            </Text>
-
-            <Pressable
-              onPress={closeMenu}
-              hitSlop={12}
-            >
-              <X
-                color={
-                  colors.muted
-                }
-                size={22}
-              />
-            </Pressable>
+      <Modal visible={profileViewOpen} transparent animationType="fade" onRequestClose={() => setProfileViewOpen(false)}>
+        <View style={styles.subShade}>
+          <View style={[styles.subSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.subHeader}>
+              <Text style={[styles.subTitle, { color: colors.text }]}>Profile</Text>
+              <Pressable onPress={() => setProfileViewOpen(false)} hitSlop={12}><X color={colors.muted} size={22} /></Pressable>
+            </View>
+            {profile?.avatar_url ? <Image source={{ uri: profile.avatar_url }} style={styles.profileViewAvatarImage} /> : <View style={[styles.profileViewAvatar, { backgroundColor: accentForeground }]}><Text style={[styles.profileViewAvatarText, { color: '#FFFFFF' }]}>{(profile?.display_name || '?').slice(0,1).toUpperCase()}</Text></View>}
+            <Text style={[styles.profileName, { color: colors.text }]}>{profile?.display_name || 'User'}</Text>
+            <Text style={[styles.profileUsername, { color: colors.muted }]}>@{profile?.username || ''}</Text>
+            {(profile?.title || profile?.tag || profile?.profile_title) ? <Text style={[styles.profileBadge, { color: accentForeground }]}>{profile.title || profile.tag || profile.profile_title}</Text> : null}
+            {profile?.badge ? <Text style={[styles.profileBadge, { color: accentForeground }]}>{profile.badge}</Text> : null}
+            {profile?.bio ? <Text style={[styles.profileBio, { color: colors.muted }]}>{profile.bio}</Text> : null}
           </View>
-
-          {!isSidekick ? (
-            <>
-              <Pressable
-                style={[
-                  styles.menuItem,
-                  {
-                    borderBottomColor:
-                      colors.border,
-                  },
-                ]}
-                onPress={() => {
-                  closeMenu();
-                  setReportOpen(
-                    true,
-                  );
-                }}
-              >
-                <Text
-                  style={[
-                    styles.menuItemText,
-                    {
-                      color:
-                        colors.text,
-                    },
-                  ]}
-                >
-                  Report
-                </Text>
-              </Pressable>
-
-              <Pressable
-                style={[
-                  styles.menuItem,
-                  {
-                    borderBottomColor:
-                      colors.border,
-                  },
-                ]}
-                onPress={
-                  handleBlock
-                }
-                disabled={
-                  actionLoading ===
-                  'block'
-                }
-              >
-                <Text
-                  style={[
-                    styles.menuItemText,
-                    {
-                      color:
-                        colors.text,
-                    },
-                  ]}
-                >
-                  {actionLoading ===
-                  'block'
-                    ? 'Blocking…'
-                    : 'Block'}
-                </Text>
-              </Pressable>
-            </>
-          ) : null}
-
-          <Pressable
-            style={[
-              styles.menuItem,
-              {
-                borderBottomColor:
-                  colors.border,
-              },
-            ]}
-            onPress={
-              handleClearChat
-            }
-            disabled={
-              actionLoading ===
-              'clear'
-            }
-          >
-            <Text
-              style={[
-                styles.menuItemText,
-                {
-                  color:
-                    colors.text,
-                },
-              ]}
-            >
-              {actionLoading ===
-              'clear'
-                ? 'Clearing…'
-                : 'Clear Chat'}
-            </Text>
-          </Pressable>
-
-          {!isSidekick ? (
-            <Pressable
-              style={
-                styles.menuItem
-              }
-              onPress={() => {
-                closeMenu();
-                setGroupOpen(
-                  true,
-                );
-              }}
-            >
-              <Text
-                style={[
-                  styles.menuItemText,
-                  {
-                    color:
-                      colors.text,
-                  },
-                ]}
-              >
-                Add to Group
-              </Text>
-            </Pressable>
-          ) : null}
         </View>
       </Modal>
 
@@ -2666,747 +2107,6 @@ export default function ChatDetailScreen() {
         </View>
       </Modal>
 
-      {/* ADD TO GROUP */}
-
-      <Modal
-        visible={groupOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() =>
-          setGroupOpen(false)
-        }
-      >
-        <View
-          style={
-            styles.subShade
-          }
-        >
-          <View
-            style={[
-              styles.subSheet,
-              {
-                backgroundColor:
-                  colors.card,
-                borderColor:
-                  colors.border,
-              },
-            ]}
-          >
-            <View
-              style={
-                styles.subHeader
-              }
-            >
-              <Text
-                style={[
-                  styles.subTitle,
-                  {
-                    color:
-                      colors.text,
-                  },
-                ]}
-              >
-                Add to Group
-              </Text>
-
-              <Pressable
-                onPress={() =>
-                  setGroupOpen(
-                    false,
-                  )
-                }
-                hitSlop={12}
-              >
-                <X
-                  color={
-                    colors.muted
-                  }
-                  size={22}
-                />
-              </Pressable>
-            </View>
-
-            {groupSuccess ? (
-              <View
-                style={
-                  styles.successWrap
-                }
-              >
-                <Text
-                  style={[
-                    styles.successText,
-                    {
-                      color:
-                        accentForeground,
-                    },
-                  ]}
-                >
-                  {groupSuccess}
-                </Text>
-              </View>
-            ) : (
-              <>
-                <Text
-                  style={[
-                    styles.subHint,
-                    {
-                      color:
-                        colors.muted,
-                    },
-                  ]}
-                >
-                  Create a new group
-                  and invite{' '}
-                  {profile?.display_name ??
-                    'this user'}.
-                </Text>
-
-                <TextInput
-                  value={groupName}
-                  onChangeText={
-                    setGroupName
-                  }
-                  placeholder="Group name"
-                  placeholderTextColor={
-                    colors.muted
-                  }
-                  style={[
-                    styles.subInput,
-                    {
-                      color:
-                        colors.text,
-                      backgroundColor:
-                        colors.bg,
-                      borderColor:
-                        colors.border,
-                    },
-                  ]}
-                  autoFocus
-                />
-
-                <Pressable
-                  onPress={
-                    handleCreateGroup
-                  }
-                  disabled={
-                    !groupName.trim() ||
-                    groupSubmitting
-                  }
-                  style={[
-                    styles.subAction,
-                    {
-                      backgroundColor:
-                        accentForeground,
-                    },
-                    (!groupName.trim() ||
-                      groupSubmitting) &&
-                      styles.sendBtnDisabled,
-                  ]}
-                >
-                  {groupSubmitting ? (
-                    <ActivityIndicator
-                      color="#FFFFFF"
-                      size="small"
-                    />
-                  ) : (
-                    <Text
-                      style={
-                        styles.subActionText
-                      }
-                    >
-                      Create Group
-                    </Text>
-                  )}
-                </Pressable>
-              </>
-            )}
-          </View>
-        </View>
-      </Modal>
-
-      {/* POLL */}
-
-      <Modal
-        visible={pollOpen}
-        transparent
-        animationType="slide"
-        onRequestClose={() =>
-          setPollOpen(false)
-        }
-      >
-        <View
-          style={
-            styles.modalShade
-          }
-        >
-          <View
-            style={[
-              styles.sheet,
-              {
-                backgroundColor:
-                  colors.card,
-                borderTopColor:
-                  colors.border,
-              },
-            ]}
-          >
-            <View
-              style={
-                styles.sheetHeader
-              }
-            >
-              <Text
-                style={[
-                  styles.sheetTitle,
-                  {
-                    color:
-                      colors.text,
-                  },
-                ]}
-              >
-                Create poll
-              </Text>
-
-              <Pressable
-                onPress={() =>
-                  setPollOpen(
-                    false,
-                  )
-                }
-                hitSlop={12}
-              >
-                <X
-                  color={
-                    colors.muted
-                  }
-                  size={22}
-                />
-              </Pressable>
-            </View>
-
-            <TextInput
-              value={pollQuestion}
-              onChangeText={
-                setPollQuestion
-              }
-              placeholder="Ask a question"
-              placeholderTextColor={
-                colors.muted
-              }
-              style={[
-                styles.subInput,
-                {
-                  color:
-                    colors.text,
-                  backgroundColor:
-                    colors.bg,
-                  borderColor:
-                    colors.border,
-                },
-              ]}
-              autoFocus
-            />
-
-            {pollOptions.map(
-              (option, index) => (
-                <View
-                  key={index}
-                  style={
-                    styles.pollOptionRow
-                  }
-                >
-                  <TextInput
-                    value={option}
-                    onChangeText={(
-                      text,
-                    ) => {
-                      setPollOptions(
-                        (previous) =>
-                          previous.map(
-                            (
-                              current,
-                              currentIndex,
-                            ) =>
-                              currentIndex ===
-                              index
-                                ? text
-                                : current,
-                          ),
-                      );
-                    }}
-                    placeholder={`Option ${
-                      index + 1
-                    }`}
-                    placeholderTextColor={
-                      colors.muted
-                    }
-                    style={[
-                      styles.subInput,
-                      {
-                        color:
-                          colors.text,
-                        backgroundColor:
-                          colors.bg,
-                        borderColor:
-                          colors.border,
-                        marginBottom: 0,
-                        flex: 1,
-                      },
-                    ]}
-                  />
-
-                  {pollOptions.length >
-                  2 ? (
-                    <Pressable
-                      onPress={() =>
-                        setPollOptions(
-                          (previous) =>
-                            previous.filter(
-                              (
-                                _,
-                                currentIndex,
-                              ) =>
-                                currentIndex !==
-                                index,
-                            ),
-                        )
-                      }
-                      hitSlop={8}
-                    >
-                      <X
-                        color={
-                          colors.muted
-                        }
-                        size={18}
-                      />
-                    </Pressable>
-                  ) : null}
-                </View>
-              ),
-            )}
-
-            <Pressable
-              onPress={() =>
-                setPollOptions(
-                  (previous) => [
-                    ...previous,
-                    '',
-                  ],
-                )
-              }
-              style={
-                styles.addOptionBtn
-              }
-            >
-              <Text
-                style={[
-                  styles.addOptionText,
-                  {
-                    color:
-                      accentForeground,
-                  },
-                ]}
-              >
-                + Add option
-              </Text>
-            </Pressable>
-
-            <Pressable
-              onPress={sendPoll}
-              disabled={
-                !pollQuestion.trim() ||
-                pollOptions.filter(
-                  (option) =>
-                    option.trim(),
-                ).length < 2
-              }
-              style={[
-                styles.subAction,
-                {
-                  backgroundColor:
-                    accentForeground,
-                },
-                (!pollQuestion.trim() ||
-                  pollOptions.filter(
-                    (option) =>
-                      option.trim(),
-                  ).length < 2) &&
-                  styles.sendBtnDisabled,
-              ]}
-            >
-              <Text
-                style={
-                  styles.subActionText
-                }
-              >
-                Send poll
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-
-      {/* EVENT */}
-
-      <Modal
-        visible={eventOpen}
-        transparent
-        animationType="slide"
-        onRequestClose={() =>
-          setEventOpen(false)
-        }
-      >
-        <View
-          style={
-            styles.modalShade
-          }
-        >
-          <View
-            style={[
-              styles.sheet,
-              {
-                backgroundColor:
-                  colors.card,
-                borderTopColor:
-                  colors.border,
-              },
-            ]}
-          >
-            <View
-              style={
-                styles.sheetHeader
-              }
-            >
-              <Text
-                style={[
-                  styles.sheetTitle,
-                  {
-                    color:
-                      colors.text,
-                  },
-                ]}
-              >
-                Create event
-              </Text>
-
-              <Pressable
-                onPress={() =>
-                  setEventOpen(
-                    false,
-                  )
-                }
-                hitSlop={12}
-              >
-                <X
-                  color={
-                    colors.muted
-                  }
-                  size={22}
-                />
-              </Pressable>
-            </View>
-
-            <TextInput
-              value={eventTitle}
-              onChangeText={
-                setEventTitle
-              }
-              placeholder="Event title"
-              placeholderTextColor={
-                colors.muted
-              }
-              style={[
-                styles.subInput,
-                {
-                  color:
-                    colors.text,
-                  backgroundColor:
-                    colors.bg,
-                  borderColor:
-                    colors.border,
-                },
-              ]}
-              autoFocus
-            />
-
-            <View
-              style={
-                styles.eventRow
-              }
-            >
-              <TextInput
-                value={eventDate}
-                onChangeText={
-                  setEventDate
-                }
-                placeholder="Date (YYYY-MM-DD)"
-                placeholderTextColor={
-                  colors.muted
-                }
-                style={[
-                  styles.subInput,
-                  {
-                    color:
-                      colors.text,
-                    backgroundColor:
-                      colors.bg,
-                    borderColor:
-                      colors.border,
-                    flex: 1,
-                    marginBottom: 0,
-                  },
-                ]}
-              />
-
-              <TextInput
-                value={eventTime}
-                onChangeText={
-                  setEventTime
-                }
-                placeholder="Time"
-                placeholderTextColor={
-                  colors.muted
-                }
-                style={[
-                  styles.subInput,
-                  {
-                    color:
-                      colors.text,
-                    backgroundColor:
-                      colors.bg,
-                    borderColor:
-                      colors.border,
-                    flex: 1,
-                    marginBottom: 0,
-                  },
-                ]}
-              />
-            </View>
-
-            <TextInput
-              value={eventDesc}
-              onChangeText={
-                setEventDesc
-              }
-              placeholder="Description (optional)"
-              placeholderTextColor={
-                colors.muted
-              }
-              style={[
-                styles.subInput,
-                {
-                  color:
-                    colors.text,
-                  backgroundColor:
-                    colors.bg,
-                  borderColor:
-                    colors.border,
-                },
-              ]}
-              multiline
-            />
-
-            <Text
-              style={[
-                styles.subHint,
-                {
-                  color:
-                    colors.muted,
-                },
-              ]}
-            >
-              Recipients who reply YES
-              will have this event added
-              to their calendar.
-            </Text>
-
-            <Pressable
-              onPress={sendEvent}
-              disabled={
-                !eventTitle.trim()
-              }
-              style={[
-                styles.subAction,
-                {
-                  backgroundColor:
-                    accentForeground,
-                },
-                !eventTitle.trim() &&
-                  styles.sendBtnDisabled,
-              ]}
-            >
-              <Text
-                style={
-                  styles.subActionText
-                }
-              >
-                Send event
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-
-      {/* PROFILE */}
-
-      <Modal
-        visible={
-          profileViewOpen
-        }
-        transparent
-        animationType="slide"
-        onRequestClose={() =>
-          setProfileViewOpen(
-            false,
-          )
-        }
-      >
-        <View
-          style={
-            styles.modalShade
-          }
-        >
-          <View
-            style={[
-              styles.sheet,
-              {
-                backgroundColor:
-                  colors.card,
-                borderTopColor:
-                  colors.border,
-              },
-            ]}
-          >
-            <View
-              style={
-                styles.sheetHeader
-              }
-            >
-              <Text
-                style={[
-                  styles.sheetTitle,
-                  {
-                    color:
-                      colors.text,
-                  },
-                ]}
-              >
-                Profile
-              </Text>
-
-              <Pressable
-                onPress={() =>
-                  setProfileViewOpen(
-                    false,
-                  )
-                }
-                hitSlop={12}
-              >
-                <X
-                  color={
-                    colors.muted
-                  }
-                  size={22}
-                />
-              </Pressable>
-            </View>
-
-            {profile ? (
-              <View
-                style={
-                  styles.profileViewBody
-                }
-              >
-                <View
-                  style={[
-                    styles.profileViewAvatar,
-                    {
-                      backgroundColor:
-                        accentForeground,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.profileViewAvatarText,
-                      {
-                        color:
-                          '#FFFFFF',
-                      },
-                    ]}
-                  >
-                    {profile.display_name
-                      .slice(0, 1)
-                      .toUpperCase()}
-                  </Text>
-                </View>
-
-                <Text
-                  style={[
-                    styles.profileName,
-                    {
-                      color:
-                        colors.text,
-                    },
-                  ]}
-                >
-                  {
-                    profile.display_name
-                  }
-                </Text>
-
-                <Text
-                  style={[
-                    styles.profileUsername,
-                    {
-                      color:
-                        colors.muted,
-                    },
-                  ]}
-                >
-                  @{profile.username}
-                </Text>
-              </View>
-            ) : (
-              <Text
-                style={[
-                  styles.subHint,
-                  {
-                    color:
-                      colors.muted,
-                  },
-                ]}
-              >
-                Profile not
-                available.
-              </Text>
-            )}
-
-            <Pressable
-              onPress={() =>
-                setProfileViewOpen(
-                  false,
-                )
-              }
-              style={[
-                styles.subAction,
-                {
-                  backgroundColor:
-                    accentForeground,
-                },
-              ]}
-            >
-              <Text
-                style={
-                  styles.subActionText
-                }
-              >
-                Close
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -3420,7 +2120,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
-    paddingTop: 28,
+    paddingTop: 36,
     paddingBottom: 12,
     borderBottomWidth: 1,
   },
@@ -3755,6 +2455,29 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
 
+  menuBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 50,
+  },
+
+  dropdownMenu: {
+    position: 'absolute',
+    top: 82,
+    right: 12,
+    width: 190,
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingVertical: 4,
+    shadowOpacity: 0.16,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 8,
+  },
+
   menuItem: {
     paddingVertical: 16,
     borderBottomWidth: 1,
@@ -3893,4 +2616,7 @@ const styles = StyleSheet.create({
     fontFamily: FONT,
     fontSize: 14,
   },
+    profileViewAvatarImage: { width: 78, height: 78, borderRadius: 39 },
+    profileBadge: { fontFamily: FONT_MED, fontSize: 13, marginTop: 8 },
+    profileBio: { fontFamily: FONT, fontSize: 13, lineHeight: 20, textAlign: 'center', marginTop: 8, maxWidth: 300 },
 });
