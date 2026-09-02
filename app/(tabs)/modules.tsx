@@ -6,12 +6,9 @@ import {
   Gamepad2,
   HeartPulse,
   ListChecks,
-  MoreVertical,
   BellRing,
   Sprout,
   WalletCards,
-  Settings,
-  ChevronLeft,
 } from 'lucide-react-native';
 import {
   ActivityIndicator,
@@ -379,13 +376,17 @@ function taskOccursToday(
 ========================================================= */
 
 export default function ModulesScreen() {
+  const appContext = useApp() as any;
+
   const {
     accentForeground,
     isDark,
-  } = useApp();
+  } = appContext;
 
-  const [menuOpen, setMenuOpen] =
-    useState(false);
+  const displayName =
+    appContext.display_name ||
+    appContext.profileName ||
+    'User';
 
   const [dashboard, setDashboard] =
     useState<DashboardState>(
@@ -1325,23 +1326,6 @@ export default function ModulesScreen() {
     ];
 
   /* =======================================================
-     BACK TO CHAT LIST
-     
-     The chat list is:
-     
-       app/(tabs)/index.tsx
-     
-     NOT /chat.
-  ======================================================= */
-
-  const goToChatList =
-    () => {
-      router.push(
-        '/(tabs)/' as any,
-      );
-    };
-
-  /* =======================================================
      RENDER
   ======================================================= */
 
@@ -1356,73 +1340,6 @@ export default function ModulesScreen() {
       ]}
     >
       {/* =================================================
-          HEADER
-      ================================================= */}
-
-      <View
-        style={[
-          styles.header,
-          {
-            borderBottomColor:
-              C.border,
-          },
-        ]}
-      >
-        {/* BACK TO CHAT LIST */}
-
-        <Pressable
-          onPress={goToChatList}
-          style={[
-            styles.backButton,
-            {
-              backgroundColor:
-                accentForeground,
-            },
-          ]}
-          hitSlop={8}
-          accessibilityLabel="Back to chat list"
-        >
-          <ChevronLeft
-            color="#FFFFFF"
-            size={21}
-            strokeWidth={3}
-          />
-        </Pressable>
-
-        {/* TITLE */}
-
-        <Text
-          style={[
-            styles.headerTitle,
-            {
-              color:
-                accentForeground,
-            },
-          ]}
-        >
-          DASHBOARD
-        </Text>
-
-        {/* MORE */}
-
-        <Pressable
-          onPress={() =>
-            setMenuOpen(true)
-          }
-          style={
-            styles.headerButton
-          }
-          hitSlop={12}
-          accessibilityLabel="More options"
-        >
-          <MoreVertical
-            color={C.text}
-            size={22}
-          />
-        </Pressable>
-      </View>
-
-      {/* =================================================
           DASHBOARD
       ================================================= */}
 
@@ -1434,6 +1351,30 @@ export default function ModulesScreen() {
           false
         }
       >
+        <View style={styles.homeHero}>
+          <Text
+            style={[
+              styles.homeHeroName,
+              {
+                color: accentForeground,
+              },
+            ]}
+          >
+            {displayName},
+          </Text>
+
+          <Text
+            style={[
+              styles.homeHeroSubtitle,
+              {
+                color: C.muted,
+              },
+            ]}
+          >
+            What would you like to do today?
+          </Text>
+        </View>
+
         <View
           style={
             styles.grid
@@ -1543,6 +1484,24 @@ export default function ModulesScreen() {
           )}
         </View>
 
+        {/* =================================================
+            SIDEKICK UPDATES / INSTRUCTIONS
+        ================================================= */}
+        <View
+          style={[
+            styles.sidekickPlaceholder,
+            {
+              backgroundColor: accentForeground,
+            },
+          ]}
+        >
+          <Text style={styles.sidekickLabel}>SIDEKICK</Text>
+          <Text style={styles.sidekickTitle}>Updates & instructions</Text>
+          <Text style={styles.sidekickBody}>
+            Your Sidekick will use this space for important updates, guidance, reminders, and instructions.
+          </Text>
+        </View>
+
         {hasError && (
           <View
             style={
@@ -1580,77 +1539,6 @@ export default function ModulesScreen() {
         )}
       </ScrollView>
 
-      {/* =================================================
-          SETTINGS MENU
-      ================================================= */}
-
-      {menuOpen && (
-        <Pressable
-          style={
-            styles.menuOverlay
-          }
-          onPress={() =>
-            setMenuOpen(false)
-          }
-        >
-          <Pressable
-            style={[
-              styles.menu,
-              {
-                backgroundColor:
-                  C.card,
-                borderColor:
-                  C.border,
-              },
-            ]}
-            onPress={(event) =>
-              event.stopPropagation()
-            }
-          >
-            <Pressable
-              onPress={() => {
-                setMenuOpen(false);
-
-                router.push(
-                  '/(tabs)/profile',
-                );
-              }}
-              style={
-                styles.menuItem
-              }
-            >
-              <View
-                style={[
-                  styles.menuIcon,
-                  {
-                    backgroundColor:
-                      C.soft,
-                  },
-                ]}
-              >
-                <Settings
-                  color={
-                    accentForeground
-                  }
-                  size={17}
-                />
-              </View>
-
-              <Text
-                style={[
-                  styles.menuItemText,
-                  {
-                    color:
-                      C.text,
-                  },
-                ]}
-              >
-                Settings
-              </Text>
-            </Pressable>
-          </Pressable>
-        </Pressable>
-      )}
     </SafeAreaView>
   );
 }
@@ -1663,48 +1551,6 @@ const styles =
   StyleSheet.create({
     safe: {
       flex: 1,
-    },
-
-    /* =====================================================
-       HEADER
-    ===================================================== */
-
-    header: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent:
-        'space-between',
-      paddingHorizontal: 16,
-      paddingTop: 24,
-      paddingBottom: 8,
-      borderBottomWidth: 1,
-    },
-
-    headerTitle: {
-      fontFamily: FONT_BOLD,
-      fontSize: 18,
-      letterSpacing: 0.8,
-    },
-
-    /* =====================================================
-       BACK BUTTON
-    ===================================================== */
-
-    backButton: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      alignItems: 'center',
-      justifyContent:
-        'center',
-    },
-
-    headerButton: {
-      width: 40,
-      height: 40,
-      alignItems: 'center',
-      justifyContent:
-        'center',
     },
 
     /* =====================================================
@@ -1728,6 +1574,25 @@ const styles =
        THREE COLUMNS EVEN ON MOBILE
     ===================================================== */
 
+    homeHero: {
+      paddingTop: 2,
+      paddingBottom: 24,
+    },
+
+    homeHeroName: {
+      fontFamily: FONT_BOLD,
+      fontSize: 28,
+      lineHeight: 34,
+      letterSpacing: -0.8,
+    },
+
+    homeHeroSubtitle: {
+      fontFamily: FONT,
+      fontSize: 12,
+      lineHeight: 17,
+      marginTop: 2,
+    },
+
     grid: {
       width: '100%',
       flexDirection: 'row',
@@ -1748,6 +1613,41 @@ const styles =
       justifyContent:
         'center',
       gap: 7,
+    },
+
+    sidekickPlaceholder: {
+      width: '100%',
+      minHeight: 228,
+      borderRadius: 24,
+      marginTop: 18,
+      paddingHorizontal: 24,
+      paddingVertical: 24,
+      alignItems: 'flex-start',
+      justifyContent: 'flex-start',
+    },
+
+    sidekickLabel: {
+      color: '#FFFFFF',
+      fontFamily: FONT_BOLD,
+      fontSize: 11,
+      letterSpacing: 1.4,
+      marginBottom: 10,
+    },
+
+    sidekickTitle: {
+      color: '#FFFFFF',
+      fontFamily: FONT_BOLD,
+      fontSize: 20,
+      lineHeight: 26,
+      marginBottom: 10,
+    },
+
+    sidekickBody: {
+      color: '#FFFFFF',
+      fontFamily: FONT,
+      fontSize: 12,
+      lineHeight: 19,
+      maxWidth: '95%',
     },
 
     modulePressed: {
@@ -1819,61 +1719,4 @@ const styles =
       textAlign: 'center',
     },
 
-    /* =====================================================
-       MENU
-    ===================================================== */
-
-    menuOverlay: {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      backgroundColor:
-        'rgba(0,0,0,0.18)',
-    },
-
-    menu: {
-      position: 'absolute',
-      top: 72,
-      right: 16,
-      minWidth: 190,
-      borderRadius: 16,
-      borderWidth: 1,
-      paddingVertical: 6,
-      paddingHorizontal: 6,
-
-      shadowColor: '#000',
-      shadowOffset: {
-        width: 0,
-        height: 4,
-      },
-      shadowOpacity: 0.15,
-      shadowRadius: 10,
-      elevation: 8,
-    },
-
-    menuItem: {
-      minHeight: 50,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-      paddingHorizontal: 8,
-      borderRadius: 11,
-    },
-
-    menuIcon: {
-      width: 32,
-      height: 32,
-      borderRadius: 10,
-      alignItems: 'center',
-      justifyContent:
-        'center',
-    },
-
-    menuItemText: {
-      fontFamily: FONT_SEMI,
-      fontSize: 13,
-      flex: 1,
-    },
   });

@@ -140,11 +140,6 @@ export default function ChatScreen() {
     isDark,
   } = appContext;
 
-  const displayName =
-    appContext.display_name ||
-    appContext.profileName ||
-    'User';
-
   /* =======================================================
      HABIT FLEX PARAMETERS
 
@@ -2432,36 +2427,6 @@ export default function ChatScreen() {
           }
         >
           <View
-            style={styles.hero}
-          >
-            <Text
-              style={[
-                styles.heroName,
-                {
-                  color:
-                    accentForeground,
-                },
-              ]}
-            >
-              {displayName},
-            </Text>
-
-            <Text
-              style={[
-                styles.heroSubtitle,
-                {
-                  color:
-                    C.muted,
-                },
-              ]}
-            >
-              What would you like
-              to take care of
-              today?
-            </Text>
-          </View>
-
-          <View
             style={
               styles.searchRow
             }
@@ -4428,26 +4393,7 @@ const styles =
 
     frozenHeader: {
       paddingHorizontal: 16,
-    },
-
-    hero: {
-      paddingTop: 38,
-      paddingBottom: 14,
-    },
-
-    heroName: {
-      fontFamily:
-        FONT_BOLD,
-      fontSize: 28,
-      lineHeight: 34,
-      letterSpacing: -0.8,
-    },
-
-    heroSubtitle: {
-      fontFamily: FONT,
-      fontSize: 12,
-      lineHeight: 17,
-      marginTop: 2,
+      paddingTop: 24,
     },
 
     searchRow: {
