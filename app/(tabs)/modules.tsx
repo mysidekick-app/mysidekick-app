@@ -1356,7 +1356,11 @@ export default function ModulesScreen() {
             style={[
               styles.homeHeroName,
               {
-                color: accentForeground,
+                color:
+                  isDark &&
+                  appContext.accent_family === 'black'
+                    ? '#FFFFFF'
+                    : accentForeground,
               },
             ]}
           >
@@ -1371,7 +1375,7 @@ export default function ModulesScreen() {
               },
             ]}
           >
-            What would you like to do today?
+            What would you like to take care today?
           </Text>
         </View>
 

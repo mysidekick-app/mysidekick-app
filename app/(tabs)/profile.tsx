@@ -525,6 +525,10 @@ const accentChoices: {
   label: string;
 }[] = [
   {
+    key: 'black',
+    label: 'Black',
+  },
+  {
     key: 'red',
     label: 'Red',
   },
@@ -1252,7 +1256,10 @@ export default function ProfileScreen() {
                 >
                   <Icon
                     color={
-                      accentForeground
+                      isDark &&
+                      accent_family === 'black'
+                        ? '#FFFFFF'
+                        : accentForeground
                     }
                     size={17}
                   />

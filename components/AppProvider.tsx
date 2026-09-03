@@ -14,6 +14,7 @@ import { useAuth } from '@/components/AuthProvider';
 export type ThemeMode = 'system' | 'light' | 'dark';
 
 export type AccentFamily =
+  | 'black'
   | 'red'
   | 'orange'
   | 'mustard'
@@ -58,7 +59,7 @@ const fallbackSettings: AppSettings = {
   title: '',
   bio: '',
   theme_mode: 'system',
-  accent_family: 'blue',
+  accent_family: 'black',
   currency_code: 'KES',
   timezone: 'Africa/Nairobi',
   username: '',
@@ -69,6 +70,13 @@ export const accentPalettes: Record<
   AccentFamily,
   AccentPalette
 > = {
+  black: {
+    light: '#5A5A5A',
+    standard: '#252525',
+    deep: '#111111',
+    wash: '#E9E9E9',
+  },
+
   red: {
     light: '#FF8E86',
     standard: '#E05252',
@@ -251,6 +259,29 @@ export function AppProvider({
       active = false;
     };
   }, [user, authLoading]);
+
+  // Publish the signed-in user's online presence globally so chat screens
+  // can show Active / Inactive without adding a database presence table.
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const channel = supabase.channel('global-presence', {
+      config: { presence: { key: user.id } },
+    });
+
+    channel.subscribe(async (status) => {
+      if (status === 'SUBSCRIBED') {
+        await channel.track({
+          user_id: user.id,
+          online_at: new Date().toISOString(),
+        });
+      }
+    });
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
 
   const updateSettings = async (
     changes: Partial<AppSettings>

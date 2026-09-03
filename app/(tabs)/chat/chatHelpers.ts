@@ -40,7 +40,10 @@ export async function ensureDirectConversation(
   const authenticatedUserId = authData.user?.id;
 
   if (authError || !authenticatedUserId) {
-    return { id: null, error: authError ?? new Error('You must be signed in.') };
+    return {
+      id: null,
+      error: authError ?? new Error('You must be signed in.'),
+    };
   }
 
   if (!myId || !otherUserId) {
@@ -50,27 +53,67 @@ export async function ensureDirectConversation(
     };
   }
 
-  if (authenticatedUserId !== myId) {
-    myId = authenticatedUserId;
-  }
+  const currentUserId = authenticatedUserId;
 
-  if (myId === otherUserId) {
+  if (currentUserId === otherUserId) {
     return {
       id: null,
       error: new Error('Cannot create a conversation with yourself.'),
     };
   }
 
-  // Find all direct conversations the current user belongs to.
+  /*
+   * First try the database RPC. Creation of a direct conversation needs
+   * both conversation memberships to be created atomically, so this is
+   * safer than doing three client-side inserts under RLS.
+   *
+   * The RPC is supplied by chat_direct_fixes.sql:
+   *   ensure_direct_conversation(p_other_user_id uuid)
+   */
+  const { data: rpcData, error: rpcError } = await supabase.rpc(
+    'ensure_direct_conversation',
+    {
+      p_other_user_id: otherUserId,
+    },
+  );
+
+  if (!rpcError) {
+    let conversationId: string | null = null;
+
+    if (typeof rpcData === 'string') {
+      conversationId = rpcData;
+    } else if (Array.isArray(rpcData)) {
+      const first = rpcData[0] as any;
+      conversationId = first?.id ?? first?.conversation_id ?? null;
+    } else if (rpcData && typeof rpcData === 'object') {
+      conversationId =
+        (rpcData as any).id ??
+        (rpcData as any).conversation_id ??
+        null;
+    }
+
+    if (conversationId) {
+      return {
+        id: conversationId,
+        error: null,
+      };
+    }
+  }
+
+  /*
+   * Fallback: find an already-existing direct conversation.
+   * This is useful during deployment before the RPC migration has been
+   * run, and it avoids creating duplicate conversations.
+   */
   const { data: myMemberships, error: myMembershipError } = await supabase
     .from('chat_conversation_members')
     .select('conversation_id')
-    .eq('user_id', myId);
+    .eq('user_id', currentUserId);
 
   if (myMembershipError) {
     return {
       id: null,
-      error: myMembershipError,
+      error: rpcError ?? myMembershipError,
     };
   }
 
@@ -83,11 +126,12 @@ export async function ensureDirectConversation(
   ];
 
   if (candidateIds.length > 0) {
-    const { data: directConversations, error: directError } = await supabase
-      .from('chat_conversations')
-      .select('id, type, group_id, channel_id')
-      .eq('type', 'direct')
-      .in('id', candidateIds);
+    const { data: directConversations, error: directError } =
+      await supabase
+        .from('chat_conversations')
+        .select('id, type, group_id, channel_id')
+        .eq('type', 'direct')
+        .in('id', candidateIds);
 
     if (directError) {
       return {
@@ -126,57 +170,17 @@ export async function ensureDirectConversation(
     }
   }
 
-  // Create a new direct conversation.
-  const { data: conversation, error: createError } = await supabase
-    .from('chat_conversations')
-    .insert({
-      type: 'direct',
-      group_id: null,
-      channel_id: null,
-      created_by: myId,
-    })
-    .select('id')
-    .single();
-
-  if (createError || !conversation) {
-    return {
-      id: null,
-      error:
-        createError ??
-        new Error('Unable to create direct conversation.'),
-    };
-  }
-
-  // Add both participants.
-  const { error: memberError } = await supabase
-    .from('chat_conversation_members')
-    .insert([
-      {
-        conversation_id: conversation.id,
-        user_id: myId,
-      },
-      {
-        conversation_id: conversation.id,
-        user_id: otherUserId,
-      },
-    ]);
-
-  if (memberError) {
-    // Best-effort cleanup.
-    await supabase
-      .from('chat_conversations')
-      .delete()
-      .eq('id', conversation.id);
-
-    return {
-      id: null,
-      error: memberError,
-    };
-  }
-
+  /*
+   * Do not attempt the old client-side creation path here. If the RPC is
+   * unavailable and no conversation exists, returning its error gives the
+   * UI a useful failure instead of creating a conversation that may only
+   * partially exist because of RLS.
+   */
   return {
-    id: conversation.id,
-    error: null,
+    id: null,
+    error:
+      rpcError ??
+      new Error('Unable to create the direct conversation.'),
   };
 }
 
@@ -620,6 +624,47 @@ export async function sendChatMessage(
     };
   }
 
+  const { data: authData, error: authError } = await supabase.auth.getUser();
+  const authenticatedUserId = authData.user?.id;
+
+  if (authError || !authenticatedUserId) {
+    return {
+      message: null,
+      error: authError ?? new Error('You must be signed in to send messages.'),
+    };
+  }
+
+  /* Never trust a sender ID supplied by the UI. */
+  if (senderId !== authenticatedUserId) {
+    senderId = authenticatedUserId;
+  }
+
+  /*
+   * Verify membership before attempting the message insert. This turns an
+   * opaque RLS failure into a clear error and also prevents the helper from
+   * trying to send into a conversation the current user cannot access.
+   */
+  const { data: membership, error: membershipError } = await supabase
+    .from('chat_conversation_members')
+    .select('id')
+    .eq('conversation_id', conversationId)
+    .eq('user_id', senderId)
+    .maybeSingle();
+
+  if (membershipError) {
+    return {
+      message: null,
+      error: membershipError,
+    };
+  }
+
+  if (!membership) {
+    return {
+      message: null,
+      error: new Error('You are not a member of this conversation.'),
+    };
+  }
+
   const trimmedBody = body.trim();
 
   if (!trimmedBody && !attachment) {
@@ -629,12 +674,6 @@ export async function sendChatMessage(
     };
   }
 
-  /*
-   * Insert the actual message first.
-   *
-   * chat_messages.body is NOT NULL, so use an empty string
-   * when the message consists only of an attachment.
-   */
   const { data, error } = await supabase
     .from('chat_messages')
     .insert({
@@ -666,13 +705,6 @@ export async function sendChatMessage(
     };
   }
 
-  /*
-   * Add attachment metadata if supplied.
-   *
-   * If the attachment table has not been created yet, we keep
-   * the message instead of deleting it. This prevents the
-   * "message appears then disappears" problem.
-   */
   let attachmentData: any = null;
 
   if (attachment) {
@@ -690,17 +722,32 @@ export async function sendChatMessage(
               : attachment.type.startsWith('audio/')
                 ? 'audio'
                 : attachment.type.startsWith('video/')
-                ? 'video'
-                : 'document',
+                  ? 'video'
+                  : 'document',
         })
         .select(
           'message_id, url, name, mime_type, attachment_type',
         )
         .single();
 
-    if (!attachmentError) {
-      attachmentData = createdAttachment;
+    if (attachmentError) {
+      console.error('CHAT ATTACHMENT METADATA ERROR:', attachmentError);
+      return {
+        message: {
+          id: data.id,
+          conversation_id: data.conversation_id,
+          sender_id: data.sender_id,
+          content: data.body ?? '',
+          created_at: data.created_at,
+          attachment_url: attachment.url,
+          attachment_name: attachment.name,
+          attachment_type: attachment.type,
+        },
+        error: attachmentError,
+      };
     }
+
+    attachmentData = createdAttachment;
   }
 
   return {

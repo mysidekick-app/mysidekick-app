@@ -53,6 +53,7 @@ type ChatItem = {
   detail: string;
   time: string;
   unread?: number;
+  lastMessageSenderId?: string;
   category: 'system' | 'groups' | 'direct';
   icon: string;
   profileId?: string;
@@ -140,12 +141,15 @@ export default function ChatScreen() {
     isDark,
   } = appContext;
 
+  const isBlackDark =
+    isDark && appContext.accent_family === 'black';
+
   /* =======================================================
      HABIT FLEX PARAMETERS
 
      Habits opens:
 
-     /chat?flex=1&streak=7&habitTitle=Morning%20Workout
+     /chat?shareStreak=true&streak=7&habitName=Morning%20Workout
 
      This puts the chat screen into recipient-selection
      mode instead of opening one person's conversation.
@@ -153,14 +157,16 @@ export default function ChatScreen() {
 
   const params = useLocalSearchParams<{
     flex?: string;
+    shareStreak?: string;
     streak?: string;
     habitTitle?: string;
+    habitName?: string;
     filter?: string;
   }>();
 
   const flexMode =
-    params.flex === '1' ||
-    params.flex === 'true';
+    params.shareStreak === '1' ||
+    params.shareStreak === 'true';
 
   const streakCount =
     Number(params.streak ?? 0);
@@ -168,7 +174,9 @@ export default function ChatScreen() {
   const habitTitle =
     typeof params.habitTitle === 'string'
       ? params.habitTitle
-      : '';
+      : typeof params.habitName === 'string'
+        ? params.habitName
+        : '';
 
   const streakMessage =
     streakCount > 0 && habitTitle
@@ -425,6 +433,10 @@ export default function ChatScreen() {
             const last = getDirectRows(profile.user_id)[0];
             return last ? formatChatTime(last.created_at) : '';
           })(),
+          lastMessageSenderId: (() => {
+            const last = getDirectRows(profile.user_id)[0];
+            return last?.sender_id;
+          })(),
           unread: (() => {
             const rows = getDirectRows(profile.user_id);
             const conversationId = conversationByFriend.get(profile.user_id);
@@ -598,6 +610,10 @@ export default function ChatScreen() {
           time: (() => {
             const last = (groupMessagesByConversation.get(conversationByGroup.get(group.id) ?? '') ?? [])[0];
             return last ? formatChatTime(last.created_at) : '';
+          })(),
+          lastMessageSenderId: (() => {
+            const last = (groupMessagesByConversation.get(conversationByGroup.get(group.id) ?? '') ?? [])[0];
+            return last?.sender_id;
           })(),
           unread: (() => {
             const rows = groupMessagesByConversation.get(conversationByGroup.get(group.id) ?? '') ?? [];
@@ -1628,7 +1644,7 @@ export default function ChatScreen() {
       setFlexError(null);
 
       router.replace(
-        '/chat' as never,
+        '/(tabs)' as never,
       );
     };
 
@@ -2227,8 +2243,8 @@ export default function ChatScreen() {
         bg: '#090909',
         card: '#111111',
         border: '#2A2A2A',
-        text: '#F4F2EE',
-        muted: '#AAA59D',
+        text: isBlackDark ? '#FFFFFF' : '#F4F2EE',
+        muted: isBlackDark ? '#FFFFFF' : '#AAA59D',
         input: '#171717',
         inputBorder: '#363636',
         divider: '#292929',
@@ -2614,7 +2630,7 @@ export default function ChatScreen() {
               ]}
             >
               <Plus
-                color={accentForeground}
+                color={isBlackDark ? '#FFFFFF' : accentForeground}
                 size={14}
                 strokeWidth={2.5}
               />
@@ -2623,7 +2639,9 @@ export default function ChatScreen() {
                   styles.filterText,
                   {
                     color:
-                      accentForeground,
+                      isBlackDark
+                        ? '#FFFFFF'
+                        : accentForeground,
                   },
                 ]}
               >
@@ -3346,27 +3364,6 @@ export default function ChatScreen() {
                           }
                         </Text>
 
-                        {chat.unread ? (
-                          <View
-                            style={[
-                              styles.unread,
-                              {
-                                backgroundColor:
-                                  accentForeground,
-                              },
-                            ]}
-                          >
-                            <Text
-                              style={
-                                styles.unreadText
-                              }
-                            >
-                              {
-                                chat.unread
-                              }
-                            </Text>
-                          </View>
-                        ) : null}
                       </View>
 
                       <Text
@@ -3406,9 +3403,28 @@ export default function ChatScreen() {
                         }
                       </Text>
 
-                      {chat.time && !chat.unread ? (
+                      {chat.unread ? (
+                        <View
+                          style={[
+                            styles.unread,
+                            {
+                              backgroundColor:
+                                accentForeground,
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={
+                              styles.unreadText
+                            }
+                          >
+                            {chat.unread}
+                          </Text>
+                        </View>
+                      ) : chat.time &&
+                        chat.lastMessageSenderId === myUserId ? (
                         <CheckCheck
-                          color={accentForeground}
+                          color={isBlackDark ? '#FFFFFF' : accentForeground}
                           size={15}
                           strokeWidth={2.2}
                         />
@@ -4393,7 +4409,7 @@ const styles =
 
     frozenHeader: {
       paddingHorizontal: 16,
-      paddingTop: 24,
+      paddingTop: 34,
     },
 
     searchRow: {
@@ -4599,7 +4615,7 @@ const styles =
 
     flexHeader: {
       paddingHorizontal: 16,
-      paddingTop: 22,
+      paddingTop: 28,
       paddingBottom: 10,
     },
 

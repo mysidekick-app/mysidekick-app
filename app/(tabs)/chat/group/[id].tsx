@@ -13,6 +13,8 @@ import {
   Text,
   TextInput,
   View,
+  Image,
+  Linking,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -31,6 +33,7 @@ import {
   Mic,
   Pause,
   Play,
+  Tag,
 } from 'lucide-react-native';
 import { useApp } from '@/components/AppProvider';
 import { supabase } from '@/lib/supabase';
@@ -75,7 +78,7 @@ type Message = {
   attachment_type?: string | null;
 };
 
-type MenuAction = 'clear' | 'delete' | 'exit' | 'edit';
+type MenuAction = 'clear' | 'delete' | 'exit' | 'edit' | 'tag';
 
 const FONT = 'Poppins-Regular';
 const FONT_MED = 'Poppins-Medium';
@@ -88,7 +91,9 @@ const ATTACHMENT_BUCKET = 'chat-attachments';
 
 export default function GroupScreen() {
   const { id: groupId } = useLocalSearchParams<{ id: string }>();
-  const { isDark, accentForeground, onAccent } = useApp();
+  const appContext = useApp() as any;
+  const { isDark, accentForeground, onAccent } = appContext;
+  const isBlackDark = isDark && appContext.accent_family === 'black';
 
   const colors = isDark
     ? {
@@ -160,6 +165,11 @@ export default function GroupScreen() {
   } | null>(null);
 
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [tagModalOpen, setTagModalOpen] = useState(false);
+  const [exitModalOpen, setExitModalOpen] = useState(false);
+  const [chatTags, setChatTags] = useState<any[]>([]);
+  const [chatTagAssignments, setChatTagAssignments] = useState<any[]>([]);
+  const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
 
   const listRef = useRef<FlatList<Message>>(null);
 
@@ -369,6 +379,19 @@ export default function GroupScreen() {
   }, [conversationId, loadMessages]);
 
   useEffect(() => {
+    if (!myId || !groupId) return;
+    const loadTags = async () => {
+      const [{ data: tags }, { data: assignments }] = await Promise.all([
+        supabase.from('social_chat_tags').select('id,name').eq('user_id', myId).order('name'),
+        supabase.from('social_chat_tag_assignments').select('tag_id').eq('user_id', myId).eq('chat_id', groupId),
+      ]);
+      setChatTags(tags ?? []);
+      setChatTagAssignments(assignments ?? []);
+    };
+    void loadTags();
+  }, [myId, groupId]);
+
+  useEffect(() => {
     if (!myId) return;
 
     setInfoLoading(true);
@@ -438,52 +461,73 @@ export default function GroupScreen() {
   // ── Promote member ────────────────────────────────────────────────────────
 
   const handlePromote = async (profileId: string) => {
-    if (!isAdmin || profileId === myId) return;
+    if (!isAdmin || profileId === myId || !groupId) return;
 
-    Alert.alert(
-      'Make admin?',
-      'This member will become an admin of the group.',
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-        {
-          text: 'Make Admin',
-          onPress: async () => {
-            const { error } = await supabase
+    Alert.alert('Make admin?', 'This member will become an admin of the group.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Make Admin',
+        onPress: async () => {
+          let { error } = await supabase.rpc('chat_group_set_member_role', {
+            p_group_id: groupId,
+            p_user_id: profileId,
+            p_role: 'admin',
+          });
+
+          if (error) {
+            const fallback = await supabase
               .from('chat_group_members')
               .update({ role: 'admin' })
               .eq('group_id', groupId)
               .eq('user_id', profileId);
+            error = fallback.error;
+          }
 
-            if (error) {
-              console.error('PROMOTE MEMBER ERROR:', error);
+          if (error) {
+            console.error('MAKE ADMIN ERROR:', error);
+            Alert.alert('Could not make admin', error.message || 'The admin action could not be completed.');
+            return;
+          }
 
-              Alert.alert(
-                'Could not update member',
-                error.message || 'Please try again.',
-              );
-
-              return;
-            }
-
-            await loadMembers();
-          },
+          await loadMembers();
         },
-      ],
-    );
+      },
+    ]);
   };
 
   const handleRemoveMember = (profileId: string, name: string) => {
-    if (!isAdmin || profileId === myId) return;
+    if (!isAdmin || profileId === myId || !groupId) return;
+
     Alert.alert('Remove member?', `Remove ${name} from this group?`, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Remove', style: 'destructive', onPress: async () => {
-        const { error } = await supabase.from('chat_group_members').delete().eq('group_id', groupId).eq('user_id', profileId);
-        if (error) Alert.alert('Could not remove member', error.message);
-        else await loadMembers();
-      } },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          let { error } = await supabase.rpc('chat_group_remove_member', {
+            p_group_id: groupId,
+            p_user_id: profileId,
+          });
+
+          if (error) {
+            const fallback = await supabase
+              .from('chat_group_members')
+              .delete()
+              .eq('group_id', groupId)
+              .eq('user_id', profileId);
+            error = fallback.error;
+          }
+
+          if (error) {
+            console.error('REMOVE MEMBER ERROR:', error);
+            Alert.alert('Could not remove member', error.message || 'The remove action could not be completed.');
+            return;
+          }
+
+          setMembers(previous => previous.filter(member => member.user_id !== profileId));
+          await loadMembers();
+        },
+      },
     ]);
   };
 
@@ -604,22 +648,56 @@ export default function GroupScreen() {
   };
 
   const handlePickAttachment = async () => {
-    if (!conversationId || uploadingAttachment || !myId) return;
+    if (!conversationId || !myId || uploadingAttachment) return;
     try {
-      const result = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true, multiple: false });
+      const result = await DocumentPicker.getDocumentAsync({
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
       if (result.canceled || !result.assets?.length) return;
       const file = result.assets[0];
-      const mime = file.mimeType || 'application/octet-stream';
-      const url = await uploadGroupAttachment(file.uri, file.name || `file-${Date.now()}`, mime);
-      if (!url) return;
-      setUploadingAttachment(true);
-      const sendResult = await sendChatMessage(conversationId, myId, mime.startsWith('image/') ? '📷 Photo' : mime.startsWith('video/') ? '🎬 Video' : mime.startsWith('audio/') ? '🎵 Audio' : `📄 ${file.name}`, { url, name: file.name || 'Attachment', type: mime });
-      setUploadingAttachment(false);
-      if (sendResult.error) Alert.alert('Message not sent', sendResult.error.message);
-      else if (sendResult.message) setMessages(prev => [...prev, sendResult.message as Message]);
+      setSelectedAttachment({
+        uri: file.uri,
+        name: file.name || `file-${Date.now()}`,
+        mimeType: file.mimeType || 'application/octet-stream',
+        size: file.size,
+      });
     } catch (error: any) {
-      setUploadingAttachment(false);
       Alert.alert('Could not select attachment', error?.message || 'Please try again.');
+    }
+  };
+
+  const sendSelectedAttachment = async () => {
+    if (!selectedAttachment || !conversationId || !myId || uploadingAttachment) return;
+    setUploadingAttachment(true);
+    try {
+      const url = await uploadGroupAttachment(
+        selectedAttachment.uri,
+        selectedAttachment.name,
+        selectedAttachment.mimeType,
+      );
+      if (!url) return;
+      const mime = selectedAttachment.mimeType;
+      const content = mime.startsWith('image/') ? '📷 Photo' : mime.startsWith('video/') ? '🎬 Video' : mime.startsWith('audio/') ? '🎤 Voice message' : `📄 ${selectedAttachment.name}`;
+      const result = await sendChatMessage(conversationId, myId, content, {
+        url,
+        name: selectedAttachment.name,
+        type: mime,
+      });
+      if (result.error || !result.message) {
+        console.error('GROUP ATTACHMENT SEND ERROR:', result.error);
+        Alert.alert(
+          'Attachment not sent',
+          result.error?.message || 'Could not save the attachment. Make sure chat_message_attachments and its RLS policies exist in Supabase.',
+        );
+        return;
+      }
+      setMessages(prev => [...prev, result.message as Message]);
+      setSelectedAttachment(null);
+    } catch (error: any) {
+      Alert.alert('Attachment upload failed', error?.message || 'Could not send the attachment.');
+    } finally {
+      setUploadingAttachment(false);
     }
   };
 
@@ -650,18 +728,70 @@ export default function GroupScreen() {
     const recording = recordingRef.current;
     recordingRef.current = null;
     setIsRecording(false); setRecordingSeconds(0);
-    if (!recording || !conversationId || !myId) return;
+    if (!recording) return;
     try {
       await recording.stopAndUnloadAsync();
       const uri = recording.getURI();
       if (!uri) return;
       const fileName = `voice-${Date.now()}.m4a`;
-      const url = await uploadGroupAttachment(uri, fileName, 'audio/m4a');
-      if (!url) return;
-      const result = await sendChatMessage(conversationId, myId, '🎤 Voice message', { url, name: fileName, type: 'audio/m4a' });
-      if (result.error) Alert.alert('Voice note not sent', result.error.message);
-      else if (result.message) setMessages(prev => [...prev, result.message as Message]);
-    } catch (error) { console.error('SEND GROUP VOICE ERROR:', error); }
+      setSelectedAttachment({ uri, name: fileName, mimeType: 'audio/m4a' });
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true, staysActiveInBackground: false, shouldDuckAndroid: true, playThroughEarpieceAndroid: false });
+    } catch (error) { console.error('STOP GROUP RECORDING ERROR:', error); }
+  };
+
+  const togglePlayback = async (url: string, messageId: string) => {
+    try {
+      if (playingMessageId === messageId) {
+        await soundRef.current?.pauseAsync();
+        setPlayingMessageId(null);
+        return;
+      }
+      await soundRef.current?.unloadAsync();
+      soundRef.current = null;
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true, staysActiveInBackground: false, shouldDuckAndroid: true, playThroughEarpieceAndroid: false });
+      const { sound } = await Audio.Sound.createAsync({ uri: url }, { shouldPlay: true });
+      soundRef.current = sound;
+      setPlayingMessageId(messageId);
+      sound.setOnPlaybackStatusUpdate(status => {
+        if ('didJustFinish' in status && status.didJustFinish) setPlayingMessageId(null);
+      });
+    } catch (error) {
+      console.error('GROUP AUDIO PLAYBACK ERROR:', error);
+      setPlayingMessageId(null);
+    }
+  };
+
+  const handleUnsend = async (message: Message) => {
+    if (!myId || message.sender_id !== myId || message.id.startsWith('local-')) return;
+
+    const age = Date.now() - new Date(message.created_at).getTime();
+    if (age > 10 * 60 * 1000) {
+      Alert.alert('Cannot unsend', 'Messages can only be unsent within 10 minutes.');
+      return;
+    }
+
+    Alert.alert(
+      'Message options',
+      'Choose an action for this message.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unsend',
+          style: 'destructive',
+          onPress: async () => {
+            const { error } = await supabase.rpc('chat_unsend_message', {
+              p_message_id: message.id,
+            });
+            if (error) {
+              console.error('UNSEND GROUP MESSAGE ERROR:', error);
+              Alert.alert('Could not unsend message', error.message || 'Please try again.');
+              return;
+            }
+            setMessages(prev => prev.filter(m => m.id !== message.id));
+          },
+        },
+      ],
+    );
   };
 
   // ── Clear chat ────────────────────────────────────────────────────────────
@@ -764,7 +894,7 @@ export default function GroupScreen() {
                 throw groupError;
               }
 
-              router.replace('/chat' as never);
+              router.replace('/(tabs)' as never);
             } catch (error: any) {
               console.error('DELETE GROUP ERROR:', error);
 
@@ -784,57 +914,24 @@ export default function GroupScreen() {
 
   const handleExitGroup = () => {
     setMenuOpen(false);
+    setExitModalOpen(true);
+  };
 
-    Alert.alert(
-      'Exit group?',
-      'You will leave this group and will no longer receive its messages.',
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-        {
-          text: 'Exit Group',
-          style: 'destructive',
-          onPress: async () => {
-            if (!myId) return;
-
-            // If the user is the only admin, warn them before leaving.
-            const adminCount = members.filter(
-              (member) => member.role === 'admin',
-            ).length;
-
-            if (isAdmin && adminCount === 1 && members.length > 1) {
-              Alert.alert(
-                'You are the only admin',
-                'Please make another member an admin before leaving the group.',
-              );
-
-              return;
-            }
-
-            const { error } = await supabase
-              .from('chat_group_members')
-              .delete()
-              .eq('group_id', groupId)
-              .eq('user_id', myId);
-
-            if (error) {
-              console.error('EXIT GROUP ERROR:', error);
-
-              Alert.alert(
-                'Could not leave group',
-                error.message || 'Please try again.',
-              );
-
-              return;
-            }
-
-            router.replace('/chat' as never);
-          },
-        },
-      ],
-    );
+  const confirmExitGroup = async () => {
+    if (!myId) return;
+    const adminCount = members.filter(member => member.role === 'admin' || member.role === 'owner').length;
+    if (isAdmin && adminCount === 1 && members.length > 1) {
+      setExitModalOpen(false);
+      Alert.alert('You are the only admin', 'Please make another member an admin before leaving the group.');
+      return;
+    }
+    const { error } = await supabase.from('chat_group_members').delete().eq('group_id', groupId).eq('user_id', myId);
+    if (error) {
+      Alert.alert('Could not leave group', error.message || 'Please try again.');
+      return;
+    }
+    setExitModalOpen(false);
+    router.replace('/(tabs)' as never);
   };
 
   // ── Menu action ───────────────────────────────────────────────────────────
@@ -851,6 +948,7 @@ export default function GroupScreen() {
     }
 
     if (action === 'exit') { handleExitGroup(); return; }
+    if (action === 'tag') { setMenuOpen(false); setTagModalOpen(true); return; }
     if (action === 'edit') { openEditGroup(); }
   };
 
@@ -859,14 +957,17 @@ export default function GroupScreen() {
   const renderMessage = ({ item }: { item: Message }) => {
     const isMine = item.sender_id === myId;
 
-    const author =
-      members.find(
-        (member) => member.user_id === item.sender_id,
-      )?.display_name ?? 'Member';
+    const sender = members.find(
+      (member) => member.user_id === item.sender_id,
+    );
 
-    const isImage =
-      item.attachment_type?.startsWith('image/') ?? false;
+    const author = sender?.username
+      ? `@${sender.username}`
+      : sender?.display_name ?? 'Member';
 
+    const isImage = item.attachment_type === 'image' || item.attachment_type?.startsWith('image/') === true;
+    const isAudio = item.attachment_type === 'audio' || item.attachment_type?.startsWith('audio/') === true;
+    const isVideo = item.attachment_type === 'video' || item.attachment_type?.startsWith('video/') === true;
     const hasAttachment = Boolean(item.attachment_url);
 
     return (
@@ -876,6 +977,11 @@ export default function GroupScreen() {
           isMine && styles.bubbleRowMine,
         ]}
       >
+        <Pressable
+          onLongPress={() => handleUnsend(item)}
+          delayLongPress={450}
+          style={[styles.messagePressable, isMine && styles.messagePressableMine]}
+        >
         <View
           style={[
             styles.bubble,
@@ -915,39 +1021,23 @@ export default function GroupScreen() {
             </Text>
           ) : null}
 
-          {hasAttachment && (
-            <View
-              style={[
-                styles.attachmentMessage,
-                {
-                  borderTopColor: isMine
-                    ? 'rgba(255,255,255,0.25)'
-                    : colors.border,
-                },
-              ]}
-            >
+          {hasAttachment && item.attachment_url && (
+            <View style={[styles.attachmentMessage, { borderTopColor: isMine ? 'rgba(255,255,255,0.25)' : colors.border }]}> 
               {isImage ? (
-                <ImageIcon size={20} color={isMine ? onAccent : accentForeground} />
-              ) : item.attachment_type?.startsWith('audio/') ? (
-                <Mic size={20} color={isMine ? onAccent : accentForeground} />
+                <Pressable onPress={() => Linking.openURL(item.attachment_url!)} style={{ width: 190, height: 150, borderRadius: 12, overflow: 'hidden' }}>
+                  <Image source={{ uri: item.attachment_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                </Pressable>
+              ) : isAudio ? (
+                <Pressable onPress={() => togglePlayback(item.attachment_url!, item.id)} style={[styles.audioAttachment, { borderColor: isMine ? 'rgba(255,255,255,0.25)' : colors.border }]}> 
+                  {playingMessageId === item.id ? <Pause size={18} color={isMine ? onAccent : accentForeground} /> : <Play size={18} color={isMine ? onAccent : accentForeground} />}
+                  <Text style={[styles.attachmentName, { color: isMine ? onAccent : colors.text }]} numberOfLines={1}>{item.attachment_name || 'Voice note'}</Text>
+                </Pressable>
               ) : (
-                <File size={20} color={isMine ? onAccent : accentForeground} />
+                <Pressable onPress={() => Linking.openURL(item.attachment_url!)} style={styles.audioAttachment}>
+                  {isVideo ? <Play size={20} color={isMine ? onAccent : accentForeground} /> : <File size={20} color={isMine ? onAccent : accentForeground} />}
+                  <Text numberOfLines={2} style={[styles.attachmentName, { color: isMine ? onAccent : colors.text }]}>{item.attachment_name || 'Attachment'}</Text>
+                </Pressable>
               )}
-
-              <Text
-                numberOfLines={2}
-                style={[
-                  styles.attachmentName,
-                  {
-                    color: isMine
-                      ? onAccent
-                      : colors.text,
-                  },
-                ]}
-              >
-                {item.attachment_name ||
-                  'Attachment'}
-              </Text>
             </View>
           )}
 
@@ -964,6 +1054,7 @@ export default function GroupScreen() {
             {formatTime(item.created_at)}
           </Text>
         </View>
+        </Pressable>
       </View>
     );
   };
@@ -981,7 +1072,7 @@ export default function GroupScreen() {
       ]}
     >
       <Pressable
-        onPress={() => router.replace('/chat' as never)}
+        onPress={() => router.replace('/(tabs)' as never)}
         style={styles.headerSide}
         hitSlop={10}
       >
@@ -1003,7 +1094,7 @@ export default function GroupScreen() {
         <Text
           style={[
             styles.headerTitle,
-            { color: accentForeground },
+            { color: isBlackDark ? '#FFFFFF' : accentForeground },
           ]}
           numberOfLines={1}
         >
@@ -1356,13 +1447,14 @@ export default function GroupScreen() {
                       style={[
                         styles.adminPill,
                         {
-                          borderColor:
-                            accentForeground,
+                          borderColor: accentForeground,
+                          backgroundColor:
+                            isBlackDark ? '#252525' : colors.card,
                         },
                       ]}
                     >
                       <Shield
-                        color={accentForeground}
+                        color={isBlackDark ? '#FFFFFF' : accentForeground}
                         size={12}
                       />
 
@@ -1370,47 +1462,74 @@ export default function GroupScreen() {
                         style={[
                           styles.adminPillText,
                           {
-                            color:
-                              accentForeground,
+                            color: isBlackDark
+                              ? '#FFFFFF'
+                              : accentForeground,
                           },
                         ]}
                       >
                         Admin
                       </Text>
                     </View>
-                  ) : isAdmin ? (
-                    <Pressable
-                      onPress={() =>
-                        handlePromote(
-                          member.user_id,
-                        )
-                      }
-                      style={[
-                        styles.makeAdminButton,
-                        {
-                          borderColor:
-                            accentForeground,
-                        },
-                      ]}
-                    >
-                      <Text
+                  ) : null}
+
+                  {isAdmin && member.user_id !== myId && member.role !== 'owner' ? (
+                    <>
+                      <Pressable
+                        onPress={() => handlePromote(member.user_id)}
                         style={[
-                          styles.makeAdminText,
+                          styles.makeAdminButton,
                           {
-                            color:
-                              accentForeground,
+                            borderColor: accentForeground,
+                            backgroundColor:
+                              isBlackDark ? '#252525' : 'transparent',
                           },
                         ]}
                       >
-                        Make Admin
-                      </Text>
-                    </Pressable>
-                  ) : null}
+                        <Text
+                          style={[
+                            styles.makeAdminText,
+                            {
+                              color: isBlackDark
+                                ? '#FFFFFF'
+                                : accentForeground,
+                            },
+                          ]}
+                        >
+                          Make Admin
+                        </Text>
+                      </Pressable>
 
-                  {isAdmin && member.profile_id !== myId ? (
-                    <Pressable onPress={() => handleRemoveMember(member.profile_id, member.display_name)} style={[styles.makeAdminButton, { borderColor: colors.danger }]}>
-                      <Text style={[styles.makeAdminText, { color: colors.danger }]}>Remove</Text>
-                    </Pressable>
+                      <Pressable
+                        onPress={() =>
+                          handleRemoveMember(
+                            member.user_id,
+                            member.display_name,
+                          )
+                        }
+                        style={[
+                          styles.makeAdminButton,
+                          {
+                            borderColor: colors.danger,
+                            backgroundColor:
+                              isBlackDark ? '#252525' : 'transparent',
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.makeAdminText,
+                            {
+                              color: isBlackDark
+                                ? '#FFFFFF'
+                                : colors.danger,
+                            },
+                          ]}
+                        >
+                          Remove
+                        </Text>
+                      </Pressable>
+                    </>
                   ) : null}
                 </View>
               ))}
@@ -1604,74 +1723,24 @@ export default function GroupScreen() {
       )}
 
       {selectedAttachment && (
-        <View
-          style={[
-            styles.attachmentPreview,
-            {
-              backgroundColor: colors.card,
-              borderTopColor: colors.border,
-            },
-          ]}
-        >
-          <View
-            style={[
-              styles.attachmentPreviewIcon,
-              {
-                backgroundColor:
-                  accentForeground,
-              },
-            ]}
-          >
-            {selectedAttachment.mimeType.startsWith(
-              'image/',
-            ) ? (
-              <ImageIcon
-                size={18}
-                color={onAccent}
-              />
-            ) : (
-              <File
-                size={18}
-                color={onAccent}
-              />
-            )}
-          </View>
-
+        <View style={[styles.attachmentPreview, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
+          {selectedAttachment.mimeType.startsWith('image/') ? (
+            <Image source={{ uri: selectedAttachment.uri }} style={styles.reviewImage} resizeMode="cover" />
+          ) : (
+            <View style={[styles.attachmentPreviewIcon, { backgroundColor: accentForeground }]}>
+              {selectedAttachment.mimeType.startsWith('audio/') ? <Mic size={18} color={onAccent} /> : <File size={18} color={onAccent} />}
+            </View>
+          )}
           <View style={styles.attachmentPreviewDetails}>
-            <Text
-              numberOfLines={1}
-              style={[
-                styles.attachmentPreviewName,
-                { color: colors.text },
-              ]}
-            >
-              {selectedAttachment.name}
-            </Text>
-
-            {selectedAttachment.size ? (
-              <Text
-                style={[
-                  styles.attachmentPreviewSize,
-                  { color: colors.muted },
-                ]}
-              >
-                {formatFileSize(
-                  selectedAttachment.size,
-                )}
-              </Text>
-            ) : null}
+            <Text numberOfLines={1} style={[styles.attachmentPreviewName, { color: colors.text }]}>{selectedAttachment.name}</Text>
+            <Text style={[styles.reviewLabel, { color: colors.muted }]}>Review before sending</Text>
+            {selectedAttachment.size ? <Text style={[styles.attachmentPreviewSize, { color: colors.muted }]}>{formatFileSize(selectedAttachment.size)}</Text> : null}
           </View>
-
-          <Pressable
-            onPress={() =>
-              setSelectedAttachment(null)
-            }
-            hitSlop={10}
-          >
-            <X
-              color={colors.muted}
-              size={20}
-            />
+          <Pressable onPress={() => setSelectedAttachment(null)} hitSlop={10} style={styles.reviewCancel}>
+            <X color={colors.muted} size={20} />
+          </Pressable>
+          <Pressable onPress={sendSelectedAttachment} disabled={uploadingAttachment} style={[styles.reviewSend, { backgroundColor: accentForeground }, uploadingAttachment && { opacity: 0.5 }]}>
+            {uploadingAttachment ? <ActivityIndicator size="small" color={onAccent} /> : <Send color={onAccent} size={17} />}
           </Pressable>
         </View>
       )}
@@ -1707,6 +1776,30 @@ export default function GroupScreen() {
       </View>
     </KeyboardAvoidingView>
   );
+
+  const tagModal = tagModalOpen ? (
+    <Modal visible transparent animationType="fade" onRequestClose={() => setTagModalOpen(false)}>
+      <View style={styles.subShade}>
+        <View style={[styles.subSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+            <Text style={[styles.infoTitle, { color: colors.text }]}>Add tag</Text>
+            <Pressable onPress={() => setTagModalOpen(false)}><X color={colors.muted} size={22} /></Pressable>
+          </View>
+          {chatTags.length ? chatTags.map(tag => (
+            <Pressable key={tag.id} onPress={async () => {
+              if (!myId) return;
+              const exists = chatTagAssignments.some(a => a.tag_id === tag.id);
+              if (!exists) await supabase.from('social_chat_tag_assignments').insert({ user_id: myId, chat_id: groupId, tag_id: tag.id });
+              setTagModalOpen(false);
+            }} style={[styles.tagOption, { borderColor: colors.border }]}>
+              <Tag size={16} color={accentForeground} />
+              <Text style={{ color: colors.text, fontFamily: FONT_MED }}>{tag.name}</Text>
+            </Pressable>
+          )) : <Text style={{ color: colors.muted, fontFamily: FONT }}>No tags created yet.</Text>}
+        </View>
+      </View>
+    </Modal>
+  ) : null;
 
   // ── Edit group modal ───────────────────────────────────────────────────────
   const editGroupModal = editingGroup ? (
@@ -1751,6 +1844,21 @@ export default function GroupScreen() {
         renderInfo()
       )}
       {editGroupModal}
+      {tagModal}
+      {exitModalOpen && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setExitModalOpen(false)}>
+          <View style={styles.subShade}>
+            <View style={[styles.subSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Text style={[styles.infoTitle, { color: colors.text }]}>Exit group?</Text>
+              <Text style={[styles.modalBodyText, { color: colors.muted }]}>You will leave this group and will no longer receive its messages.</Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 18, marginTop: 18 }}>
+                <Pressable onPress={() => setExitModalOpen(false)}><Text style={[styles.menuText, { color: colors.muted }]}>Cancel</Text></Pressable>
+                <Pressable onPress={confirmExitGroup}><Text style={[styles.menuText, { color: colors.danger }]}>Exit Group</Text></Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
     </SafeAreaView>
   );
 }
@@ -1905,8 +2013,18 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
 
+  messagePressable: {
+    maxWidth: '82%',
+    minWidth: 50,
+    alignSelf: 'flex-start',
+  },
+
+  messagePressableMine: {
+    alignSelf: 'flex-end',
+  },
+
   bubble: {
-    maxWidth: '80%',
+    width: '100%',
     borderRadius: 16,
     borderWidth: 1,
     paddingHorizontal: 12,
@@ -1921,6 +2039,7 @@ const styles = StyleSheet.create({
   },
 
   bubbleText: {
+    flexShrink: 1,
     fontFamily: FONT,
     fontSize: 15,
     lineHeight: 21,
@@ -1942,6 +2061,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+
+  audioAttachment: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    padding: 9,
+    borderWidth: 1,
+    borderRadius: 10,
+    minWidth: 150,
   },
 
   attachmentName: {
@@ -1993,6 +2122,30 @@ const styles = StyleSheet.create({
   },
 
   // Attachment preview
+  reviewImage: {
+    width: 54,
+    height: 54,
+    borderRadius: 10,
+  },
+
+  reviewLabel: {
+    fontFamily: FONT,
+    fontSize: 10,
+    marginTop: 2,
+  },
+
+  reviewCancel: {
+    padding: 5,
+  },
+
+  reviewSend: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
 
   attachmentPreview: {
     flexDirection: 'row',
@@ -2024,6 +2177,23 @@ const styles = StyleSheet.create({
     fontFamily: FONT,
     fontSize: 10,
     marginTop: 2,
+  },
+
+  modalBodyText: {
+    fontFamily: FONT,
+    fontSize: 13,
+    lineHeight: 20,
+    marginTop: 8,
+  },
+
+  tagOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderRadius: 12,
+    marginBottom: 8,
   },
 
   // Info screen
@@ -2250,6 +2420,8 @@ const styles = StyleSheet.create({
 
   memberDetails: {
     flex: 1,
+    minWidth: 0,
+    marginRight: 6,
   },
 
   adminPill: {

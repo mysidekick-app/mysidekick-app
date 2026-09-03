@@ -120,12 +120,14 @@ const SYSTEM_CHAT_TITLES: Record<string, string> = {
 export default function ChatDetailScreen() {
   const { id, from } = useLocalSearchParams<{ id: string; from?: string }>();
 
+  const appContext = useApp() as any;
   const {
     isDark,
     accentForeground,
     accentWash,
     onAccent,
-  } = useApp();
+  } = appContext;
+  const isBlackDark = isDark && appContext.accent_family === 'black';
 
   const normalizedId = (id ?? '').toLowerCase();
 
@@ -152,6 +154,7 @@ export default function ChatDetailScreen() {
   const [profileError, setProfileError] = useState<string | null>(null);
 
   const [myId, setMyId] = useState<string | null>(null);
+  const [otherUserActive, setOtherUserActive] = useState(false);
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(!isSidekick);
@@ -161,6 +164,16 @@ export default function ChatDetailScreen() {
   const [sending, setSending] = useState(false);
 
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
+
+  const [pendingAttachment, setPendingAttachment] = useState<{
+    uri: string;
+    type: AttachmentType;
+    name: string;
+    mimeType: string;
+  } | null>(null);
+  const [attachmentReviewOpen, setAttachmentReviewOpen] = useState(false);
+  const [attachmentSending, setAttachmentSending] = useState(false);
+  const [reviewPlaying, setReviewPlaying] = useState(false);
 
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
@@ -189,7 +202,6 @@ export default function ChatDetailScreen() {
 
   const [pollOpen, setPollOpen] = useState(false);
   const [eventOpen, setEventOpen] = useState(false);
-  const [profileViewOpen, setProfileViewOpen] = useState(false);
   const [tagModalOpen, setTagModalOpen] = useState(false);
   const [chatTags, setChatTags] = useState<{ id: string; name: string }[]>([]);
   const [assignedTagIds, setAssignedTagIds] = useState<string[]>([]);
@@ -328,6 +340,48 @@ export default function ChatDetailScreen() {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!myId || !id || isSidekick || SYSTEM_CHAT_TITLES[normalizedId]) {
+      setOtherUserActive(false);
+      return;
+    }
+
+    let cancelled = false;
+    const presenceTopic = `chat-presence-${[myId, id].sort().join('-')}`;
+    const channel = supabase.channel(presenceTopic, {
+      config: { presence: { key: myId } },
+    });
+
+    const checkPresence = () => {
+      if (cancelled) return;
+      const state = channel.presenceState() as Record<string, unknown[]>;
+      setOtherUserActive(Array.isArray(state[id]) && state[id].length > 0);
+    };
+
+    void channel.subscribe(async (status) => {
+      if (status === 'SUBSCRIBED' && !cancelled) {
+        try {
+          await channel.track({
+            user_id: myId,
+            online_at: new Date().toISOString(),
+          });
+          checkPresence();
+        } catch (error) {
+          console.warn('Presence track failed:', error);
+        }
+      }
+    });
+
+    const interval = setInterval(checkPresence, 5000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      setOtherUserActive(false);
+      void supabase.removeChannel(channel);
+    };
+  }, [myId, id, isSidekick, normalizedId]);
 
   useEffect(() => {
     if (!myId || !id || isSidekick) return;
@@ -598,55 +652,36 @@ export default function ChatDetailScreen() {
   const handlePickDocument = async (
     audioOnly: boolean,
   ) => {
-    const result =
-      await DocumentPicker.getDocumentAsync({
+    if (!myId || !conversationId || uploadingAttachment || attachmentSending) return;
+
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
         type: audioOnly ? 'audio/*' : '*/*',
         copyToCacheDirectory: true,
+        multiple: false,
       });
 
-    if (
-      result.canceled ||
-      !result.assets?.length
-    ) {
-      return;
+      if (result.canceled || !result.assets?.length) return;
+
+      const asset = result.assets[0];
+      const fileName = asset.name ?? `file-${Date.now()}`;
+      const mimeType = asset.mimeType ?? 'application/octet-stream';
+      const type: AttachmentType = audioOnly ? 'audio' : (
+        mimeType.startsWith('image/')
+          ? 'image'
+          : mimeType.startsWith('video/')
+            ? 'video'
+            : mimeType.startsWith('audio/')
+              ? 'audio'
+              : 'document'
+      );
+
+      setPendingAttachment({ uri: asset.uri, type, name: fileName, mimeType });
+      setAttachmentReviewOpen(true);
+    } catch (error) {
+      console.error('PICK DOCUMENT ERROR:', error);
+      showToast('Could not select attachment.');
     }
-
-    const asset = result.assets[0];
-
-    const fileName =
-      asset.name ??
-      `file-${Date.now()}`;
-
-    const mimeType =
-      asset.mimeType ??
-      'application/octet-stream';
-
-    const type: AttachmentType =
-      audioOnly
-        ? 'audio'
-        : 'document';
-
-    setUploadingAttachment(true);
-
-    const url = await uploadAttachment(
-      asset.uri,
-      type,
-      fileName,
-      mimeType,
-    );
-
-    setUploadingAttachment(false);
-
-    if (!url) {
-      showToast('Could not upload file.');
-      return;
-    }
-
-    await sendAttachmentMessage(
-      type,
-      url,
-      fileName,
-    );
   };
 
   /*
@@ -721,74 +756,34 @@ export default function ChatDetailScreen() {
 
   const stopRecordingAndSend = async () => {
     if (recordingTimerRef.current) {
-      clearInterval(
-        recordingTimerRef.current,
-      );
-
+      clearInterval(recordingTimerRef.current);
       recordingTimerRef.current = null;
     }
 
     setIsRecording(false);
 
-    const recording =
-      recordingRef.current;
-
-    if (!recording) {
-      return;
-    }
+    const recording = recordingRef.current;
+    if (!recording) return;
 
     try {
       await recording.stopAndUnloadAsync();
-
-      const uri =
-        recording.getURI();
-
+      const uri = recording.getURI();
       recordingRef.current = null;
       setRecordingSeconds(0);
 
-      if (!uri) {
-        return;
-      }
+      if (!uri) return;
 
-      const fileName =
-        `voice-${Date.now()}.m4a`;
-
-      setUploadingAttachment(true);
-
-      const url =
-        await uploadAttachment(
-          uri,
-          'audio',
-          fileName,
-          'audio/m4a',
-        );
-
-      setUploadingAttachment(false);
-
-      if (!url) {
-        showToast(
-          'Could not upload voice note.',
-        );
-
-        return;
-      }
-
-      await sendAttachmentMessage(
-        'audio',
-        url,
-        fileName,
-      );
+      const fileName = `voice-${Date.now()}.m4a`;
+      setPendingAttachment({
+        uri,
+        type: 'audio',
+        name: fileName,
+        mimeType: 'audio/m4a',
+      });
+      setAttachmentReviewOpen(true);
     } catch (error) {
-      console.error(
-        'STOP RECORDING ERROR:',
-        error,
-      );
-
-      setUploadingAttachment(false);
-
-      showToast(
-        'Could not save voice note.',
-      );
+      console.error('STOP RECORDING ERROR:', error);
+      showToast('Could not save voice note.');
     }
   };
 
@@ -819,6 +814,14 @@ export default function ChatDetailScreen() {
     }
 
     try {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      });
+
       const { sound } =
         await Audio.Sound.createAsync(
           {
@@ -878,7 +881,7 @@ export default function ChatDetailScreen() {
    * Open the device file picker directly. No bottom attachment sheet.
    */
   const handlePickAttachment = async () => {
-    if (uploadingAttachment || !myId || !conversationId) return;
+    if (uploadingAttachment || attachmentSending || !myId || !conversationId) return;
 
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -900,20 +903,101 @@ export default function ChatDetailScreen() {
             ? 'audio'
             : 'document';
 
-      setUploadingAttachment(true);
-      const url = await uploadAttachment(asset.uri, type, fileName, mimeType);
-      setUploadingAttachment(false);
+      setPendingAttachment({ uri: asset.uri, type, name: fileName, mimeType });
+      setAttachmentReviewOpen(true);
+    } catch (error) {
+      console.error('PICK ATTACHMENT ERROR:', error);
+      showToast('Could not select attachment.');
+    }
+  };
+
+  const closeAttachmentReview = async () => {
+    setAttachmentReviewOpen(false);
+    setPendingAttachment(null);
+    setReviewPlaying(false);
+  };
+
+  const toggleReviewAudio = async () => {
+    if (!pendingAttachment || pendingAttachment.type !== 'audio') return;
+
+    if (reviewPlaying) {
+      await soundRef.current?.stopAsync();
+      await soundRef.current?.unloadAsync();
+      soundRef.current = null;
+      setReviewPlaying(false);
+      return;
+    }
+
+    try {
+      await soundRef.current?.unloadAsync();
+      soundRef.current = null;
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      });
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: pendingAttachment.uri },
+        { shouldPlay: true },
+      );
+      soundRef.current = sound;
+      setReviewPlaying(true);
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (status.isLoaded && status.didJustFinish) {
+          setReviewPlaying(false);
+          void sound.unloadAsync();
+          soundRef.current = null;
+        }
+      });
+    } catch (error) {
+      console.error('REVIEW AUDIO ERROR:', error);
+      showToast('Could not play voice note preview.');
+    }
+  };
+
+  const sendPendingAttachment = async () => {
+    if (!pendingAttachment || !myId || !conversationId || attachmentSending) return;
+
+    setAttachmentSending(true);
+    setUploadingAttachment(true);
+
+    try {
+      const url = await uploadAttachment(
+        pendingAttachment.uri,
+        pendingAttachment.type,
+        pendingAttachment.name,
+        pendingAttachment.mimeType,
+      );
 
       if (!url) {
         showToast('Could not upload attachment.');
         return;
       }
 
-      await sendAttachmentMessage(type, url, fileName);
+      await sendAttachmentMessage(
+        pendingAttachment.type,
+        url,
+        pendingAttachment.name,
+      );
+
+      try {
+        await soundRef.current?.stopAsync();
+      } catch {}
+      try {
+        await soundRef.current?.unloadAsync();
+      } catch {}
+      soundRef.current = null;
+      setReviewPlaying(false);
+      setAttachmentReviewOpen(false);
+      setPendingAttachment(null);
     } catch (error) {
+      console.error('SEND PENDING ATTACHMENT ERROR:', error);
+      showToast('Failed to send attachment.');
+    } finally {
       setUploadingAttachment(false);
-      console.error('PICK ATTACHMENT ERROR:', error);
-      showToast('Could not select attachment.');
+      setAttachmentSending(false);
     }
   };
 
@@ -1153,7 +1237,7 @@ export default function ChatDetailScreen() {
     );
 
     setTimeout(() => {
-      router.replace('/chat' as never);
+      router.replace('/(tabs)' as never);
     }, 700);
   };
 
@@ -1167,7 +1251,60 @@ export default function ChatDetailScreen() {
       .eq('user_id', myId);
     setActionLoading(null);
     if (error) { showToast('Could not delete chat.'); return; }
-    router.replace('/chat' as never);
+    router.replace('/(tabs)' as never);
+  };
+
+  /*
+   * UNSEND
+   * Only the sender can unsend a direct message, and only within
+   * five minutes of sending it. The database RPC enforces the same
+   * rule server-side and does not create a notification.
+   */
+  const handleUnsendMessage = async (message: Message) => {
+    if (!myId || message.sender_id !== myId || message.id.startsWith('local-')) {
+      return;
+    }
+
+    const age = Date.now() - new Date(message.created_at).getTime();
+    const fiveMinutes = 5 * 60 * 1000;
+
+    if (age > fiveMinutes) {
+      Alert.alert(
+        'Unsend unavailable',
+        'Messages can only be unsent within 5 minutes of sending.',
+      );
+      return;
+    }
+
+    Alert.alert(
+      'Message options',
+      'What would you like to do with this message?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unsend',
+          style: 'destructive',
+          onPress: async () => {
+            const { error } = await supabase.rpc('chat_unsend_direct_message', {
+              p_message_id: message.id,
+            });
+
+            if (error) {
+              console.error('UNSEND DIRECT MESSAGE ERROR:', error);
+              Alert.alert(
+                'Could not unsend message',
+                error.message || 'Please try again.',
+              );
+              return;
+            }
+
+            setMessages((previous) =>
+              previous.filter((item) => item.id !== message.id),
+            );
+          },
+        },
+      ],
+    );
   };
 
   /*
@@ -1342,11 +1479,24 @@ export default function ChatDetailScreen() {
             : styles.msgRowTheirs,
         ]}
       >
-        <View
-          style={[
-            styles.bubble,
-            isSidekickReply
-              ? {
+        <Pressable
+          onLongPress={() => {
+            if (isMine && !isSidekickReply) {
+              void handleUnsendMessage(item);
+            }
+          }}
+          delayLongPress={350}
+          disabled={!isMine || isSidekickReply}
+          style={({ pressed }) => [
+            styles.messagePressable,
+            pressed && isMine && !isSidekickReply && styles.messagePressed,
+          ]}
+        >
+          <View
+            style={[
+              styles.bubble,
+              isSidekickReply
+                ? {
                   backgroundColor:
                     colors.card,
                   borderColor:
@@ -1538,7 +1688,8 @@ export default function ChatDetailScreen() {
           {outgoing ? (
             <CheckCheck color={accentForeground} size={14} strokeWidth={2.2} style={{ marginLeft: 4 }} />
           ) : null}
-        </View>
+          </View>
+        </Pressable>
       </View>
     );
   };
@@ -1584,7 +1735,7 @@ export default function ChatDetailScreen() {
         ]}
       >
         <Pressable
-          onPress={() => router.replace('/chat' as never)}
+          onPress={() => router.replace('/(tabs)' as never)}
           hitSlop={12}
           style={styles.headerBtn}
         >
@@ -1608,9 +1759,10 @@ export default function ChatDetailScreen() {
                 !showProfileButton
               }
               onPress={() =>
-                setProfileViewOpen(
-                  true,
-                )
+                router.push({
+                  pathname: '/chat/profile/[id]',
+                  params: { id },
+                } as never)
               }
               style={
                 styles.headerTitleWrap
@@ -1620,8 +1772,7 @@ export default function ChatDetailScreen() {
                 style={[
                   styles.headerTitle,
                   {
-                    color:
-                      accentForeground,
+                    color: isBlackDark ? '#FFFFFF' : accentForeground,
                   },
                 ]}
                 numberOfLines={1}
@@ -1636,9 +1787,14 @@ export default function ChatDetailScreen() {
                   }
                 >
                   <View
-                    style={
-                      styles.activeDot
-                    }
+                    style={[
+                      styles.activeDot,
+                      {
+                        backgroundColor: otherUserActive
+                          ? '#34C759'
+                          : '#8E8E93',
+                      },
+                    ]}
                   />
 
                   <Text
@@ -1647,7 +1803,7 @@ export default function ChatDetailScreen() {
                       { color: colors.muted },
                     ]}
                   >
-                    {profile?.title || profile?.tag || profile?.profile_title || 'Friend'}
+                    {otherUserActive ? 'Active now' : 'Offline'}
                   </Text>
                 </View>
               ) : null}
@@ -1941,19 +2097,69 @@ export default function ChatDetailScreen() {
         </View>
       </Modal>
 
-      <Modal visible={profileViewOpen} transparent animationType="fade" onRequestClose={() => setProfileViewOpen(false)}>
+      <Modal
+        visible={attachmentReviewOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={closeAttachmentReview}
+      >
         <View style={styles.subShade}>
-          <View style={[styles.subSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={[styles.attachmentReviewSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={styles.subHeader}>
-              <Text style={[styles.subTitle, { color: colors.text }]}>Profile</Text>
-              <Pressable onPress={() => setProfileViewOpen(false)} hitSlop={12}><X color={colors.muted} size={22} /></Pressable>
+              <Text style={[styles.subTitle, { color: colors.text }]}>Review attachment</Text>
+              <Pressable onPress={closeAttachmentReview} hitSlop={12} disabled={attachmentSending}>
+                <X color={colors.muted} size={22} />
+              </Pressable>
             </View>
-            {profile?.avatar_url ? <Image source={{ uri: profile.avatar_url }} style={styles.profileViewAvatarImage} /> : <View style={[styles.profileViewAvatar, { backgroundColor: accentForeground }]}><Text style={[styles.profileViewAvatarText, { color: '#FFFFFF' }]}>{(profile?.display_name || '?').slice(0,1).toUpperCase()}</Text></View>}
-            <Text style={[styles.profileName, { color: colors.text }]}>{profile?.display_name || 'User'}</Text>
-            <Text style={[styles.profileUsername, { color: colors.muted }]}>@{profile?.username || ''}</Text>
-            {(profile?.title || profile?.tag || profile?.profile_title) ? <Text style={[styles.profileBadge, { color: accentForeground }]}>{profile.title || profile.tag || profile.profile_title}</Text> : null}
-            {profile?.badge ? <Text style={[styles.profileBadge, { color: accentForeground }]}>{profile.badge}</Text> : null}
-            {profile?.bio ? <Text style={[styles.profileBio, { color: colors.muted }]}>{profile.bio}</Text> : null}
+
+            {pendingAttachment?.type === 'image' ? (
+              <Image
+                source={{ uri: pendingAttachment.uri }}
+                style={styles.attachmentReviewImage}
+                resizeMode="contain"
+              />
+            ) : pendingAttachment?.type === 'audio' ? (
+              <View style={[styles.attachmentReviewAudio, { borderColor: colors.border }]}>
+                <Pressable
+                  onPress={toggleReviewAudio}
+                  style={[styles.reviewPlayButton, { backgroundColor: accentForeground }]}
+                >
+                  {reviewPlaying ? <Pause color="#FFFFFF" size={20} /> : <Play color="#FFFFFF" size={20} />}
+                </Pressable>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.reviewFileName, { color: colors.text }]} numberOfLines={2}>
+                    {pendingAttachment.name}
+                  </Text>
+                  <Text style={[styles.subHint, { color: colors.muted }]}>Voice note ready to send</Text>
+                </View>
+              </View>
+            ) : (
+              <View style={[styles.attachmentReviewFile, { borderColor: colors.border }]}>
+                <FileText color={accentForeground} size={30} />
+                <Text style={[styles.reviewFileName, { color: colors.text }]} numberOfLines={3}>
+                  {pendingAttachment?.name || 'Attachment'}
+                </Text>
+                <Text style={[styles.subHint, { color: colors.muted }]}>Ready to send</Text>
+              </View>
+            )}
+
+            <View style={styles.reviewActions}>
+              <Pressable
+                onPress={closeAttachmentReview}
+                disabled={attachmentSending}
+                style={[styles.reviewCancelButton, { borderColor: colors.border }]}
+              >
+                <Text style={[styles.reviewCancelText, { color: colors.text }]}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={sendPendingAttachment}
+                disabled={!pendingAttachment || attachmentSending}
+                style={[styles.reviewSendButton, { backgroundColor: accentForeground }, attachmentSending && styles.sendBtnDisabled]}
+              >
+                {attachmentSending ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Send color="#FFFFFF" size={17} />}
+                <Text style={styles.reviewSendText}>{attachmentSending ? 'Sending…' : 'Send'}</Text>
+              </Pressable>
+            </View>
           </View>
         </View>
       </Modal>
@@ -2232,8 +2438,19 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
   },
 
-  bubble: {
+  messagePressable: {
     maxWidth: '82%',
+    flexShrink: 1,
+  },
+
+  messagePressed: {
+    opacity: 0.82,
+  },
+
+  bubble: {
+    width: '100%',
+    maxWidth: '100%',
+    minWidth: 0,
     borderRadius: 18,
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -2243,6 +2460,7 @@ const styles = StyleSheet.create({
     fontFamily: FONT,
     fontSize: 15,
     lineHeight: 21,
+    flexShrink: 1,
   },
 
   attachmentImage: {
@@ -2480,6 +2698,7 @@ const styles = StyleSheet.create({
 
   menuItem: {
     paddingVertical: 16,
+    paddingHorizontal: 16,
     borderBottomWidth: 1,
   },
 
@@ -2587,6 +2806,82 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
 
+  attachmentReviewSheet: {
+    width: '92%',
+    maxWidth: 460,
+    borderRadius: 22,
+    borderWidth: 1,
+    padding: 18,
+  },
+  attachmentReviewImage: {
+    width: '100%',
+    height: 300,
+    borderRadius: 16,
+    marginVertical: 12,
+    backgroundColor: '#111111',
+  },
+  attachmentReviewAudio: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 14,
+    marginVertical: 16,
+  },
+  attachmentReviewFile: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 150,
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 20,
+    marginVertical: 16,
+    gap: 8,
+  },
+  reviewPlayButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reviewFileName: {
+    fontFamily: FONT_SEMI,
+    fontSize: 14,
+  },
+  reviewActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  reviewCancelButton: {
+    flex: 1,
+    minHeight: 48,
+    borderWidth: 1,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  reviewCancelText: {
+    fontFamily: FONT_SEMI,
+    fontSize: 14,
+  },
+  reviewSendButton: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  reviewSendText: {
+    color: '#FFFFFF',
+    fontFamily: FONT_SEMI,
+    fontSize: 14,
+  },
+
   profileViewBody: {
     alignItems: 'center',
     paddingVertical: 20,
@@ -2617,6 +2912,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
     profileViewAvatarImage: { width: 78, height: 78, borderRadius: 39 },
-    profileBadge: { fontFamily: FONT_MED, fontSize: 13, marginTop: 8 },
+    profileFieldLabel: { fontFamily: FONT_MED, fontSize: 11, marginTop: 10, textTransform: 'uppercase', letterSpacing: 0.6 },
+  profileBadge: { fontFamily: FONT_MED, fontSize: 13, marginTop: 8 },
     profileBio: { fontFamily: FONT, fontSize: 13, lineHeight: 20, textAlign: 'center', marginTop: 8, maxWidth: 300 },
 });

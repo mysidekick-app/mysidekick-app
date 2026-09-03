@@ -288,7 +288,7 @@ export default function HabitDetailScreen() {
     if (!habit) return;
 
     router.push({
-      pathname: '/chat',
+      pathname: '/(tabs)',
       params: {
         shareStreak: 'true',
         streak: String(

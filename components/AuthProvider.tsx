@@ -13,6 +13,7 @@ import type {
 } from '@supabase/supabase-js';
 
 import { supabase } from '@/lib/supabase';
+import { router } from 'expo-router';
 
 type SignUpMetadata = {
   full_name: string;
@@ -83,13 +84,21 @@ export function AuthProvider({
         subscription,
       },
     } = supabase.auth.onAuthStateChange(
-      (_event, newSession) => {
+      (event, newSession) => {
         if (!mounted) {
           return;
         }
 
         setSession(newSession);
         setLoading(false);
+
+        /*
+         * Modules is the authenticated home page.
+         * Every successful sign-in starts there.
+         */
+        if (event === 'SIGNED_IN') {
+          router.replace('/modules' as never);
+        }
       }
     );
 
