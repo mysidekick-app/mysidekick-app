@@ -13,7 +13,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
-  Bell,
   Camera,
   Check,
   ChevronRight,
@@ -34,6 +33,8 @@ import {
   accentPalettes,
   ThemeMode,
 } from '@/components/AppProvider';
+
+import { useAuth } from '@/components/AuthProvider';
 
 import { CurrencyPickerModal } from '@/components/CurrencyPickerModal';
 import { getCurrency } from '@/components/currencies';
@@ -71,9 +72,7 @@ const TIMEZONE_GROUPS: TimezoneGroup[] = [
 ];
 
 const TIMEZONES: TimezoneItem[] = [
-  /*
-   * AFRICA
-   */
+  // AFRICA
   {
     value: 'Africa/Abidjan',
     label: "Abidjan, Côte d'Ivoire",
@@ -140,9 +139,7 @@ const TIMEZONES: TimezoneItem[] = [
     group: 'Africa',
   },
 
-  /*
-   * AMERICAS
-   */
+  // AMERICAS
   {
     value: 'America/Anchorage',
     label: 'Anchorage, United States',
@@ -219,9 +216,7 @@ const TIMEZONES: TimezoneItem[] = [
     group: 'Americas',
   },
 
-  /*
-   * ASIA
-   */
+  // ASIA
   {
     value: 'Asia/Almaty',
     label: 'Almaty, Kazakhstan',
@@ -298,9 +293,7 @@ const TIMEZONES: TimezoneItem[] = [
     group: 'Asia',
   },
 
-  /*
-   * EUROPE
-   */
+  // EUROPE
   {
     value: 'Europe/Amsterdam',
     label: 'Amsterdam, Netherlands',
@@ -402,13 +395,7 @@ const TIMEZONES: TimezoneItem[] = [
     group: 'Europe',
   },
 
-  /*
-   * MIDDLE EAST
-   *
-   * Some IANA timezone identifiers use
-   * Asia/ even though we display them
-   * under the Middle East grouping.
-   */
+  // MIDDLE EAST
   {
     value: 'Asia/Amman',
     label: 'Amman, Jordan',
@@ -465,9 +452,7 @@ const TIMEZONES: TimezoneItem[] = [
     group: 'Middle East',
   },
 
-  /*
-   * OCEANIA
-   */
+  // OCEANIA
   {
     value: 'Australia/Adelaide',
     label: 'Adelaide, Australia',
@@ -584,17 +569,13 @@ export default function ProfileScreen() {
     accent_family,
   } = useApp();
 
-  const [editing, setEditing] =
-    useState(false);
+  const { signOut } = useAuth();
 
-  const [name, setName] =
-    useState(display_name);
+  const [editing, setEditing] = useState(false);
 
-  const [profileTitle, setProfileTitle] =
-    useState(title);
-
-  const [profileBio, setProfileBio] =
-    useState(bio);
+  const [name, setName] = useState(display_name);
+  const [profileTitle, setProfileTitle] = useState(title);
+  const [profileBio, setProfileBio] = useState(bio);
 
   const [openSetting, setOpenSetting] =
     useState<SettingKey>(null);
@@ -608,67 +589,49 @@ export default function ProfileScreen() {
   const [timezoneSearch, setTimezoneSearch] =
     useState('');
 
-  const currency =
-    getCurrency(currency_code);
+  const currency = getCurrency(currency_code);
 
-  const selectedTimezone =
-    TIMEZONES.find(
-      (item) =>
-        item.value === timezone
+  const selectedTimezone = TIMEZONES.find(
+    (item) => item.value === timezone
+  );
+
+  const filteredTimezoneGroups = useMemo(() => {
+    const search = timezoneSearch
+      .trim()
+      .toLowerCase();
+
+    return TIMEZONE_GROUPS.map((group) => ({
+      group,
+      items: TIMEZONES.filter((item) => {
+        if (item.group !== group) {
+          return false;
+        }
+
+        if (!search) {
+          return true;
+        }
+
+        return (
+          item.label
+            .toLowerCase()
+            .includes(search) ||
+          item.value
+            .toLowerCase()
+            .includes(search)
+        );
+      }),
+    })).filter(
+      (section) => section.items.length > 0
     );
+  }, [timezoneSearch]);
 
-  const filteredTimezoneGroups =
-    useMemo(() => {
-      const search =
-        timezoneSearch
-          .trim()
-          .toLowerCase();
-
-      return TIMEZONE_GROUPS.map(
-        (group) => ({
-          group,
-
-          items: TIMEZONES.filter(
-            (item) => {
-              if (
-                item.group !== group
-              ) {
-                return false;
-              }
-
-              if (!search) {
-                return true;
-              }
-
-              return (
-                item.label
-                  .toLowerCase()
-                  .includes(search) ||
-                item.value
-                  .toLowerCase()
-                  .includes(search)
-              );
-            }
-          ),
-        })
-      ).filter(
-        (section) =>
-          section.items.length > 0
-      );
-    }, [timezoneSearch]);
-
-  const clampBio = (
-    text: string
-  ) => {
+  const clampBio = (text: string) => {
     const words = text
       .trim()
       .split(/\s+/)
       .filter(Boolean);
 
-    if (
-      words.length <=
-      MAX_BIO_WORDS
-    ) {
+    if (words.length <= MAX_BIO_WORDS) {
       return text;
     }
 
@@ -677,21 +640,14 @@ export default function ProfileScreen() {
       .join(' ');
   };
 
-  const clampTitle = (
-    text: string
-  ) => {
-    return text.slice(
-      0,
-      MAX_TITLE_CHARS
-    );
+  const clampTitle = (text: string) => {
+    return text.slice(0, MAX_TITLE_CHARS);
   };
 
-  const bioWordCount =
-    profileBio
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean)
-      .length;
+  const bioWordCount = profileBio
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
 
   const titleCharacterCount =
     profileTitle.length;
@@ -700,15 +656,31 @@ export default function ProfileScreen() {
     await updateSettings({
       display_name:
         name.trim() || 'User',
-
       title:
         clampTitle(profileTitle),
-
       bio:
         clampBio(profileBio),
     });
 
     setEditing(false);
+  };
+
+  const handleLogout = async () => {
+    try {
+      const { error } = await signOut();
+
+      if (error) {
+        console.error(
+          'Logout failed:',
+          error
+        );
+      }
+    } catch (error) {
+      console.error(
+        'Logout exception:',
+        error
+      );
+    }
   };
 
   const C = isDark
@@ -736,7 +708,7 @@ export default function ProfileScreen() {
   const settingRows: {
     key: SettingKey;
     label: string;
-    icon: typeof Bell;
+    icon: typeof CircleUserRound;
   }[] = [
     {
       key: 'account',
@@ -770,8 +742,7 @@ export default function ProfileScreen() {
       style={[
         styles.safe,
         {
-          backgroundColor:
-            C.bg,
+          backgroundColor: C.bg,
         },
       ]}
     >
@@ -785,9 +756,7 @@ export default function ProfileScreen() {
         ]}
       >
         <View
-          style={
-            styles.headerSpacer
-          }
+          style={styles.headerSpacer}
         />
       </View>
 
@@ -800,7 +769,6 @@ export default function ProfileScreen() {
         }
       >
         {/* PROFILE CARD */}
-
         <View
           style={[
             styles.profileCard,
@@ -989,8 +957,6 @@ export default function ProfileScreen() {
                   {display_name}
                 </Text>
 
-                {/* USERNAME IS BELOW PROFILE NAME */}
-
                 {username ? (
                   <Text
                     style={[
@@ -1109,15 +1075,12 @@ export default function ProfileScreen() {
                     setName(
                       display_name
                     );
-
                     setProfileTitle(
                       title
                     );
-
                     setProfileBio(
                       bio
                     );
-
                     setEditing(
                       true
                     );
@@ -1164,6 +1127,9 @@ export default function ProfileScreen() {
             }
           >
             <Pressable
+              onPress={
+                handleLogout
+              }
               style={
                 styles.logout
               }
@@ -1189,7 +1155,6 @@ export default function ProfileScreen() {
         </View>
 
         {/* SETTINGS */}
-
         <Text
           style={[
             styles.settingsTitle,
@@ -1235,7 +1200,6 @@ export default function ProfileScreen() {
                     borderBottomColor:
                       C.divider,
                   },
-
                   i ===
                     settingRows.length -
                       1 && {
@@ -1257,7 +1221,8 @@ export default function ProfileScreen() {
                   <Icon
                     color={
                       isDark &&
-                      accent_family === 'black'
+                      accent_family ===
+                        'black'
                         ? '#FFFFFF'
                         : accentForeground
                     }
@@ -1292,7 +1257,6 @@ export default function ProfileScreen() {
       </ScrollView>
 
       {/* ACCOUNT SHEET */}
-
       <Modal
         visible={
           openSetting ===
@@ -1363,7 +1327,6 @@ export default function ProfileScreen() {
             </Text>
 
             {/* CURRENCY */}
-
             <Pressable
               onPress={() =>
                 setCurrencyOpen(
@@ -1438,13 +1401,11 @@ export default function ProfileScreen() {
             </Pressable>
 
             {/* TIMEZONE */}
-
             <Pressable
               onPress={() => {
                 setTimezoneSearch(
                   ''
                 );
-
                 setTimezoneOpen(
                   true
                 );
@@ -1549,7 +1510,6 @@ export default function ProfileScreen() {
       </Modal>
 
       {/* DISPLAY SHEET */}
-
       <Modal
         visible={
           openSetting ===
@@ -1608,7 +1568,6 @@ export default function ProfileScreen() {
             </View>
 
             {/* THEME */}
-
             <View
               style={[
                 styles.subCard,
@@ -1688,7 +1647,6 @@ export default function ProfileScreen() {
                             color:
                               C.muted,
                           },
-
                           theme_mode ===
                             mode && {
                             color:
@@ -1712,7 +1670,6 @@ export default function ProfileScreen() {
             </View>
 
             {/* ACCENT */}
-
             <View
               style={[
                 styles.subCard,
@@ -1768,7 +1725,6 @@ export default function ProfileScreen() {
                               ]
                                 .standard,
                           },
-
                           accent_family ===
                             key && {
                             borderColor:
@@ -1839,7 +1795,6 @@ export default function ProfileScreen() {
       </Modal>
 
       {/* PASSWORD SHEET */}
-
       <Modal
         visible={
           openSetting ===
@@ -1941,7 +1896,6 @@ export default function ProfileScreen() {
       </Modal>
 
       {/* PRIVACY SHEET */}
-
       <Modal
         visible={
           openSetting ===
@@ -2043,7 +1997,6 @@ export default function ProfileScreen() {
       </Modal>
 
       {/* RESET SHEET */}
-
       <Modal
         visible={
           openSetting ===
@@ -2146,7 +2099,6 @@ export default function ProfileScreen() {
       </Modal>
 
       {/* TIMEZONE PICKER */}
-
       <Modal
         visible={
           timezoneOpen
@@ -2229,7 +2181,6 @@ export default function ProfileScreen() {
             </Text>
 
             {/* SEARCH */}
-
             <View
               style={[
                 styles.timezoneSearchBox,
@@ -2266,7 +2217,6 @@ export default function ProfileScreen() {
             </View>
 
             {/* TIMEZONE LIST */}
-
             <ScrollView
               style={
                 styles.timezoneScroll
@@ -2410,7 +2360,6 @@ export default function ProfileScreen() {
                 setTimezoneOpen(
                   false
                 );
-
                 setTimezoneSearch(
                   ''
                 );
@@ -2440,7 +2389,6 @@ export default function ProfileScreen() {
       </Modal>
 
       {/* CURRENCY PICKER */}
-
       <CurrencyPickerModal
         visible={
           currencyOpen
@@ -2448,9 +2396,7 @@ export default function ProfileScreen() {
         currentCode={
           currency_code
         }
-        onSelect={(
-          code
-        ) =>
+        onSelect={(code) =>
           updateSettings({
             currency_code:
               code,

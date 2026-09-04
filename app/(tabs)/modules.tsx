@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+
 import {
   Bookmark,
   CalendarDays,
@@ -10,16 +11,21 @@ import {
   Sprout,
   WalletCards,
 } from 'lucide-react-native';
+
 import {
   ActivityIndicator,
+  Image,
   Pressable,
   SafeAreaView,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+
 import { router } from 'expo-router';
+
 import { useApp } from '@/components/AppProvider';
 import { supabase } from '@/lib/supabase';
 
@@ -61,14 +67,6 @@ const FONT_BOLD = 'Poppins-Bold';
 
 /* =========================================================
    SUPPORTED WELL-BEING MODULES
-=========================================================
-
-   These are the ONLY seven well-being categories
-   recognized by the dashboard.
-
-   Blank Pages uses "blank_pages" as the canonical
-   dashboard key, but "morning_pages" is still accepted
-   because that is the original backend key.
 ========================================================= */
 
 const SUPPORTED_WELLBEING_MODULES = new Set([
@@ -88,11 +86,6 @@ function normalizeWellbeingModuleKey(
     return null;
   }
 
-  /*
-   * The interface was renamed from Morning Pages
-   * to Blank Pages, while the backend may still
-   * contain morning_pages.
-   */
   if (key === 'morning_pages') {
     return 'blank_pages';
   }
@@ -115,8 +108,9 @@ function getTodayKey(): string {
 }
 
 function parseDate(value: string): Date {
-  const [year, month, day] =
-    value.split('-').map(Number);
+  const [year, month, day] = value
+    .split('-')
+    .map(Number);
 
   return new Date(
     year,
@@ -193,8 +187,7 @@ function occurrenceStartsOnDate(
     return false;
   }
 
-  const repeat =
-    task.repeat ?? 'none';
+  const repeat = task.repeat ?? 'none';
 
   if (repeat === 'none') {
     return date === task.start_date;
@@ -223,9 +216,7 @@ function occurrenceStartsOnDate(
         task.start_date,
       );
 
-      const current = parseDate(
-        date,
-      );
+      const current = parseDate(date);
 
       const monthDiff =
         (current.getFullYear() -
@@ -247,9 +238,7 @@ function occurrenceStartsOnDate(
         task.start_date,
       );
 
-      const current = parseDate(
-        date,
-      );
+      const current = parseDate(date);
 
       const yearDiff =
         current.getFullYear() -
@@ -314,8 +303,7 @@ function taskOccursToday(
   },
   today: string,
 ): boolean {
-  const repeat =
-    task.repeat ?? 'none';
+  const repeat = task.repeat ?? 'none';
 
   /* Non-recurring task */
   if (repeat === 'none') {
@@ -437,6 +425,7 @@ export default function ModulesScreen() {
         nextKey !== todayKey
       ) {
         setTodayKey(nextKey);
+
         setDashboard(
           emptyDashboard(),
         );
@@ -481,8 +470,10 @@ export default function ModulesScreen() {
             setDashboard(
               emptyDashboard(),
             );
+
             setLoading(false);
             setHasError(true);
+
             return;
           }
 
@@ -913,16 +904,6 @@ export default function ModulesScreen() {
 
           /* ===============================================
              8. WELL-BEING
-
-             EXACTLY 7 SUPPORTED MODULES
-
-             The denominator is based on the user's
-             selected/enabled categories.
-
-             Database duplicates cannot increase the
-             denominator.
-
-             morning_pages is normalized to blank_pages.
           =============================================== */
 
           try {
@@ -955,11 +936,6 @@ export default function ModulesScreen() {
                 wellbeingModuleError,
               );
             } else {
-              /*
-               * Store selected modules in a Set.
-               *
-               * This removes duplicate database rows.
-               */
               const selectedModuleKeys =
                 new Set<string>();
 
@@ -973,10 +949,6 @@ export default function ModulesScreen() {
                     row.module_key,
                   );
 
-                /*
-                 * Ignore unsupported / obsolete
-                 * module keys.
-                 */
                 if (
                   normalizedKey &&
                   SUPPORTED_WELLBEING_MODULES.has(
@@ -989,28 +961,16 @@ export default function ModulesScreen() {
                 }
               }
 
-              /*
-               * TOTAL TRACKED
-               *
-               * This is now guaranteed to represent
-               * unique supported categories only.
-               */
               next.wellbeingTotal =
                 selectedModuleKeys.size;
 
-              /*
-               * There are no selected modules.
-               */
               if (
                 selectedModuleKeys.size ===
                 0
               ) {
-                next.wellbeingCompleted = 0;
+                next.wellbeingCompleted =
+                  0;
               } else {
-                /*
-                 * Blank Pages may exist in the database
-                 * under either name.
-                 */
                 const databaseKeys =
                   Array.from(
                     selectedModuleKeys,
@@ -1064,18 +1024,6 @@ export default function ModulesScreen() {
                     wellbeingEntryError,
                   );
                 } else {
-                  /*
-                   * Normalize every completed entry.
-                   *
-                   * Example:
-                   *
-                   * morning_pages
-                   * blank_pages
-                   *
-                   * become the same canonical key:
-                   *
-                   * blank_pages
-                   */
                   const completedModuleKeys =
                     new Set<string>();
 
@@ -1101,9 +1049,6 @@ export default function ModulesScreen() {
                     }
                   }
 
-                  /*
-                   * Completed cannot exceed total.
-                   */
                   next.wellbeingCompleted =
                     Math.min(
                       completedModuleKeys.size,
@@ -1121,6 +1066,11 @@ export default function ModulesScreen() {
 
           /* ===============================================
              9. GAMES
+             
+             IMPORTANT:
+             Games are recorded in game_scores.
+             Count today's game score records for the
+             currently logged-in player.
           =============================================== */
 
           try {
@@ -1150,13 +1100,11 @@ export default function ModulesScreen() {
             } =
               await supabase
                 .from(
-                  'game_sessions',
+                  'game_scores',
                 )
-                .select(
-                  'id',
-                )
+                .select('id')
                 .eq(
-                  'user_id',
+                  'player_id',
                   user.id,
                 )
                 .gte(
@@ -1179,6 +1127,11 @@ export default function ModulesScreen() {
                   gameRows ??
                   []
                 ).length;
+
+              console.log(
+                'DASHBOARD GAMES COUNT:',
+                next.games,
+              );
             }
           } catch (error) {
             console.log(
@@ -1218,112 +1171,111 @@ export default function ModulesScreen() {
      DASHBOARD MODULES
   ======================================================= */
 
-  const dashboardItems:
-    DashboardItem[] = [
-      {
-        key: 'planner',
-        label: 'Planner',
-        icon: CalendarDays,
-        value: String(
-          dashboard.planner,
-        ),
-        description:
-          'incomplete tasks today',
-        route: '/planner',
-      },
+  const dashboardItems: DashboardItem[] = [
+    {
+      key: 'planner',
+      label: 'Planner',
+      icon: CalendarDays,
+      value: String(
+        dashboard.planner,
+      ),
+      description:
+        'incomplete tasks today',
+      route: '/planner',
+    },
 
-      {
-        key: 'habits',
-        label: 'Habits',
-        icon: CheckCircle2,
-        value: String(
-          dashboard.habits,
-        ),
-        description:
-          'incomplete habits today',
-        route: '/habits',
-      },
+    {
+      key: 'habits',
+      label: 'Habits',
+      icon: CheckCircle2,
+      value: String(
+        dashboard.habits,
+      ),
+      description:
+        'incomplete habits today',
+      route: '/habits',
+    },
 
-      {
-        key: 'finance',
-        label: 'Finance',
-        icon: WalletCards,
-        value: String(
-          dashboard.finance,
-        ),
-        description:
-          'finance items logged today',
-        route: '/modules/finances',
-      },
+    {
+      key: 'finance',
+      label: 'Finance',
+      icon: WalletCards,
+      value: String(
+        dashboard.finance,
+      ),
+      description:
+        'finance items logged today',
+      route: '/modules/finances',
+    },
 
-      {
-        key: 'lists',
-        label: 'Lists',
-        icon: ListChecks,
-        value: String(
-          dashboard.lists,
-        ),
-        description:
-          'incomplete list items',
-        route: '/modules/lists',
-      },
+    {
+      key: 'lists',
+      label: 'Lists',
+      icon: ListChecks,
+      value: String(
+        dashboard.lists,
+      ),
+      description:
+        'incomplete list items',
+      route: '/modules/lists',
+    },
 
-      {
-        key: 'reminders',
-        label: 'Reminders',
-        icon: BellRing,
-        value: String(
-          dashboard.reminders,
-        ),
-        description:
-          'incomplete reminders',
-        route: '/reminders',
-      },
+    {
+      key: 'reminders',
+      label: 'Reminders',
+      icon: BellRing,
+      value: String(
+        dashboard.reminders,
+      ),
+      description:
+        'incomplete reminders',
+      route: '/reminders',
+    },
 
-      {
-        key: 'bookmarks',
-        label: 'Bookmarks',
-        icon: Bookmark,
-        value: String(
-          dashboard.bookmarks,
-        ),
-        description:
-          'resources added today',
-        route: '/bookmarks',
-      },
+    {
+      key: 'bookmarks',
+      label: 'Bookmarks',
+      icon: Bookmark,
+      value: String(
+        dashboard.bookmarks,
+      ),
+      description:
+        'resources added today',
+      route: '/bookmarks',
+    },
 
-      {
-        key: 'plants',
-        label: 'Plants',
-        icon: Sprout,
-        value: `${dashboard.plantsNeedingAttention}/${dashboard.plantsTotal}`,
-        description:
-          'needing attention',
-        route: '/plants',
-      },
+    {
+      key: 'plants',
+      label: 'Plants',
+      icon: Sprout,
+      value: `${dashboard.plantsNeedingAttention}/${dashboard.plantsTotal}`,
+      description:
+        'needing attention',
+      route: '/plants',
+    },
 
-      {
-        key: 'wellbeing',
-        label: 'Well-being',
-        icon: HeartPulse,
-        value: `${dashboard.wellbeingCompleted}/${dashboard.wellbeingTotal}`,
-        description:
-          'completed today',
-        route: '/modules/wellbeing',
-      },
+    {
+      key: 'wellbeing',
+      label: 'Well-being',
+      icon: HeartPulse,
+      value: `${dashboard.wellbeingCompleted}/${dashboard.wellbeingTotal}`,
+      description:
+        'completed today',
+      route: '/modules/wellbeing',
+    },
 
-      {
-        key: 'games',
-        label: 'Games',
-        icon: Gamepad2,
-        value: String(
-          dashboard.games,
-        ),
-        description:
-          'games played today',
-        route: '/modules/games',
-      },
-    ];
+    {
+      key: 'games',
+      label: 'Games',
+      icon: Gamepad2,
+      value: String(
+        dashboard.games,
+      ),
+      description:
+        'games played today',
+      route: '/modules/games',
+    },
+  ];
 
   /* =======================================================
      RENDER
@@ -1334,55 +1286,150 @@ export default function ModulesScreen() {
       style={[
         styles.safe,
         {
-          backgroundColor:
-            C.bg,
+          backgroundColor: C.bg,
         },
       ]}
     >
+      <StatusBar
+        barStyle={
+          isDark
+            ? 'light-content'
+            : 'dark-content'
+        }
+        backgroundColor={C.bg}
+        translucent={false}
+      />
+
       {/* =================================================
-          DASHBOARD
+          FIXED SIDEKICK RECTANGLE
+          
+          This is intentionally OUTSIDE the ScrollView.
+          It will remain static while the modules scroll.
+      ================================================= */}
+
+      <View
+        style={styles.fixedSidekickArea}
+      >
+        <View
+          style={[
+            styles.sidekickPlaceholder,
+            {
+              backgroundColor:
+                accentForeground,
+            },
+          ]}
+        >
+          {/* Sidekick instructor */}
+
+          <View
+            style={[
+              styles.sidekickInstructor,
+              {
+                backgroundColor:
+                  accentForeground,
+              },
+            ]}
+          >
+            <Image
+              source={require('../../assets/sidekick-favicon.png')}
+              style={
+                styles.sidekickInstructorImage
+              }
+              resizeMode="contain"
+            />
+          </View>
+
+          {/* Message indicators */}
+
+          <View
+            style={styles.sidekickDots}
+          >
+            <View
+              style={[
+                styles.sidekickDot,
+                styles.sidekickDotActive,
+              ]}
+            />
+
+            <View
+              style={styles.sidekickDot}
+            />
+
+            <View
+              style={styles.sidekickDot}
+            />
+          </View>
+
+          {/* Sidekick content */}
+
+          <View
+            style={styles.sidekickContent}
+          >
+            <Text
+              style={
+                styles.sidekickGreeting
+              }
+            >
+              Good morning {displayName},
+            </Text>
+
+            <Text
+              style={
+                styles.sidekickBody
+              }
+            >
+              Your Sidekick will use
+              this space for important
+              updates, guidance,
+              reminders, and
+              instructions.
+            </Text>
+          </View>
+
+          {/* Navigation */}
+
+          <View
+            style={
+              styles.sidekickNavigation
+            }
+          >
+            <Text
+              style={
+                styles.sidekickNavigationText
+              }
+            >
+              Previous
+            </Text>
+
+            <Text
+              style={
+                styles.sidekickNavigationText
+              }
+            >
+              Next
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      {/* =================================================
+          SCROLLABLE MODULE AREA
+          
+          ONLY this section scrolls.
       ================================================= */}
 
       <ScrollView
+        style={styles.modulesScroll}
         contentContainerStyle={
-          styles.content
+          styles.modulesContent
         }
         showsVerticalScrollIndicator={
           false
         }
+        bounces={true}
       >
-        <View style={styles.homeHero}>
-          <Text
-            style={[
-              styles.homeHeroName,
-              {
-                color:
-                  isDark &&
-                  appContext.accent_family === 'black'
-                    ? '#FFFFFF'
-                    : accentForeground,
-              },
-            ]}
-          >
-            {displayName},
-          </Text>
-
-          <Text
-            style={[
-              styles.homeHeroSubtitle,
-              {
-                color: C.muted,
-              },
-            ]}
-          >
-            What would you like to take care today?
-          </Text>
-        </View>
-
         <View
-          style={
-            styles.grid
-          }
+          style={styles.grid}
         >
           {dashboardItems.map(
             ({
@@ -1400,9 +1447,7 @@ export default function ModulesScreen() {
                     route as any,
                   )
                 }
-                style={({
-                  pressed,
-                }) => [
+                style={({ pressed }) => [
                   styles.module,
                   {
                     backgroundColor:
@@ -1442,8 +1487,7 @@ export default function ModulesScreen() {
                   style={[
                     styles.moduleLabel,
                     {
-                      color:
-                        C.text,
+                      color: C.text,
                     },
                   ]}
                 >
@@ -1459,8 +1503,7 @@ export default function ModulesScreen() {
                   style={[
                     styles.moduleValue,
                     {
-                      color:
-                        C.text,
+                      color: C.text,
                     },
                   ]}
                 >
@@ -1476,8 +1519,7 @@ export default function ModulesScreen() {
                   style={[
                     styles.moduleDescription,
                     {
-                      color:
-                        C.muted,
+                      color: C.muted,
                     },
                   ]}
                 >
@@ -1488,23 +1530,7 @@ export default function ModulesScreen() {
           )}
         </View>
 
-        {/* =================================================
-            SIDEKICK UPDATES / INSTRUCTIONS
-        ================================================= */}
-        <View
-          style={[
-            styles.sidekickPlaceholder,
-            {
-              backgroundColor: accentForeground,
-            },
-          ]}
-        >
-          <Text style={styles.sidekickLabel}>SIDEKICK</Text>
-          <Text style={styles.sidekickTitle}>Updates & instructions</Text>
-          <Text style={styles.sidekickBody}>
-            Your Sidekick will use this space for important updates, guidance, reminders, and instructions.
-          </Text>
-        </View>
+        {/* ERROR */}
 
         {hasError && (
           <View
@@ -1516,8 +1542,7 @@ export default function ModulesScreen() {
               style={[
                 styles.errorText,
                 {
-                  color:
-                    C.muted,
+                  color: C.muted,
                 },
               ]}
             >
@@ -1526,6 +1551,8 @@ export default function ModulesScreen() {
             </Text>
           </View>
         )}
+
+        {/* LOADING */}
 
         {loading && (
           <View
@@ -1542,7 +1569,6 @@ export default function ModulesScreen() {
           </View>
         )}
       </ScrollView>
-
     </SafeAreaView>
   );
 }
@@ -1558,51 +1584,129 @@ const styles =
     },
 
     /* =====================================================
-       CONTENT
+       FIXED SIDEKICK AREA
+       This does NOT scroll.
     ===================================================== */
 
-    content: {
+    fixedSidekickArea: {
       paddingHorizontal: 16,
+      paddingTop: 80,
+      paddingBottom: 10,
+    },
 
-      /*
-       * Extra space before the dashboard modules/title area.
-       */
-      paddingTop: 30,
+    sidekickPlaceholder: {
+      width: '100%',
+      minHeight: 190,
+      borderRadius: 24,
+      paddingHorizontal: 32,
+      paddingTop: 58,
+      paddingBottom: 48,
+      position: 'relative',
+      overflow: 'visible',
+    },
 
+    sidekickInstructor: {
+      position: 'absolute',
+      top: -34,
+      left: 0,
+      width: 104,
+      height: 104,
+      borderRadius: 52,
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
+    },
+
+    sidekickInstructorImage: {
+      width: 82,
+      height: 82,
+    },
+
+    sidekickDots: {
+      position: 'absolute',
+      top: 22,
+      right: 28,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+      gap: 7,
+    },
+
+    sidekickDot: {
+      width: 11,
+      height: 11,
+      borderRadius: 6,
+      backgroundColor: 'transparent',
+      borderWidth: 1.5,
+      borderColor: '#FFFFFF',
+    },
+
+    sidekickDotActive: {
+      backgroundColor: '#FFFFFF',
+    },
+
+    sidekickContent: {
+      width: '100%',
+    },
+
+    sidekickGreeting: {
+      color: '#FFFFFF',
+      fontFamily: FONT,
+      fontSize: 15,
+      lineHeight: 23,
+      fontStyle: 'italic',
+      marginBottom: 2,
+    },
+
+    sidekickBody: {
+      color: '#FFFFFF',
+      fontFamily: FONT,
+      fontSize: 12,
+      lineHeight: 19,
+      fontStyle: 'italic',
+      maxWidth: '95%',
+    },
+
+    sidekickNavigation: {
+      position: 'absolute',
+      left: 32,
+      right: 28,
+      bottom: 18,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+
+    sidekickNavigationText: {
+      color: '#FFFFFF',
+      fontFamily: FONT_BOLD,
+      fontSize: 12,
+    },
+
+    /* =====================================================
+       MODULE SCROLL AREA
+       This is the ONLY scrolling section.
+    ===================================================== */
+
+    modulesScroll: {
+      flex: 1,
+    },
+
+    modulesContent: {
+      paddingHorizontal: 16,
+      paddingTop: 14,
       paddingBottom: 36,
     },
 
     /* =====================================================
-       DASHBOARD MODULE GRID
-
-       THREE COLUMNS EVEN ON MOBILE
+       MODULE GRID
     ===================================================== */
-
-    homeHero: {
-      paddingTop: 2,
-      paddingBottom: 24,
-    },
-
-    homeHeroName: {
-      fontFamily: FONT_BOLD,
-      fontSize: 28,
-      lineHeight: 34,
-      letterSpacing: -0.8,
-    },
-
-    homeHeroSubtitle: {
-      fontFamily: FONT,
-      fontSize: 12,
-      lineHeight: 17,
-      marginTop: 2,
-    },
 
     grid: {
       width: '100%',
       flexDirection: 'row',
       flexWrap: 'wrap',
-      justifyContent:
-        'space-between',
+      justifyContent: 'space-between',
       rowGap: 10,
     },
 
@@ -1612,46 +1716,10 @@ const styles =
       borderRadius: 18,
       borderWidth: 1,
       paddingHorizontal: 7,
-      paddingVertical: 12,
+      paddingVertical: 10,
       alignItems: 'center',
-      justifyContent:
-        'center',
+      justifyContent: 'center',
       gap: 7,
-    },
-
-    sidekickPlaceholder: {
-      width: '100%',
-      minHeight: 228,
-      borderRadius: 24,
-      marginTop: 18,
-      paddingHorizontal: 24,
-      paddingVertical: 24,
-      alignItems: 'flex-start',
-      justifyContent: 'flex-start',
-    },
-
-    sidekickLabel: {
-      color: '#FFFFFF',
-      fontFamily: FONT_BOLD,
-      fontSize: 11,
-      letterSpacing: 1.4,
-      marginBottom: 10,
-    },
-
-    sidekickTitle: {
-      color: '#FFFFFF',
-      fontFamily: FONT_BOLD,
-      fontSize: 20,
-      lineHeight: 26,
-      marginBottom: 10,
-    },
-
-    sidekickBody: {
-      color: '#FFFFFF',
-      fontFamily: FONT,
-      fontSize: 12,
-      lineHeight: 19,
-      maxWidth: '95%',
     },
 
     modulePressed: {
@@ -1668,8 +1736,7 @@ const styles =
       height: 48,
       borderRadius: 15,
       alignItems: 'center',
-      justifyContent:
-        'center',
+      justifyContent: 'center',
       marginBottom: 2,
     },
 
@@ -1678,8 +1745,7 @@ const styles =
       fontSize: 8,
       letterSpacing: 0.15,
       textAlign: 'center',
-      includeFontPadding:
-        false,
+      includeFontPadding: false,
       flexShrink: 1,
     },
 
@@ -1688,8 +1754,7 @@ const styles =
       fontSize: 22,
       lineHeight: 25,
       textAlign: 'center',
-      includeFontPadding:
-        false,
+      includeFontPadding: false,
     },
 
     moduleDescription: {
@@ -1697,8 +1762,7 @@ const styles =
       fontSize: 7.5,
       lineHeight: 10,
       textAlign: 'center',
-      includeFontPadding:
-        false,
+      includeFontPadding: false,
       maxWidth: '95%',
     },
 
@@ -1722,5 +1786,4 @@ const styles =
       fontSize: 9,
       textAlign: 'center',
     },
-
   });

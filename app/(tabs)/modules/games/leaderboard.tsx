@@ -37,6 +37,15 @@ type LeaderboardRow = {
   games_played: number;
 };
 
+type GameScore = {
+  player_id: string;
+  game: string;
+  mode: string | null;
+  result: string | null;
+  points: number | null;
+  difficulty: string | null;
+};
+
 const GAME_FILTERS: {
   key: GameFilter;
   label: string;
@@ -65,6 +74,77 @@ function getRankColor(rank: number): string {
   if (rank === 3) return BRONZE;
 
   return '';
+}
+
+/**
+ * Normalise result values coming from the different games.
+ *
+ * Chess uses values such as:
+ *   white_wins
+ *   black_wins
+ *   draw
+ *
+ * Tic-Tac-Toe may use:
+ *   win
+ *   loss
+ *   draw
+ *
+ * Other games may simply record their points without a result.
+ */
+function getResultType(
+  score: GameScore,
+): 'win' | 'draw' | 'loss' | 'other' {
+  const result = String(score.result ?? '')
+    .trim()
+    .toLowerCase();
+
+  if (!result) {
+    return 'other';
+  }
+
+  if (
+    result === 'draw' ||
+    result === 'drawn' ||
+    result === 'tie' ||
+    result === 'tied'
+  ) {
+    return 'draw';
+  }
+
+  /*
+   * Chess stores the winning side as white_wins /
+   * black_wins. The actual player who owns the score
+   * receives the score row, so a non-zero score is
+   * treated as a win for leaderboard purposes.
+   */
+  if (
+    result === 'white_wins' ||
+    result === 'black_wins'
+  ) {
+    return Number(score.points ?? 0) > 0
+      ? 'win'
+      : 'loss';
+  }
+
+  if (
+    result === 'win' ||
+    result === 'won' ||
+    result === 'winner' ||
+    result === 'won_game'
+  ) {
+    return 'win';
+  }
+
+  if (
+    result === 'loss' ||
+    result === 'lost' ||
+    result === 'lose' ||
+    result === 'loser'
+  ) {
+    return 'loss';
+  }
+
+  return 'other';
 }
 
 export default function LeaderboardScreen() {
@@ -115,27 +195,39 @@ export default function LeaderboardScreen() {
     async (activeFilter: GameFilter) => {
       setLoading(true);
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      try {
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser();
 
-      const currentUserId =
-        user?.id ?? null;
+        if (userError) {
+          console.error(
+            'LEADERBOARD USER ERROR:',
+            userError,
+          );
+        }
 
-      setMyId(currentUserId);
+        const currentUserId =
+          user?.id ?? null;
 
-      if (!currentUserId) {
-        setRows([]);
-        setLoading(false);
-        return;
-      }
+        setMyId(currentUserId);
 
-      /*
-       * Find every connection involving the
-       * current user.
-       */
-      const { data: friendRows } =
-        await supabase
+        if (!currentUserId) {
+          setRows([]);
+          return;
+        }
+
+        /*
+         * --------------------------------------------------
+         * 1. Find all friends connected to the current user
+         * --------------------------------------------------
+         */
+
+        const {
+          data: friendRows,
+          error: friendshipError,
+        } = await supabase
           .from('friendships')
           .select(
             'user_id, friend_user_id',
@@ -144,27 +236,55 @@ export default function LeaderboardScreen() {
             `user_id.eq.${currentUserId},friend_user_id.eq.${currentUserId}`,
           );
 
-      const friendIds = (
-        friendRows ?? []
-      ).map((row) =>
-        row.user_id === currentUserId
-          ? row.friend_user_id
-          : row.user_id,
-      );
+        if (friendshipError) {
+          console.error(
+            'LEADERBOARD FRIENDSHIP ERROR:',
+            friendshipError,
+          );
+        }
 
-      const scopedIds = [
-        ...new Set([
-          currentUserId,
-          ...friendIds,
-        ]),
-      ];
+        const friendIds = (
+          friendRows ?? []
+        )
+          .map((row) =>
+            row.user_id === currentUserId
+              ? row.friend_user_id
+              : row.user_id,
+          )
+          .filter(
+            (id): id is string =>
+              typeof id === 'string' &&
+              id.length > 0 &&
+              id !== currentUserId,
+          );
 
-      /*
-       * Profiles are the source of truth for
-       * display names.
-       */
-      const { data: profileRows } =
-        await supabase
+        /*
+         * The leaderboard contains:
+         *
+         *   You
+         *   + all your friends
+         */
+        const scopedIds = [
+          ...new Set([
+            currentUserId,
+            ...friendIds,
+          ]),
+        ];
+
+        /*
+         * --------------------------------------------------
+         * 2. Get profile names
+         * --------------------------------------------------
+         *
+         * profiles.user_id is the link to auth.users.id.
+         * We deliberately use profiles as the source of
+         * truth rather than a display_name stored on a score.
+         */
+
+        const {
+          data: profileRows,
+          error: profileError,
+        } = await supabase
           .from('profiles')
           .select(
             'user_id, display_name',
@@ -174,195 +294,272 @@ export default function LeaderboardScreen() {
             scopedIds,
           );
 
-      const nameById = new Map<
-        string,
-        string
-      >();
+        if (profileError) {
+          console.error(
+            'LEADERBOARD PROFILE ERROR:',
+            profileError,
+          );
+        }
 
-      for (const profile of
-        profileRows ?? []) {
-        nameById.set(
-          profile.user_id,
-          profile.display_name ??
-            'Player',
-        );
-      }
+        const nameById = new Map<
+          string,
+          string
+        >();
 
-      /*
-       * Get actual recorded leaderboard
-       * values for all people in scope.
-       */
-      let query = supabase
-        .from('game_leaderboard')
-        .select(
-          'game, player_id, display_name, total_points, wins, draws, games_played',
-        )
-        .in(
-          'player_id',
-          scopedIds,
-        );
+        for (
+          const profile of profileRows ?? []
+        ) {
+          const name =
+            typeof profile.display_name ===
+              'string'
+              ? profile.display_name.trim()
+              : '';
 
-      if (activeFilter !== 'all') {
-        query = query.eq(
-          'game',
-          activeFilter,
-        );
-      }
+          if (name) {
+            nameById.set(
+              profile.user_id,
+              name,
+            );
+          }
+        }
 
-      const {
-        data: scoreRows,
-        error,
-      } = await query;
+        /*
+         * --------------------------------------------------
+         * 3. Read the actual game scores
+         * --------------------------------------------------
+         *
+         * This is the important change.
+         *
+         * The games write to game_scores, so the leaderboard
+         * must read game_scores directly.
+         */
 
-      if (error) {
+        let scoreQuery = supabase
+          .from('game_scores')
+          .select(
+            `
+              player_id,
+              game,
+              mode,
+              result,
+              points,
+              difficulty
+            `,
+          )
+          .in(
+            'player_id',
+            scopedIds,
+          );
+
+        if (activeFilter !== 'all') {
+          scoreQuery = scoreQuery.eq(
+            'game',
+            activeFilter,
+          );
+        }
+
+        const {
+          data: scoreRows,
+          error: scoreError,
+        } = await scoreQuery;
+
+        if (scoreError) {
+          console.error(
+            'LEADERBOARD SCORE ERROR:',
+            scoreError,
+          );
+
+          setRows([]);
+          return;
+        }
+
+        /*
+         * --------------------------------------------------
+         * 4. Aggregate scores by player
+         * --------------------------------------------------
+         */
+
+        const totals = new Map<
+          string,
+          LeaderboardRow
+        >();
+
+        for (
+          const rawScore of
+            scoreRows ?? []
+        ) {
+          const score =
+            rawScore as GameScore;
+
+          const playerId =
+            score.player_id;
+
+          if (!playerId) {
+            continue;
+          }
+
+          const points = Number(
+            score.points ?? 0,
+          );
+
+          const resultType =
+            getResultType(score);
+
+          const existing =
+            totals.get(playerId);
+
+          if (existing) {
+            existing.total_points +=
+              points;
+
+            /*
+             * Only count games that have an
+             * actual recorded result.
+             *
+             * Solo games such as Sudoku,
+             * Word Search and Sequence may
+             * not store a result field.
+             *
+             * Those are still counted as played.
+             */
+            existing.games_played += 1;
+
+            if (resultType === 'win') {
+              existing.wins += 1;
+            }
+
+            if (resultType === 'draw') {
+              existing.draws += 1;
+            }
+          } else {
+            totals.set(playerId, {
+              player_id: playerId,
+
+              display_name:
+                nameById.get(playerId) ??
+                'Player',
+
+              total_points: points,
+
+              wins:
+                resultType === 'win'
+                  ? 1
+                  : 0,
+
+              draws:
+                resultType === 'draw'
+                  ? 1
+                  : 0,
+
+              games_played: 1,
+            });
+          }
+        }
+
+        /*
+         * --------------------------------------------------
+         * 5. Add friends who have not played yet
+         * --------------------------------------------------
+         *
+         * This means a friend still appears on the
+         * leaderboard with:
+         *
+         *   0 pts
+         *   0W
+         *   0D
+         *   0 played
+         */
+
+        for (
+          const playerId of scopedIds
+        ) {
+          if (!totals.has(playerId)) {
+            totals.set(playerId, {
+              player_id: playerId,
+
+              display_name:
+                nameById.get(playerId) ??
+                'Player',
+
+              total_points: 0,
+              wins: 0,
+              draws: 0,
+              games_played: 0,
+            });
+          }
+        }
+
+        /*
+         * --------------------------------------------------
+         * 6. Sort leaderboard
+         * --------------------------------------------------
+         *
+         * Primary:
+         *   Total points
+         *
+         * Secondary:
+         *   Wins
+         *
+         * Third:
+         *   Games played
+         *
+         * Fourth:
+         *   Name
+         */
+
+        const sorted = [
+          ...totals.values(),
+        ].sort((a, b) => {
+          if (
+            b.total_points !==
+            a.total_points
+          ) {
+            return (
+              b.total_points -
+              a.total_points
+            );
+          }
+
+          if (b.wins !== a.wins) {
+            return b.wins - a.wins;
+          }
+
+          if (
+            b.games_played !==
+            a.games_played
+          ) {
+            return (
+              b.games_played -
+              a.games_played
+            );
+          }
+
+          return a.display_name.localeCompare(
+            b.display_name,
+          );
+        });
+
+        setRows(sorted);
+      } catch (error) {
         console.error(
-          'LEADERBOARD ERROR:',
+          'LEADERBOARD UNEXPECTED ERROR:',
           error,
         );
+
+        setRows([]);
+      } finally {
+        setLoading(false);
       }
-
-      /*
-       * Aggregate by player.
-       *
-       * For All:
-       *   Chess + Tic-Tac-Toe + Sudoku
-       *   + Word Search + Sequence
-       *
-       * For an individual filter:
-       *   only that game's row is used.
-       */
-      const totals = new Map<
-        string,
-        LeaderboardRow
-      >();
-
-      for (const score of
-        scoreRows ?? []) {
-        const playerId =
-          score.player_id;
-
-        const existing =
-          totals.get(playerId);
-
-        if (existing) {
-          existing.total_points +=
-            Number(
-              score.total_points ?? 0,
-            );
-
-          existing.wins += Number(
-            score.wins ?? 0,
-          );
-
-          existing.draws += Number(
-            score.draws ?? 0,
-          );
-
-          existing.games_played +=
-            Number(
-              score.games_played ?? 0,
-            );
-        } else {
-          totals.set(playerId, {
-            player_id: playerId,
-
-            display_name:
-              nameById.get(playerId) ??
-              score.display_name ??
-              'Player',
-
-            total_points: Number(
-              score.total_points ?? 0,
-            ),
-
-            wins: Number(
-              score.wins ?? 0,
-            ),
-
-            draws: Number(
-              score.draws ?? 0,
-            ),
-
-            games_played: Number(
-              score.games_played ?? 0,
-            ),
-          });
-        }
-      }
-
-      /*
-       * Add every connected person who doesn't
-       * yet have a leaderboard row.
-       *
-       * This is what makes a friend with zero
-       * games/points appear.
-       */
-      for (const playerId of
-        scopedIds) {
-        if (!totals.has(playerId)) {
-          totals.set(playerId, {
-            player_id: playerId,
-
-            display_name:
-              nameById.get(playerId) ??
-              'Player',
-
-            total_points: 0,
-            wins: 0,
-            draws: 0,
-            games_played: 0,
-          });
-        }
-      }
-
-      /*
-       * Rank by total points.
-       *
-       * If points are tied, use wins as the
-       * secondary ordering, then games played,
-       * then name for a stable order.
-       */
-      const sorted = [
-        ...totals.values(),
-      ].sort((a, b) => {
-        if (
-          b.total_points !==
-          a.total_points
-        ) {
-          return (
-            b.total_points -
-            a.total_points
-          );
-        }
-
-        if (b.wins !== a.wins) {
-          return b.wins - a.wins;
-        }
-
-        if (
-          b.games_played !==
-          a.games_played
-        ) {
-          return (
-            b.games_played -
-            a.games_played
-          );
-        }
-
-        return a.display_name.localeCompare(
-          b.display_name,
-        );
-      });
-
-      setRows(sorted);
-      setLoading(false);
     },
     [],
   );
 
   useEffect(() => {
     fetchLeaderboard(filter);
-  }, [filter, fetchLeaderboard]);
+  }, [
+    filter,
+    fetchLeaderboard,
+  ]);
 
   return (
     <SafeAreaView
@@ -503,6 +700,48 @@ export default function LeaderboardScreen() {
               ]}
             >
               Loading scores…
+            </Text>
+          </View>
+        ) : rows.length === 0 ? (
+          <View
+            style={[
+              styles.emptyState,
+              {
+                backgroundColor:
+                  colors.card,
+                borderColor:
+                  colors.border,
+              },
+            ]}
+          >
+            <Trophy
+              size={30}
+              color={colors.muted}
+            />
+
+            <Text
+              style={[
+                styles.emptyText,
+                {
+                  color:
+                    colors.text,
+                },
+              ]}
+            >
+              No scores yet
+            </Text>
+
+            <Text
+              style={[
+                styles.mutedText,
+                {
+                  color:
+                    colors.muted,
+                },
+              ]}
+            >
+              Play a game to appear on
+              the leaderboard.
             </Text>
           </View>
         ) : (
@@ -794,7 +1033,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 60,
+    paddingHorizontal: 30,
     gap: 10,
+    borderRadius: 12,
+    borderWidth: 1,
   },
 
   emptyText: {

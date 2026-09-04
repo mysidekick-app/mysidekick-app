@@ -15,7 +15,7 @@ import { router } from 'expo-router';
 const CHARCOAL = '#242424';
 const WORD = 'sidekick';
 
-const SIDEKICK_IMAGE = require('../assets/Sidekick.png');
+const SIDEKICK_IMAGE = require('../assets/sidekick.png');
 
 export default function WelcomeScreen() {
   const { width, height } = useWindowDimensions();

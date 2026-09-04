@@ -49,6 +49,7 @@ type AppContextValue = AppSettings & {
   accentForeground: string;
   accentWash: string;
   onAccent: string;
+  text: string;
   updateSettings: (
     changes: Partial<AppSettings>
   ) => Promise<void>;
@@ -72,7 +73,7 @@ export const accentPalettes: Record<
 > = {
   black: {
     light: '#5A5A5A',
-    standard: '#252525',
+    standard: '#3F3F3F',
     deep: '#111111',
     wash: '#E9E9E9',
   },
@@ -419,6 +420,23 @@ export function AppProvider({
   const onAccent =
     '#FFFFFF';
 
+  /*
+   * General app-wide text color: black text in light mode,
+   * white text in dark mode. Use this wherever a component
+   * currently hardcodes '#000000' / 'black' for text, so
+   * that text stays visible against dark backgrounds.
+   *
+   * Note: this does NOT distinguish between dark-background
+   * and white-background surfaces — a component that keeps
+   * an explicit white background in dark mode will also get
+   * white text from this token, which will be invisible
+   * there. If you have such surfaces (white buttons/filters,
+   * etc.), those specific components should keep a fixed
+   * black text color instead of pulling from `text`.
+   */
+  const text =
+    isDark ? '#FFFFFF' : '#000000';
+
   const value =
     useMemo<AppContextValue>(
       () => ({
@@ -437,6 +455,8 @@ export function AppProvider({
 
         onAccent,
 
+        text,
+
         updateSettings,
       }),
       [
@@ -447,6 +467,7 @@ export function AppProvider({
         accent,
         accentForeground,
         accentWash,
+        text,
       ]
     );
 

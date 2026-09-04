@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "My Sidekick",
-    "slug": "my-sidekick",
+    "slug": "bolt-expo-nativewind",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/sidekick.png",
