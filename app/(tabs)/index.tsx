@@ -4036,7 +4036,7 @@ export default function ChatScreen() {
                 accentForeground
               }
               style={{
-                marginTop: 16,
+                marginTop: 100,
               }}
             />
           ) : null}

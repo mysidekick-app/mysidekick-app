@@ -1590,7 +1590,7 @@ const styles =
 
     fixedSidekickArea: {
       paddingHorizontal: 16,
-      paddingTop: 80,
+      paddingTop: 100,
       paddingBottom: 10,
     },
 

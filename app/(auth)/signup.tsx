@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -13,7 +14,7 @@ import {
   View,
 } from 'react-native';
 
-import { Check, Eye, EyeOff, Sparkles, X } from 'lucide-react-native';
+import { Check, Eye, EyeOff, X } from 'lucide-react-native';
 import { Link, router } from 'expo-router';
 
 import { useAuth } from '@/components/AuthProvider';
@@ -56,40 +57,6 @@ export default function SignUpScreen() {
   );
   const [usernameError, setUsernameError] = useState<string | null>(null);
 
-  /*
-   * Username rules:
-   *
-   * - minimum 5 characters
-   * - maximum 20 characters
-   * - lowercase only
-   * - letters allowed
-   * - numbers allowed
-   * - underscore allowed
-   * - full stop allowed
-   * - full stop must be between letters
-   * - no spaces
-   * - no other special characters
-   *
-   * Examples:
-   * john1
-   * john123
-   * john_doe
-   * john.doe
-   * john.doe123
-   * john_123
-   *
-   * Not allowed:
-   * john
-   * .john1
-   * john1.
-   * john..doe
-   * john._doe
-   * john_.doe
-   * john-doe
-   * john doe
-   * John123
-   */
-
   const isValidUsername = (value: string) => {
     if (!value) return false;
 
@@ -100,17 +67,11 @@ export default function SignUpScreen() {
       return false;
     }
 
-    // Must begin and end with a letter or number.
     if (!/^[a-z0-9]/.test(value)) return false;
     if (!/[a-z0-9]$/.test(value)) return false;
 
-    // Only lowercase letters, numbers, underscore and full stop.
     if (!/^[a-z0-9_.]+$/.test(value)) return false;
 
-    /*
-     * Every full stop must have a letter immediately
-     * before and after it.
-     */
     for (let i = 0; i < value.length; i++) {
       if (value[i] === '.') {
         const before = value[i - 1];
@@ -130,11 +91,6 @@ export default function SignUpScreen() {
     return true;
   };
 
-  /*
-   * Check username availability using the existing Supabase RPC.
-   * We only check availability once the username satisfies
-   * the complete format and length rules.
-   */
   useEffect(() => {
     const cleanUsername = username.trim().toLowerCase();
 
@@ -210,10 +166,6 @@ export default function SignUpScreen() {
   }, [username]);
 
   const handleUsernameChange = (value: string) => {
-    /*
-     * Always store usernames in lowercase and enforce
-     * the 20-character maximum at the input level.
-     */
     const lower = value.toLowerCase().slice(0, MAX_USERNAME_LENGTH);
 
     setUsername(lower);
@@ -259,10 +211,6 @@ export default function SignUpScreen() {
       return;
     }
 
-    /*
-     * Do not allow signup until username availability
-     * has been confirmed by Supabase.
-     */
     if (usernameChecking) {
       setError('Please wait while we check your username.');
       return;
@@ -293,10 +241,6 @@ export default function SignUpScreen() {
     setSubmitting(false);
 
     if (result.error) {
-      /*
-       * This catches the rare case where another user claims
-       * the username between the availability check and signup.
-       */
       const message = result.error.toLowerCase();
 
       if (
@@ -347,14 +291,12 @@ export default function SignUpScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.card}>
-            {/* Logo placeholder */}
             <View style={styles.brand}>
-              <View style={styles.logoMark}>
-                <Sparkles size={18} color={COLORS.text} strokeWidth={2.2} />
-              </View>
-
-              <Text style={styles.logoText}>sidekick</Text>
-              <Text style={styles.logoCaption}>your everyday companion</Text>
+              <Image
+                source={require('@/assets/sidekick.png')}
+                style={styles.logoImage}
+                resizeMode="cover"
+              />
             </View>
 
             <View style={styles.heading}>
@@ -452,13 +394,19 @@ export default function SignUpScreen() {
                   <Text
                     style={[
                       styles.usernameHint,
-                      usernameAvailable === false && styles.usernameError,
+                      usernameAvailable === false &&
+                        styles.usernameError,
                     ]}
                   >
                     {usernameError}
                   </Text>
                 ) : usernameAvailable === true ? (
-                  <Text style={[styles.usernameHint, styles.usernameSuccess]}>
+                  <Text
+                    style={[
+                      styles.usernameHint,
+                      styles.usernameSuccess,
+                    ]}
+                  >
                     Username available
                   </Text>
                 ) : (
@@ -508,7 +456,9 @@ export default function SignUpScreen() {
                   />
 
                   <Pressable
-                    onPress={() => setShowPassword((current) => !current)}
+                    onPress={() =>
+                      setShowPassword((current) => !current)
+                    }
                     style={styles.eyeButton}
                     hitSlop={8}
                     accessibilityRole="button"
@@ -553,7 +503,9 @@ export default function SignUpScreen() {
             </View>
 
             <View style={styles.linkRow}>
-              <Text style={styles.linkMuted}>Already have an account?</Text>
+              <Text style={styles.linkMuted}>
+                Already have an account?
+              </Text>
 
               <Link href="/login" asChild>
                 <Pressable hitSlop={8}>
@@ -600,34 +552,13 @@ const styles = StyleSheet.create({
 
   brand: {
     alignItems: 'center',
-    marginBottom: 27,
+    marginBottom: 20,
   },
 
-  logoMark: {
-    width: 42,
-    height: 42,
-    borderRadius: 15,
-    backgroundColor: COLORS.charcoal,
-    borderWidth: 1,
-    borderColor: '#3A3A3A',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 9,
-  },
-
-  logoText: {
-    color: COLORS.text,
-    fontFamily: 'Poppins-Bold',
-    fontSize: 23,
-    letterSpacing: -0.5,
-  },
-
-  logoCaption: {
-    color: COLORS.muted,
-    fontFamily: 'Poppins-Regular',
-    fontSize: 10.5,
-    marginTop: 2,
-    letterSpacing: 0.4,
+  logoImage: {
+    width: 92,
+    height: 92,
+    borderRadius: 46,
   },
 
   heading: {

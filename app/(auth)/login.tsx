@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -13,7 +14,7 @@ import {
   View,
 } from 'react-native';
 
-import { Eye, EyeOff, Sparkles } from 'lucide-react-native';
+import { Eye, EyeOff } from 'lucide-react-native';
 import { Link, router } from 'expo-router';
 
 import { useAuth } from '@/components/AuthProvider';
@@ -66,11 +67,11 @@ export default function LoginScreen() {
     return (
       <SafeAreaView style={styles.safe}>
         <View style={styles.loadingScreen}>
-          <View style={styles.logoMark}>
-            <Sparkles size={18} color={COLORS.text} strokeWidth={2.2} />
-          </View>
-
-          <Text style={styles.logoText}>sidekick</Text>
+          <Image
+            source={require('@/assets/sidekick.png')}
+            style={styles.loadingLogo}
+            resizeMode="cover"
+          />
 
           <ActivityIndicator
             size="small"
@@ -94,14 +95,12 @@ export default function LoginScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.card}>
-            {/* Logo placeholder */}
             <View style={styles.brand}>
-              <View style={styles.logoMark}>
-                <Sparkles size={18} color={COLORS.text} strokeWidth={2.2} />
-              </View>
-
-              <Text style={styles.logoText}>sidekick</Text>
-              <Text style={styles.logoCaption}>your everyday companion</Text>
+              <Image
+                source={require('@/assets/sidekick.png')}
+                style={styles.logoImage}
+                resizeMode="cover"
+              />
             </View>
 
             <View style={styles.heading}>
@@ -243,34 +242,13 @@ const styles = StyleSheet.create({
 
   brand: {
     alignItems: 'center',
-    marginBottom: 30,
+    marginBottom: 15,
   },
 
-  logoMark: {
-    width: 42,
-    height: 42,
-    borderRadius: 15,
-    backgroundColor: COLORS.charcoal,
-    borderWidth: 1,
-    borderColor: '#3A3A3A',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 9,
-  },
-
-  logoText: {
-    color: COLORS.text,
-    fontFamily: 'Poppins-Bold',
-    fontSize: 23,
-    letterSpacing: -0.5,
-  },
-
-  logoCaption: {
-    color: COLORS.muted,
-    fontFamily: 'Poppins-Regular',
-    fontSize: 10.5,
-    marginTop: 2,
-    letterSpacing: 0.4,
+  logoImage: {
+    width: 92,
+    height: 92,
+    borderRadius: 46,
   },
 
   heading: {
@@ -405,10 +383,16 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
   },
 
-  loadingScreen: {   
+  loadingScreen: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+
+  loadingLogo: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
   },
 
   loadingIndicator: {
