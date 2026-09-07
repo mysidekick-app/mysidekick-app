@@ -408,7 +408,7 @@ const styles = StyleSheet.create({
   deleteListText: { fontFamily: FONT_MED, fontSize: 12 },
   fab: {
     position: 'absolute',
-    bottom: 24,
+    bottom: 82,
     alignSelf: 'center',
     width: 56,
     height: 56,

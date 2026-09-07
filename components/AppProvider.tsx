@@ -6,6 +6,7 @@ import {
   useMemo,
   useState,
 } from 'react';
+
 import { useColorScheme } from 'react-native';
 
 import { supabase } from '@/lib/supabase';
@@ -40,6 +41,9 @@ type AppSettings = {
   timezone: string;
   username: string;
   avatar_url: string | null;
+  // Selected Sidekick sticker/avatar.
+  // null means the user has not selected a Sidekick yet.
+  sidekick_id: string | null;
 };
 
 type AppContextValue = AppSettings & {
@@ -65,6 +69,9 @@ const fallbackSettings: AppSettings = {
   timezone: 'Africa/Nairobi',
   username: '',
   avatar_url: null,
+  // No Sidekick selected yet.
+  // SidekickAvatar will use assets/sidekick-favicon.png.
+  sidekick_id: null,
 };
 
 export const accentPalettes: Record<
@@ -73,7 +80,7 @@ export const accentPalettes: Record<
 > = {
   black: {
     light: '#5A5A5A',
-    standard: '#3F3F3F',
+    standard: '#4F4F4F',
     deep: '#111111',
     wash: '#E9E9E9',
   },
@@ -160,7 +167,6 @@ export function AppProvider({
           setSettings(fallbackSettings);
           setLoading(false);
         }
-
         return;
       }
 
@@ -170,7 +176,6 @@ export function AppProvider({
        * Application settings live in:
        * public.assistant_app_settings
        */
-
       const {
         data: appSettingsData,
         error: appSettingsError,
@@ -191,17 +196,17 @@ export function AppProvider({
         .maybeSingle();
 
       /*
-       * Username and profile picture live in:
+       * Username, profile picture, and Sidekick
+       * selection live in:
        * public.profiles
        */
-
       const {
         data: profileData,
         error: profileError,
       } = await supabase
         .from('profiles')
         .select(
-          'username, avatar_url'
+          'username, avatar_url, sidekick_id'
         )
         .eq('user_id', user.id)
         .maybeSingle();
@@ -230,11 +235,49 @@ export function AppProvider({
         user.email?.split('@')[0] ??
         '';
 
-      setSettings({
+      const savedAccentFamily =
+        appSettingsData?.accent_family;
+
+      const validAccentFamily =
+        savedAccentFamily &&
+        savedAccentFamily in accentPalettes
+          ? (savedAccentFamily as AccentFamily)
+          : fallbackSettings.accent_family;
+
+      const savedThemeMode =
+        appSettingsData?.theme_mode;
+
+      const validThemeMode =
+        savedThemeMode === 'system' ||
+        savedThemeMode === 'light' ||
+        savedThemeMode === 'dark'
+          ? savedThemeMode
+          : fallbackSettings.theme_mode;
+
+      const savedSettings: AppSettings = {
         ...fallbackSettings,
-        ...(appSettingsData ?? {}),
 
         display_name: displayName,
+
+        title:
+          appSettingsData?.title ?? '',
+
+        bio:
+          appSettingsData?.bio ?? '',
+
+        theme_mode:
+          validThemeMode,
+
+        accent_family:
+          validAccentFamily,
+
+        currency_code:
+          appSettingsData?.currency_code ??
+          fallbackSettings.currency_code,
+
+        timezone:
+          appSettingsData?.timezone ||
+          fallbackSettings.timezone,
 
         username:
           profileData?.username ?? '',
@@ -242,15 +285,11 @@ export function AppProvider({
         avatar_url:
           profileData?.avatar_url ?? null,
 
-        /*
-         * Keep Nairobi as the fallback if an older
-         * account does not yet have a timezone.
-         */
-        timezone:
-          appSettingsData?.timezone ??
-          'Africa/Nairobi',
-      });
+        sidekick_id:
+          profileData?.sidekick_id ?? null,
+      };
 
+      setSettings(savedSettings);
       setLoading(false);
     }
 
@@ -261,14 +300,25 @@ export function AppProvider({
     };
   }, [user, authLoading]);
 
-  // Publish the signed-in user's online presence globally so chat screens
-  // can show Active / Inactive without adding a database presence table.
+  /*
+   * Publish the signed-in user's online presence globally
+   * so chat screens can show Active / Inactive.
+   */
   useEffect(() => {
-    if (!user?.id) return;
+    if (!user?.id) {
+      return;
+    }
 
-    const channel = supabase.channel('global-presence', {
-      config: { presence: { key: user.id } },
-    });
+    const channel = supabase.channel(
+      'global-presence',
+      {
+        config: {
+          presence: {
+            key: user.id,
+          },
+        },
+      }
+    );
 
     channel.subscribe(async (status) => {
       if (status === 'SUBSCRIBED') {
@@ -291,13 +341,11 @@ export function AppProvider({
       console.warn(
         'Cannot update app settings without an authenticated user.'
       );
-
       return;
     }
 
     /*
-     * Update local state immediately so the UI
-     * responds without waiting for Supabase.
+     * Update local state immediately.
      */
     const next: AppSettings = {
       ...settings,
@@ -307,55 +355,92 @@ export function AppProvider({
     setSettings(next);
 
     /*
-     * Application settings.
+     * Save application settings.
      *
-     * Username and avatar_url are NOT stored here.
+     * We deliberately do NOT use upsert here.
+     *
+     * First try to UPDATE the user's existing row.
+     * If no row exists, INSERT a new row.
+     *
+     * This makes the settings persistence independent
+     * of an onConflict/user_id unique constraint.
      */
-    const {
-      error: settingsError,
-    } = await supabase
-      .from('assistant_app_settings')
-      .upsert(
-        {
-          user_id: user.id,
-          display_name: next.display_name,
-          title: next.title,
-          bio: next.bio,
-          theme_mode: next.theme_mode,
-          accent_family: next.accent_family,
-          currency_code: next.currency_code,
-          timezone:
-            next.timezone || 'Africa/Nairobi',
-          updated_at:
-            new Date().toISOString(),
-        },
-        {
-          onConflict: 'user_id',
-        }
-      );
+    const hasAppSettingsChanges =
+      changes.display_name !== undefined ||
+      changes.title !== undefined ||
+      changes.bio !== undefined ||
+      changes.theme_mode !== undefined ||
+      changes.accent_family !== undefined ||
+      changes.currency_code !== undefined ||
+      changes.timezone !== undefined;
 
-    if (settingsError) {
-      console.error(
-        'Failed to save app settings:',
-        settingsError.message
-      );
+    if (hasAppSettingsChanges) {
+      const settingsData = {
+        display_name: next.display_name,
+        title: next.title,
+        bio: next.bio,
+        theme_mode: next.theme_mode,
+        accent_family: next.accent_family,
+        currency_code: next.currency_code,
+        timezone:
+          next.timezone || 'Africa/Nairobi',
+        updated_at:
+          new Date().toISOString(),
+      };
+
+      /*
+       * First try to update the existing settings row.
+       */
+      const {
+        data: updatedRows,
+        error: updateError,
+      } = await supabase
+        .from('assistant_app_settings')
+        .update(settingsData)
+        .eq('user_id', user.id)
+        .select('user_id');
+
+      if (updateError) {
+        console.error(
+          'Failed to update app settings:',
+          updateError.message
+        );
+      } else if (!updatedRows || updatedRows.length === 0) {
+        /*
+         * No row exists yet, so create it.
+         */
+        const {
+          error: insertError,
+        } = await supabase
+          .from('assistant_app_settings')
+          .insert({
+            user_id: user.id,
+            ...settingsData,
+          });
+
+        if (insertError) {
+          console.error(
+            'Failed to insert app settings:',
+            insertError.message
+          );
+        }
+      }
     }
 
     /*
-     * Username and profile picture live in
-     * public.profiles.
-     *
-     * Only update them when explicitly passed
-     * to updateSettings().
+     * Username, profile picture, and Sidekick
+     * selection live in public.profiles.
      */
     if (
       changes.username !== undefined ||
-      changes.avatar_url !== undefined
+      changes.avatar_url !== undefined ||
+      changes.sidekick_id !== undefined
     ) {
       const profileUpdate: {
         user_id: string;
         username?: string;
         avatar_url?: string | null;
+        sidekick_id?: string | null;
         updated_at: string;
       } = {
         user_id: user.id,
@@ -379,6 +464,16 @@ export function AppProvider({
           changes.avatar_url;
       }
 
+      if (
+        changes.sidekick_id !== undefined
+      ) {
+        profileUpdate.sidekick_id =
+          changes.sidekick_id;
+      }
+
+      /*
+       * Keep the existing profile persistence behavior.
+       */
       const {
         error: profileError,
       } = await supabase
@@ -409,7 +504,7 @@ export function AppProvider({
   const accent =
     accentPalettes[
       settings.accent_family
-    ] ?? accentPalettes.blue;
+    ] ?? accentPalettes.black;
 
   const accentForeground =
     accent.standard;
@@ -421,18 +516,9 @@ export function AppProvider({
     '#FFFFFF';
 
   /*
-   * General app-wide text color: black text in light mode,
-   * white text in dark mode. Use this wherever a component
-   * currently hardcodes '#000000' / 'black' for text, so
-   * that text stays visible against dark backgrounds.
-   *
-   * Note: this does NOT distinguish between dark-background
-   * and white-background surfaces — a component that keeps
-   * an explicit white background in dark mode will also get
-   * white text from this token, which will be invisible
-   * there. If you have such surfaces (white buttons/filters,
-   * etc.), those specific components should keep a fixed
-   * black text color instead of pulling from `text`.
+   * General app-wide text color:
+   * black text in light mode,
+   * white text in dark mode.
    */
   const text =
     isDark ? '#FFFFFF' : '#000000';
@@ -441,22 +527,14 @@ export function AppProvider({
     useMemo<AppContextValue>(
       () => ({
         ...settings,
-
         loading:
           loading || authLoading,
-
         isDark,
-
         accent,
-
         accentForeground,
-
         accentWash,
-
         onAccent,
-
         text,
-
         updateSettings,
       }),
       [

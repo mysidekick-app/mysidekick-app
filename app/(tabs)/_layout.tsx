@@ -1,10 +1,13 @@
 import React from 'react';
+
 import { Tabs } from 'expo-router';
+
 import {
   Home,
   MessageCircle,
   User,
 } from 'lucide-react-native';
+
 import { View, StyleSheet } from 'react-native';
 
 import { useApp } from '@/components/AppProvider';
@@ -15,78 +18,98 @@ export default function TabsLayout() {
     isDark,
   } = useApp();
 
+  const inactiveColor = isDark ? '#8C8982' : '#A4A09A';
+  const navBackground = isDark ? '#111111' : '#FFFFFF';
+  const navBorder = isDark ? '#292929' : '#ECE9E4';
+
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
 
+        tabBarActiveTintColor: accentForeground,
+        tabBarInactiveTintColor: inactiveColor,
+
         /*
-         * We are handling the selected/unselected appearance
-         * ourselves inside tabBarIcon, so the native tint
-         * colors are kept neutral.
+         * Keep the navbar floating.
+         *
+         * The important part is that we DO NOT change the
+         * navigator's layout behavior. This prevents the
+         * extra white/black boxes that appeared previously.
          */
-        tabBarActiveTintColor: '#FFFFFF',
-        tabBarInactiveTintColor: isDark
-          ? '#8C8982'
-          : '#A4A09A',
-
         tabBarStyle: {
-          backgroundColor: isDark
-            ? '#111111'
-            : '#FFFFFF',
+          position: 'absolute',
 
-          borderTopColor: isDark
-            ? '#292929'
-            : '#ECE9E4',
+          left: 8,
+          right: 8,
+          bottom: 10,
 
-          height: 64,
-          paddingBottom: 8,
-          paddingTop: 7,
+          height: 58,
+
+          backgroundColor: navBackground,
+
+          borderTopColor: navBorder,
+          borderTopWidth: 1,
+
+          borderRadius: 18,
+
+          overflow: 'visible',
+
+          paddingTop: 4,
+          paddingBottom: 4,
+
+          elevation: 8,
+
+          shadowOpacity: 0.08,
+          shadowRadius: 8,
+
+          shadowOffset: {
+            width: 0,
+            height: 3,
+          },
         },
 
-        /*
-         * Hide all tab titles.
-         * The navigation is now icon-only.
-         */
         tabBarShowLabel: false,
 
         tabBarLabelStyle: {
           display: 'none',
         },
+
+        tabBarItemStyle: {
+          height: 54,
+
+          paddingTop: 0,
+          paddingBottom: 0,
+
+          overflow: 'visible',
+        },
       }}
     >
       {/* =====================================================
           CHAT
-         ===================================================== */}
+          ===================================================== */}
+
       <Tabs.Screen
         name="index"
         options={{
           title: 'Chat',
 
-          tabBarIcon: ({
-            focused,
-          }) => (
+          tabBarIcon: ({ focused }) => (
             <View
               style={[
                 styles.iconWrapper,
+
                 focused && [
                   styles.selectedIconWrapper,
                   {
-                    backgroundColor:
-                      accentForeground,
+                    backgroundColor: accentForeground,
                   },
                 ],
               ]}
             >
               <MessageCircle
-                color={
-                  focused
-                    ? '#FFFFFF'
-                    : isDark
-                    ? '#8C8982'
-                    : '#A4A09A'
-                }
-                size={focused ? 25 : 22}
+                color={focused ? '#FFFFFF' : inactiveColor}
+                size={focused ? 24 : 21}
                 strokeWidth={focused ? 2.3 : 2}
               />
             </View>
@@ -96,36 +119,29 @@ export default function TabsLayout() {
 
       {/* =====================================================
           HOME
-         ===================================================== */}
+          ===================================================== */}
+
       <Tabs.Screen
         name="modules"
         options={{
           title: 'Home',
 
-          tabBarIcon: ({
-            focused,
-          }) => (
+          tabBarIcon: ({ focused }) => (
             <View
               style={[
                 styles.iconWrapper,
+
                 focused && [
                   styles.selectedIconWrapper,
                   {
-                    backgroundColor:
-                      accentForeground,
+                    backgroundColor: accentForeground,
                   },
                 ],
               ]}
             >
               <Home
-                color={
-                  focused
-                    ? '#FFFFFF'
-                    : isDark
-                    ? '#8C8982'
-                    : '#A4A09A'
-                }
-                size={focused ? 25 : 22}
+                color={focused ? '#FFFFFF' : inactiveColor}
+                size={focused ? 24 : 21}
                 strokeWidth={focused ? 2.3 : 2}
               />
             </View>
@@ -135,36 +151,29 @@ export default function TabsLayout() {
 
       {/* =====================================================
           PROFILE
-         ===================================================== */}
+          ===================================================== */}
+
       <Tabs.Screen
         name="profile"
         options={{
           title: 'Profile',
 
-          tabBarIcon: ({
-            focused,
-          }) => (
+          tabBarIcon: ({ focused }) => (
             <View
               style={[
                 styles.iconWrapper,
+
                 focused && [
                   styles.selectedIconWrapper,
                   {
-                    backgroundColor:
-                      accentForeground,
+                    backgroundColor: accentForeground,
                   },
                 ],
               ]}
             >
               <User
-                color={
-                  focused
-                    ? '#FFFFFF'
-                    : isDark
-                    ? '#8C8982'
-                    : '#A4A09A'
-                }
-                size={focused ? 25 : 22}
+                color={focused ? '#FFFFFF' : inactiveColor}
+                size={focused ? 24 : 21}
                 strokeWidth={focused ? 2.3 : 2}
               />
             </View>
@@ -174,8 +183,7 @@ export default function TabsLayout() {
 
       {/* =====================================================
           HIDDEN ROUTES
-          Functionality unchanged
-         ===================================================== */}
+          ===================================================== */}
 
       <Tabs.Screen
         name="bookmarks"
@@ -259,38 +267,49 @@ export default function TabsLayout() {
 
 const styles = StyleSheet.create({
   /*
-   * Normal icon:
-   * No background.
-   * Slightly smaller.
+   * Normal unselected icon
    */
   iconWrapper: {
-    width: 46,
-    height: 46,
+    width: 34,
+    height: 34,
+
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 23,
+
+    borderRadius: 17,
   },
 
   /*
-   * Selected icon:
-   * Circular accent background.
-   * The icon itself becomes white.
+   * Selected icon
    *
-   * Because the selected icon is physically inside
-   * a larger circle, it also appears slightly larger
-   * than the unselected icons.
+   * Keeps the raised selected-state appearance from
+   * the original navbar.
    */
   selectedIconWrapper: {
     width: 46,
     height: 46,
+
     borderRadius: 23,
+
     alignItems: 'center',
     justifyContent: 'center',
 
+    marginTop: -14,
+
     transform: [
       {
-        scale: 1.08,
+        scale: 1.02,
       },
     ],
+
+    elevation: 5,
+
+    shadowOpacity: 0.14,
+    shadowRadius: 5,
+
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
   },
 });

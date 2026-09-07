@@ -33,7 +33,15 @@ import {
   router,
 } from 'expo-router';
 
+import {
+  Poppins_400Regular,
+  Poppins_500Medium,
+  Poppins_600SemiBold,
+  Poppins_700Bold,
+} from '@expo-google-fonts/poppins';
+
 import { useApp } from '@/components/AppProvider';
+import SidekickAvatar from '@/components/SidekickAvatar';
 import { supabase } from '@/lib/supabase';
 import {
   ensureDirectConversation,
@@ -59,6 +67,7 @@ type ChatItem = {
   profileId?: string;
   route?: string;
   moduleRoute?: string;
+  sidekickId?: string | null;
 };
 
 type SocialProfile = {
@@ -388,6 +397,28 @@ export default function ChatScreen() {
       return;
     }
 
+    const {
+      data: sidekickProfiles,
+      error: sidekickProfileError,
+    } = await supabase
+      .from('profiles')
+      .select('user_id, sidekick_id')
+      .in('user_id', friendIds);
+
+    if (sidekickProfileError) {
+      console.warn(
+        'LOAD FRIEND SIDEKICKS ERROR:',
+        sidekickProfileError,
+      );
+    }
+
+    const sidekickByUserId = new Map<string, string | null>(
+      (sidekickProfiles ?? []).map((row: any) => [
+        row.user_id,
+        row.sidekick_id ?? null,
+      ]),
+    );
+
     const conversationByFriend = new Map<string, string>();
     for (const friendId of friendIds) {
       const { id: conversationId } = await ensureDirectConversation(user.id, friendId);
@@ -450,6 +481,8 @@ export default function ChatScreen() {
             .slice(0, 1)
             .toUpperCase(),
           profileId: profile.user_id,
+          sidekickId:
+            sidekickByUserId.get(profile.user_id) ?? null,
         }),
       );
 
@@ -2739,29 +2772,35 @@ export default function ChatScreen() {
                           },
                         ]}
                       >
-                        <View
-                          style={[
-                            styles.avatar,
-                            {
-                              backgroundColor:
-                                accentForeground,
-                            },
-                          ]}
-                        >
-                          <Text
+                        {friend.sidekickId ? (
+                          <View
                             style={[
-                              styles.avatarText,
-                              {
-                                color:
-                                  '#FFFFFF',
-                              },
+                              styles.avatar,
+                              styles.sidekickAvatarContainer,
                             ]}
                           >
-                            {
-                              friend.icon
-                            }
-                          </Text>
-                        </View>
+                            <SidekickAvatar
+                              sidekickId={friend.sidekickId}
+                              size={38}
+                            />
+                          </View>
+                        ) : (
+                          <View
+                            style={[
+                              styles.avatar,
+                              { backgroundColor: accentForeground },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.avatarText,
+                                { color: '#FFFFFF' },
+                              ]}
+                            >
+                              {friend.icon}
+                            </Text>
+                          </View>
+                        )}
 
                         <View
                           style={
@@ -3316,29 +3355,54 @@ export default function ChatScreen() {
                         styles.pressed,
                     ]}
                   >
-                    <View
-                      style={[
-                        styles.avatar,
-                        {
-                          backgroundColor:
-                            accentForeground,
-                        },
-                      ]}
-                    >
-                      <Text
+                    {chat.category === 'system' &&
+                    chat.id === 'sys-sidekick' &&
+                    appContext.sidekick_id ? (
+                      <View
                         style={[
-                          styles.avatarText,
-                          {
-                            color:
-                              '#FFFFFF',
-                          },
+                          styles.avatar,
+                          styles.sidekickAvatarContainer,
                         ]}
                       >
-                        {
-                          chat.icon
-                        }
-                      </Text>
-                    </View>
+                        <SidekickAvatar
+                          sidekickId={appContext.sidekick_id}
+                          size={38}
+                        />
+                      </View>
+                    ) : chat.category === 'direct' && chat.sidekickId ? (
+                      <View
+                        style={[
+                          styles.avatar,
+                          styles.sidekickAvatarContainer,
+                        ]}
+                      >
+                        <SidekickAvatar
+                          sidekickId={chat.sidekickId}
+                          size={38}
+                        />
+                      </View>
+                    ) : (
+                      <View
+                        style={[
+                          styles.avatar,
+                          { backgroundColor: accentForeground },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.avatarText,
+                            { color: '#FFFFFF' },
+                          ]}
+                        >
+                          {chat.category === 'system' &&
+                          chat.id === 'sys-sidekick'
+                            ? (appContext.display_name || '?')
+                                .slice(0, 1)
+                                .toUpperCase()
+                            : chat.icon}
+                        </Text>
+                      </View>
+                    )}
 
                     <View
                       style={
@@ -4409,7 +4473,9 @@ const styles =
 
     frozenHeader: {
       paddingHorizontal: 16,
-      paddingTop: 34,
+      paddingTop: 60,
+      paddingVertical: 12,
+      borderBottomWidth: 1,
     },
 
     searchRow: {
@@ -4539,11 +4605,17 @@ const styles =
     },
 
     avatar: {
-      width: 42,
-      height: 42,
+      width: 48,
+      height: 48,
       borderRadius: 15,
       alignItems: 'center',
       justifyContent: 'center',
+      overflow: 'hidden',
+    },
+
+    sidekickAvatarContainer: {
+      backgroundColor: '#FFFFFF',
+      padding: 5,
     },
 
     avatarText: {
@@ -4860,21 +4932,18 @@ const styles =
 
     addGroupFab: {
       position: 'absolute',
-      bottom: 24,
-      left: '50%',
-      marginLeft: -29,
-      width: 58,
-      height: 58,
-      borderRadius: 29,
+      bottom: 82,
+      alignSelf: 'center',
+      width: 56,
+      height: 56,
+      borderRadius: 28,
       alignItems: 'center',
       justifyContent: 'center',
-      elevation: 7,
-      shadowOffset: {
-        width: 0,
-        height: 4,
-      },
-      shadowOpacity: 0.22,
-      shadowRadius: 7,
+      shadowColor: '#000',
+      shadowOpacity: 0.25,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 6,
     },
 
     /* =====================================================

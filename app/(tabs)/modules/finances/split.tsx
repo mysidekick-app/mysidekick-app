@@ -1188,13 +1188,18 @@ const styles = StyleSheet.create({
 
   fab: {
     position: 'absolute',
-    bottom: 24,
+    bottom: 82,
     alignSelf: 'center',
     width: 56,
     height: 56,
     borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
   },
 
   modalShade: {

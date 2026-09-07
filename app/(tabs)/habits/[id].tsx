@@ -2,14 +2,16 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 
+import { SafeAreaView } from 'react-native-safe-area-context';
+
 import {
+  ChevronLeft,
   Flame,
   Trash2,
   MessageCircle,
@@ -19,8 +21,6 @@ import {
   useLocalSearchParams,
   router,
 } from 'expo-router';
-
-import { PageHeader } from '@/components/PageHeader';
 
 import { useApp } from '@/components/AppProvider';
 
@@ -327,7 +327,40 @@ export default function HabitDetailScreen() {
             styles.safeDark,
         ]}
       >
-        <PageHeader title="Habit" />
+        <View
+          style={[
+            styles.header,
+            isDark && styles.headerDark,
+          ]}
+        >
+          <Pressable
+            onPress={() => router.replace('/habits' as never)}
+            style={[
+              styles.backButton,
+              {
+                backgroundColor: accentForeground,
+              },
+            ]}
+            hitSlop={8}
+          >
+            <ChevronLeft
+              color={onAccent}
+              size={21}
+              strokeWidth={2.5}
+            />
+          </Pressable>
+
+          <Text
+            style={[
+              styles.headerTitle,
+              isDark && styles.darkText,
+            ]}
+          >
+            Habit
+          </Text>
+
+          <View style={styles.headerSpacer} />
+        </View>
 
         <View style={styles.center}>
           <Text
@@ -353,7 +386,40 @@ export default function HabitDetailScreen() {
             styles.safeDark,
         ]}
       >
-        <PageHeader title="Habit" />
+        <View
+          style={[
+            styles.header,
+            isDark && styles.headerDark,
+          ]}
+        >
+          <Pressable
+            onPress={() => router.replace('/habits' as never)}
+            style={[
+              styles.backButton,
+              {
+                backgroundColor: accentForeground,
+              },
+            ]}
+            hitSlop={8}
+          >
+            <ChevronLeft
+              color={onAccent}
+              size={21}
+              strokeWidth={2.5}
+            />
+          </Pressable>
+
+          <Text
+            style={[
+              styles.headerTitle,
+              isDark && styles.darkText,
+            ]}
+          >
+            Habit
+          </Text>
+
+          <View style={styles.headerSpacer} />
+        </View>
 
         <View style={styles.center}>
           <Text
@@ -379,17 +445,43 @@ export default function HabitDetailScreen() {
           styles.safeDark,
       ]}
     >
-      <PageHeader
-        title={
-          habit.name.length > 18
-            ? habit.name.slice(0, 18) +
-              '…'
-            : habit.name
-        }
-        onBack={() =>
-          router.push('/modules')
-        }
-      />
+      <View
+        style={[
+          styles.header,
+          isDark && styles.headerDark,
+        ]}
+      >
+        <Pressable
+          onPress={() => router.replace('/habits' as never)}
+          style={[
+            styles.backButton,
+            {
+              backgroundColor: accentForeground,
+            },
+          ]}
+          hitSlop={8}
+        >
+          <ChevronLeft
+            color={onAccent}
+            size={21}
+            strokeWidth={2.5}
+          />
+        </Pressable>
+
+        <Text
+          style={[
+            styles.headerTitle,
+            isDark && styles.darkText,
+          ]}
+          numberOfLines={1}
+        >
+          {habit.name.length > 18
+            ? habit.name.slice(0, 18) + '…'
+            : habit.name}
+        </Text>
+
+        <View style={styles.headerSpacer} />
+      </View>
 
       <ScrollView
         contentContainerStyle={
@@ -747,9 +839,48 @@ const styles = StyleSheet.create({
       '#090909',
   },
 
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 30,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ECE9E4',
+  },
+
+  headerDark: {
+    borderBottomColor: '#292929',
+  },
+
+  backButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  headerTitle: {
+    flex: 1,
+    marginHorizontal: 14,
+    textAlign: 'center',
+    fontFamily: FONT_BOLD,
+    fontSize: 17,
+    color: '#27241F',
+    letterSpacing: 0.2,
+  },
+
+  headerSpacer: {
+    width: 38,
+    height: 38,
+  },
+
   content: {
-    padding: 16,
-    paddingBottom: 30,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 80,
   },
 
   darkText: {

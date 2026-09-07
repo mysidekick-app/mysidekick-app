@@ -10,10 +10,13 @@ import {
 } from 'react-native';
 
 import { router } from 'expo-router';
-import { Bell, ChevronLeft } from 'lucide-react-native';
+
+import { ChevronLeft, MoreVertical } from 'lucide-react-native';
 
 import { useApp } from '@/components/AppProvider';
+
 import { useAuth } from '@/components/AuthProvider';
+
 import { supabase } from '@/lib/supabase';
 
 import {
@@ -55,7 +58,7 @@ const FONT_BOLD = 'Poppins-Bold';
 const FONT_XB = 'Poppins-ExtraBold';
 
 /* ------------------------------------------------------------------ */
-/* Mood config                                                        */
+/* Mood config                                                         */
 /* ------------------------------------------------------------------ */
 
 type MoodLevel = 1 | 2 | 3 | 4 | 5;
@@ -75,13 +78,13 @@ const MOOD_OPTIONS: MoodOption[] = [
 ];
 
 const MOOD_BY_VALUE = new Map<MoodLevel, MoodOption>(
-  MOOD_OPTIONS.map((m) => [m.value, m]),
+  MOOD_OPTIONS.map(m => [m.value, m]),
 );
 
 const MODULE_KEY = 'mood_tracker';
 
 /* ------------------------------------------------------------------ */
-/* Helpers                                                            */
+/* Helpers                                                             */
 /* ------------------------------------------------------------------ */
 
 function prettyDateLabel(dateStr: string): string {
@@ -105,7 +108,7 @@ function shortDateLabel(dateStr: string): string {
 }
 
 /* ------------------------------------------------------------------ */
-/* Entry row types                                                    */
+/* Entry row types                                                      */
 /* ------------------------------------------------------------------ */
 
 type MoodEntryRow = {
@@ -120,7 +123,7 @@ type HistoryRow = {
 };
 
 /* ================================================================== */
-/* Screen                                                             */
+/* Screen                                                              */
 /* ================================================================== */
 
 export default function MoodTrackerScreen() {
@@ -134,6 +137,7 @@ export default function MoodTrackerScreen() {
   const { user } = useAuth();
 
   const accent = accentForeground;
+
   const COLORS = isDark
     ? DARK_PALETTE
     : LIGHT_PALETTE;
@@ -172,13 +176,25 @@ export default function MoodTrackerScreen() {
   const [allEntryDates, setAllEntryDates] =
     useState<Set<string>>(new Set());
 
+  const [menuOpen, setMenuOpen] =
+    useState(false);
+
   const isFuture = useMemo(
     () => selectedDate > today,
     [selectedDate, today],
   );
 
   /* ---------------------------------------------------------------- */
-  /* Load existing entry for selected date                            */
+  /* Settings menu                                                     */
+  /* ---------------------------------------------------------------- */
+
+  const openSettings = useCallback(() => {
+    setMenuOpen(false);
+    router.push('/(tabs)/profile');
+  }, []);
+
+  /* ---------------------------------------------------------------- */
+  /* Load existing entry for selected date                             */
   /* ---------------------------------------------------------------- */
 
   const loadEntry = useCallback(
@@ -191,6 +207,7 @@ export default function MoodTrackerScreen() {
         setError(
           'You must be signed in to use this module.',
         );
+
         setMoodValue(null);
         setLoading(false);
         return;
@@ -249,7 +266,7 @@ export default function MoodTrackerScreen() {
   );
 
   /* ---------------------------------------------------------------- */
-  /* Load last 7 mood entries                                        */
+  /* Load last 7 mood entries                                         */
   /* ---------------------------------------------------------------- */
 
   const loadHistory = useCallback(
@@ -307,7 +324,7 @@ export default function MoodTrackerScreen() {
   );
 
   /* ---------------------------------------------------------------- */
-  /* Load all entry dates for calendar dots                           */
+  /* Load all entry dates for calendar dots                            */
   /* ---------------------------------------------------------------- */
 
   const loadEntryDates = useCallback(
@@ -355,7 +372,7 @@ export default function MoodTrackerScreen() {
   );
 
   /* ---------------------------------------------------------------- */
-  /* Initial / dependent loads                                       */
+  /* Initial / dependent loads                                        */
   /* ---------------------------------------------------------------- */
 
   useEffect(() => {
@@ -371,7 +388,7 @@ export default function MoodTrackerScreen() {
   }, [loadEntryDates]);
 
   /* ---------------------------------------------------------------- */
-  /* Date selection                                                   */
+  /* Date selection                                                    */
   /* ---------------------------------------------------------------- */
 
   const onSelectDate = useCallback(
@@ -395,6 +412,7 @@ export default function MoodTrackerScreen() {
         setSaveMsg(
           'You cannot save an entry for a future date.',
         );
+
         return;
       }
 
@@ -402,6 +420,7 @@ export default function MoodTrackerScreen() {
         setError(
           'You must be signed in to save a mood.',
         );
+
         return;
       }
 
@@ -409,6 +428,7 @@ export default function MoodTrackerScreen() {
         setSaveMsg(
           'Pick a mood before saving.',
         );
+
         return;
       }
 
@@ -486,7 +506,6 @@ export default function MoodTrackerScreen() {
 
   return (
     <View style={styles.safe}>
-
       {/* Header */}
       <View
         style={[
@@ -496,7 +515,7 @@ export default function MoodTrackerScreen() {
       >
         <Pressable
           onPress={() =>
-            router.push('/modules')
+            router.push('/(tabs)/modules/wellbeing')
           }
           style={[
             styles.backBtn,
@@ -521,16 +540,47 @@ export default function MoodTrackerScreen() {
         </Text>
 
         <Pressable
-          style={styles.bellBtn}
+          onPress={() =>
+            setMenuOpen(prev => !prev)
+          }
+          style={styles.menuBtn}
           hitSlop={12}
-          accessibilityLabel="Notifications"
+          accessibilityLabel="Open settings menu"
         >
-          <Bell
+          <MoreVertical
             color={COLORS.text}
-            size={20}
+            size={22}
+            strokeWidth={2.3}
           />
         </Pressable>
       </View>
+
+      {menuOpen ? (
+        <View
+          style={[
+            styles.menu,
+            {
+              backgroundColor: COLORS.card,
+              borderColor: COLORS.cardBorder,
+            },
+          ]}
+        >
+          <Pressable
+            onPress={openSettings}
+            style={({ pressed }) => [
+              styles.menuItem,
+              pressed &&
+                styles.menuItemPressed,
+            ]}
+          >
+            <Text
+              style={styles.menuItemText}
+            >
+              Settings
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <ScrollView
         contentContainerStyle={
@@ -629,7 +679,8 @@ export default function MoodTrackerScreen() {
                 style={[
                   styles.retryText,
                   {
-                    color: onAccent,
+                    color:
+                      onAccent,
                   },
                 ]}
               >
@@ -666,7 +717,7 @@ export default function MoodTrackerScreen() {
                 style={styles.moodRow}
               >
                 {MOOD_OPTIONS.map(
-                  (opt) => {
+                  opt => {
                     const isSelected =
                       moodValue ===
                       opt.value;
@@ -707,7 +758,9 @@ export default function MoodTrackerScreen() {
                             styles.moodEmoji
                           }
                         >
-                          {opt.emoji}
+                          {
+                            opt.emoji
+                          }
                         </Text>
 
                         <Text
@@ -926,7 +979,7 @@ export default function MoodTrackerScreen() {
                   }
                 >
                   {history.map(
-                    (row) => {
+                    row => {
                       const mv =
                         row.mood_value;
 
@@ -953,15 +1006,19 @@ export default function MoodTrackerScreen() {
                               styles.historyRowCurrent,
                               {
                                 backgroundColor:
-                                  accentWash,
+                                  accent,
                               },
                             ],
                           ]}
                         >
                           <Text
-                            style={
-                              styles.historyEmoji
-                            }
+                            style={[
+                              styles.historyEmoji,
+                              isCurrent && {
+                                color:
+                                  '#FFFFFF',
+                              },
+                            ]}
                           >
                             {mood
                               ? mood.emoji
@@ -974,9 +1031,13 @@ export default function MoodTrackerScreen() {
                             }}
                           >
                             <Text
-                              style={
-                                styles.historyDate
-                              }
+                              style={[
+                                styles.historyDate,
+                                isCurrent && {
+                                  color:
+                                    '#FFFFFF',
+                                },
+                              ]}
                             >
                               {shortDateLabel(
                                 row.entry_date,
@@ -984,9 +1045,13 @@ export default function MoodTrackerScreen() {
                             </Text>
 
                             <Text
-                              style={
-                                styles.historyMoodLabel
-                              }
+                              style={[
+                                styles.historyMoodLabel,
+                                isCurrent && {
+                                  color:
+                                    'rgba(255,255,255,0.82)',
+                                },
+                              ]}
                             >
                               {mood
                                 ? mood.label
@@ -1000,7 +1065,7 @@ export default function MoodTrackerScreen() {
                                 styles.historyCurrentTag,
                                 {
                                   color:
-                                    accent,
+                                    '#FFFFFF',
                                 },
                               ]}
                             >
@@ -1022,7 +1087,7 @@ export default function MoodTrackerScreen() {
 }
 
 /* ------------------------------------------------------------------ */
-/* Styles                                                             */
+/* Styles                                                              */
 /* ------------------------------------------------------------------ */
 
 type Palette = typeof DARK_PALETTE;
@@ -1059,11 +1124,44 @@ function makeStyles(C: Palette) {
       color: C.text,
     },
 
-    bellBtn: {
+    menuBtn: {
       width: 38,
       height: 38,
       alignItems: 'center',
       justifyContent: 'center',
+    },
+
+    menu: {
+      position: 'absolute',
+      top: 76,
+      right: 14,
+      minWidth: 150,
+      borderWidth: 1,
+      borderRadius: 14,
+      paddingVertical: 6,
+      zIndex: 1000,
+      elevation: 8,
+      shadowOffset: {
+        width: 0,
+        height: 4,
+      },
+      shadowOpacity: 0.18,
+      shadowRadius: 10,
+    },
+
+    menuItem: {
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+    },
+
+    menuItemPressed: {
+      opacity: 0.6,
+    },
+
+    menuItemText: {
+      fontFamily: FONT_MEDIUM,
+      fontSize: 13.5,
+      color: C.text,
     },
 
     scroll: {

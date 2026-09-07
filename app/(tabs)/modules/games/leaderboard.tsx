@@ -18,11 +18,11 @@ import {
 import { router } from 'expo-router';
 
 import { supabase } from '@/lib/supabase';
+
 import { useApp } from '@/components/AppProvider';
 
 type GameFilter =
   | 'all'
-  | 'chess'
   | 'tictactoe'
   | 'sudoku'
   | 'wordsearch'
@@ -30,121 +30,45 @@ type GameFilter =
 
 type LeaderboardRow = {
   player_id: string;
-  display_name: string;
+  display_name: string | null;
   total_points: number;
   wins: number;
   draws: number;
   games_played: number;
 };
 
-type GameScore = {
-  player_id: string;
-  game: string;
-  mode: string | null;
-  result: string | null;
-  points: number | null;
-  difficulty: string | null;
-};
-
 const GAME_FILTERS: {
   key: GameFilter;
   label: string;
 }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'chess', label: 'Chess' },
+  {
+    key: 'all',
+    label: 'All',
+  },
   {
     key: 'tictactoe',
     label: 'Tic-Tac-Toe',
   },
-  { key: 'sudoku', label: 'Sudoku' },
+  {
+    key: 'sudoku',
+    label: 'Sudoku',
+  },
   {
     key: 'wordsearch',
     label: 'Word Search',
   },
-  { key: 'sequence', label: 'Sequence' },
+  {
+    key: 'sequence',
+    label: 'Sequence',
+  },
 ];
 
-const GOLD = '#FFD700';
-const SILVER = '#C0C0C0';
-const BRONZE = '#CD7F32';
+function getRankDisplay(rank: number): string {
+  if (rank === 1) return '🥇';
+  if (rank === 2) return '🥈';
+  if (rank === 3) return '🥉';
 
-function getRankColor(rank: number): string {
-  if (rank === 1) return GOLD;
-  if (rank === 2) return SILVER;
-  if (rank === 3) return BRONZE;
-
-  return '';
-}
-
-/**
- * Normalise result values coming from the different games.
- *
- * Chess uses values such as:
- *   white_wins
- *   black_wins
- *   draw
- *
- * Tic-Tac-Toe may use:
- *   win
- *   loss
- *   draw
- *
- * Other games may simply record their points without a result.
- */
-function getResultType(
-  score: GameScore,
-): 'win' | 'draw' | 'loss' | 'other' {
-  const result = String(score.result ?? '')
-    .trim()
-    .toLowerCase();
-
-  if (!result) {
-    return 'other';
-  }
-
-  if (
-    result === 'draw' ||
-    result === 'drawn' ||
-    result === 'tie' ||
-    result === 'tied'
-  ) {
-    return 'draw';
-  }
-
-  /*
-   * Chess stores the winning side as white_wins /
-   * black_wins. The actual player who owns the score
-   * receives the score row, so a non-zero score is
-   * treated as a win for leaderboard purposes.
-   */
-  if (
-    result === 'white_wins' ||
-    result === 'black_wins'
-  ) {
-    return Number(score.points ?? 0) > 0
-      ? 'win'
-      : 'loss';
-  }
-
-  if (
-    result === 'win' ||
-    result === 'won' ||
-    result === 'winner' ||
-    result === 'won_game'
-  ) {
-    return 'win';
-  }
-
-  if (
-    result === 'loss' ||
-    result === 'lost' ||
-    result === 'lose' ||
-    result === 'loser'
-  ) {
-    return 'loss';
-  }
-
-  return 'other';
+  return `#${rank}`;
 }
 
 export default function LeaderboardScreen() {
@@ -176,6 +100,7 @@ export default function LeaderboardScreen() {
       : '#8F8A82',
 
     accent: accentForeground,
+
     onAccent,
   };
 
@@ -191,20 +116,23 @@ export default function LeaderboardScreen() {
   const [myId, setMyId] =
     useState<string | null>(null);
 
-  const fetchLeaderboard = useCallback(
-    async (activeFilter: GameFilter) => {
-      setLoading(true);
+  const fetchLeaderboard =
+    useCallback(
+      async (
+        activeFilter: GameFilter
+      ) => {
+        setLoading(true);
 
-      try {
         const {
           data: { user },
           error: userError,
-        } = await supabase.auth.getUser();
+        } =
+          await supabase.auth.getUser();
 
         if (userError) {
           console.error(
             'LEADERBOARD USER ERROR:',
-            userError,
+            userError
           );
         }
 
@@ -215,182 +143,194 @@ export default function LeaderboardScreen() {
 
         if (!currentUserId) {
           setRows([]);
+          setLoading(false);
           return;
         }
 
         /*
-         * --------------------------------------------------
-         * 1. Find all friends connected to the current user
-         * --------------------------------------------------
+         * FRIENDS
+         *
+         * friendships uses:
+         * user_id
+         * friend_user_id
+         *
+         * A friendship can have the current
+         * user in either column, so check both.
          */
 
         const {
           data: friendRows,
-          error: friendshipError,
-        } = await supabase
-          .from('friendships')
-          .select(
-            'user_id, friend_user_id',
-          )
-          .or(
-            `user_id.eq.${currentUserId},friend_user_id.eq.${currentUserId}`,
+          error: friendError,
+        } =
+          await supabase
+            .from('friendships')
+            .select(
+              'user_id, friend_user_id'
+            )
+            .or(
+              `user_id.eq.${currentUserId},friend_user_id.eq.${currentUserId}`
+            );
+
+        if (friendError) {
+          console.error(
+            'LEADERBOARD FRIEND ERROR:',
+            friendError
           );
 
-        if (friendshipError) {
-          console.error(
-            'LEADERBOARD FRIENDSHIP ERROR:',
-            friendshipError,
-          );
+          setRows([]);
+          setLoading(false);
+          return;
         }
 
-        const friendIds = (
-          friendRows ?? []
-        )
-          .map((row) =>
-            row.user_id === currentUserId
-              ? row.friend_user_id
-              : row.user_id,
-          )
-          .filter(
-            (id): id is string =>
-              typeof id === 'string' &&
-              id.length > 0 &&
-              id !== currentUserId,
-          );
-
         /*
-         * The leaderboard contains:
-         *
-         *   You
-         *   + all your friends
+         * Extract the OTHER person from each
+         * friendship row.
          */
-        const scopedIds = [
-          ...new Set([
-            currentUserId,
-            ...friendIds,
-          ]),
+
+        const friendIds = [
+          ...new Set(
+            (friendRows ?? [])
+              .map((friendship) => {
+                if (
+                  friendship.user_id ===
+                  currentUserId
+                ) {
+                  return friendship.friend_user_id;
+                }
+
+                if (
+                  friendship.friend_user_id ===
+                  currentUserId
+                ) {
+                  return friendship.user_id;
+                }
+
+                return null;
+              })
+              .filter(
+                (
+                  id
+                ): id is string =>
+                  Boolean(id)
+              )
+          ),
         ];
 
         /*
-         * --------------------------------------------------
-         * 2. Get profile names
-         * --------------------------------------------------
-         *
-         * profiles.user_id is the link to auth.users.id.
-         * We deliberately use profiles as the source of
-         * truth rather than a display_name stored on a score.
+         * Include yourself so you always appear
+         * alongside your friends.
+         */
+
+        const scopedIds = [
+          currentUserId,
+          ...friendIds.filter(
+            (id) =>
+              id !== currentUserId
+          ),
+        ];
+
+        /*
+         * PROFILES
          */
 
         const {
           data: profileRows,
           error: profileError,
-        } = await supabase
-          .from('profiles')
-          .select(
-            'user_id, display_name',
-          )
-          .in(
-            'user_id',
-            scopedIds,
-          );
+        } =
+          await supabase
+            .from('profiles')
+            .select(
+              'user_id, display_name'
+            )
+            .in(
+              'user_id',
+              scopedIds
+            );
 
         if (profileError) {
           console.error(
             'LEADERBOARD PROFILE ERROR:',
-            profileError,
+            profileError
           );
         }
 
-        const nameById = new Map<
-          string,
-          string
-        >();
+        const nameById =
+          new Map<string, string>();
 
         for (
-          const profile of profileRows ?? []
+          const profile of
+            profileRows ?? []
         ) {
-          const name =
-            typeof profile.display_name ===
-              'string'
-              ? profile.display_name.trim()
-              : '';
-
-          if (name) {
-            nameById.set(
-              profile.user_id,
-              name,
-            );
-          }
+          nameById.set(
+            profile.user_id,
+            profile.display_name ??
+              'Player'
+          );
         }
 
         /*
-         * --------------------------------------------------
-         * 3. Read the actual game scores
-         * --------------------------------------------------
+         * GAME SCORES
          *
-         * This is the important change.
-         *
-         * The games write to game_scores, so the leaderboard
-         * must read game_scores directly.
+         * Only retrieve scores belonging to
+         * yourself and your friends.
          */
 
-        let scoreQuery = supabase
+        let query = supabase
           .from('game_scores')
           .select(
-            `
-              player_id,
-              game,
-              mode,
-              result,
-              points,
-              difficulty
-            `,
+            'player_id, game, result, points'
           )
           .in(
             'player_id',
-            scopedIds,
-          );
+            scopedIds
+          )
+          .in('game', [
+            'tictactoe',
+            'sudoku',
+            'wordsearch',
+            'sequence',
+          ]);
 
-        if (activeFilter !== 'all') {
-          scoreQuery = scoreQuery.eq(
+        if (
+          activeFilter !== 'all'
+        ) {
+          query = query.eq(
             'game',
-            activeFilter,
+            activeFilter
           );
         }
 
         const {
           data: scoreRows,
           error: scoreError,
-        } = await scoreQuery;
+        } =
+          await query;
 
         if (scoreError) {
           console.error(
             'LEADERBOARD SCORE ERROR:',
-            scoreError,
+            scoreError
           );
 
           setRows([]);
+          setLoading(false);
           return;
         }
 
         /*
-         * --------------------------------------------------
-         * 4. Aggregate scores by player
-         * --------------------------------------------------
+         * AGGREGATE SCORES
          */
 
-        const totals = new Map<
-          string,
-          LeaderboardRow
-        >();
+        const totals =
+          new Map<
+            string,
+            LeaderboardRow
+          >();
 
         for (
-          const rawScore of
+          const score of
             scoreRows ?? []
         ) {
-          const score =
-            rawScore as GameScore;
-
           const playerId =
             score.player_id;
 
@@ -398,164 +338,187 @@ export default function LeaderboardScreen() {
             continue;
           }
 
-          const points = Number(
-            score.points ?? 0,
-          );
+          /*
+           * Never count abandoned games.
+           */
 
-          const resultType =
-            getResultType(score);
+          if (
+            score.result ===
+            'abandoned'
+          ) {
+            continue;
+          }
+
+          const points =
+            Number(
+              score.points ?? 0
+            );
+
+          const isWin =
+            score.result ===
+              'win' ||
+            score.result ===
+              'x_wins' ||
+            score.result ===
+              'o_wins';
+
+          const isDraw =
+            score.result ===
+            'draw';
 
           const existing =
-            totals.get(playerId);
+            totals.get(
+              playerId
+            );
 
           if (existing) {
             existing.total_points +=
               points;
 
-            /*
-             * Only count games that have an
-             * actual recorded result.
-             *
-             * Solo games such as Sudoku,
-             * Word Search and Sequence may
-             * not store a result field.
-             *
-             * Those are still counted as played.
-             */
-            existing.games_played += 1;
+            existing.games_played +=
+              1;
 
-            if (resultType === 'win') {
+            if (isWin) {
               existing.wins += 1;
             }
 
-            if (resultType === 'draw') {
+            if (isDraw) {
               existing.draws += 1;
             }
           } else {
-            totals.set(playerId, {
-              player_id: playerId,
+            totals.set(
+              playerId,
+              {
+                player_id:
+                  playerId,
 
-              display_name:
-                nameById.get(playerId) ??
-                'Player',
+                display_name:
+                  nameById.get(
+                    playerId
+                  ) ??
+                  'Player',
 
-              total_points: points,
+                total_points:
+                  points,
 
-              wins:
-                resultType === 'win'
-                  ? 1
-                  : 0,
+                wins:
+                  isWin ? 1 : 0,
 
-              draws:
-                resultType === 'draw'
-                  ? 1
-                  : 0,
+                draws:
+                  isDraw ? 1 : 0,
 
-              games_played: 1,
-            });
+                games_played: 1,
+              }
+            );
           }
         }
 
         /*
-         * --------------------------------------------------
-         * 5. Add friends who have not played yet
-         * --------------------------------------------------
-         *
-         * This means a friend still appears on the
-         * leaderboard with:
-         *
-         *   0 pts
-         *   0W
-         *   0D
-         *   0 played
+         * Add yourself/friends even if they have
+         * not played the selected game yet.
          */
 
         for (
-          const playerId of scopedIds
+          const playerId of
+            scopedIds
         ) {
-          if (!totals.has(playerId)) {
-            totals.set(playerId, {
-              player_id: playerId,
+          if (
+            !totals.has(
+              playerId
+            )
+          ) {
+            totals.set(
+              playerId,
+              {
+                player_id:
+                  playerId,
 
-              display_name:
-                nameById.get(playerId) ??
-                'Player',
+                display_name:
+                  nameById.get(
+                    playerId
+                  ) ??
+                  'Player',
 
-              total_points: 0,
-              wins: 0,
-              draws: 0,
-              games_played: 0,
-            });
+                total_points: 0,
+
+                wins: 0,
+
+                draws: 0,
+
+                games_played: 0,
+              }
+            );
           }
         }
 
         /*
-         * --------------------------------------------------
-         * 6. Sort leaderboard
-         * --------------------------------------------------
+         * SORT
          *
-         * Primary:
-         *   Total points
-         *
-         * Secondary:
-         *   Wins
-         *
-         * Third:
-         *   Games played
-         *
-         * Fourth:
-         *   Name
+         * 1. Points
+         * 2. Wins
+         * 3. Games played
+         * 4. Name
          */
 
         const sorted = [
           ...totals.values(),
-        ].sort((a, b) => {
-          if (
-            b.total_points !==
-            a.total_points
-          ) {
-            return (
-              b.total_points -
+        ].sort(
+          (
+            a,
+            b
+          ) => {
+            if (
+              b.total_points !==
               a.total_points
-            );
-          }
+            ) {
+              return (
+                b.total_points -
+                a.total_points
+              );
+            }
 
-          if (b.wins !== a.wins) {
-            return b.wins - a.wins;
-          }
+            if (
+              b.wins !==
+              a.wins
+            ) {
+              return (
+                b.wins -
+                a.wins
+              );
+            }
 
-          if (
-            b.games_played !==
-            a.games_played
-          ) {
-            return (
-              b.games_played -
+            if (
+              b.games_played !==
               a.games_played
+            ) {
+              return (
+                b.games_played -
+                a.games_played
+              );
+            }
+
+            return (
+              (
+                a.display_name ??
+                'Player'
+              ).localeCompare(
+                b.display_name ??
+                  'Player'
+              )
             );
           }
-
-          return a.display_name.localeCompare(
-            b.display_name,
-          );
-        });
-
-        setRows(sorted);
-      } catch (error) {
-        console.error(
-          'LEADERBOARD UNEXPECTED ERROR:',
-          error,
         );
 
-        setRows([]);
-      } finally {
+        setRows(sorted);
         setLoading(false);
-      }
-    },
-    [],
-  );
+      },
+      []
+    );
 
   useEffect(() => {
-    fetchLeaderboard(filter);
+    fetchLeaderboard(
+      filter
+    );
   }, [
     filter,
     fetchLeaderboard,
@@ -571,6 +534,8 @@ export default function LeaderboardScreen() {
         },
       ]}
     >
+      {/* Header */}
+
       <View
         style={[
           styles.header,
@@ -603,7 +568,8 @@ export default function LeaderboardScreen() {
           style={[
             styles.headerTitle,
             {
-              color: colors.accent,
+              color:
+                colors.accent,
             },
           ]}
         >
@@ -611,14 +577,20 @@ export default function LeaderboardScreen() {
         </Text>
 
         <View
-          style={styles.headerRight}
+          style={
+            styles.headerRight
+          }
         >
           <Trophy
             size={22}
-            color={colors.accent}
+            color={
+              colors.accent
+            }
           />
         </View>
       </View>
+
+      {/* Game filters */}
 
       <ScrollView
         horizontal
@@ -636,46 +608,54 @@ export default function LeaderboardScreen() {
           },
         ]}
       >
-        {GAME_FILTERS.map((game) => (
-          <Pressable
-            key={game.key}
-            onPress={() =>
-              setFilter(game.key)
-            }
-            style={[
-              styles.filterPill,
-              {
-                borderColor:
-                  colors.border,
-                backgroundColor:
-                  colors.card,
-              },
-              filter === game.key && {
-                backgroundColor:
-                  colors.accent,
-                borderColor:
-                  colors.accent,
-              },
-            ]}
-          >
-            <Text
+        {GAME_FILTERS.map(
+          (game) => (
+            <Pressable
+              key={game.key}
+              onPress={() =>
+                setFilter(
+                  game.key
+                )
+              }
               style={[
-                styles.filterPillText,
+                styles.filterPill,
                 {
-                  color:
-                    colors.muted,
+                  borderColor:
+                    colors.border,
+                  backgroundColor:
+                    colors.card,
                 },
-                filter === game.key && {
-                  color:
-                    colors.onAccent,
+                filter ===
+                  game.key && {
+                  backgroundColor:
+                    colors.accent,
+                  borderColor:
+                    colors.accent,
                 },
               ]}
             >
-              {game.label}
-            </Text>
-          </Pressable>
-        ))}
+              <Text
+                style={[
+                  styles.filterPillText,
+                  {
+                    color:
+                      colors.muted,
+                  },
+                  filter ===
+                    game.key && {
+                    color:
+                      colors.onAccent,
+                  },
+                ]}
+              >
+                {game.label}
+              </Text>
+            </Pressable>
+          )
+        )}
       </ScrollView>
+
+      {/* Leaderboard */}
 
       <ScrollView
         style={styles.scroll}
@@ -688,7 +668,9 @@ export default function LeaderboardScreen() {
       >
         {loading ? (
           <View
-            style={styles.centerState}
+            style={
+              styles.centerState
+            }
           >
             <Text
               style={[
@@ -702,21 +684,18 @@ export default function LeaderboardScreen() {
               Loading scores…
             </Text>
           </View>
-        ) : rows.length === 0 ? (
+        ) : rows.length ===
+          0 ? (
           <View
-            style={[
-              styles.emptyState,
-              {
-                backgroundColor:
-                  colors.card,
-                borderColor:
-                  colors.border,
-              },
-            ]}
+            style={
+              styles.emptyState
+            }
           >
             <Trophy
-              size={30}
-              color={colors.muted}
+              size={36}
+              color={
+                colors.muted
+              }
             />
 
             <Text
@@ -728,7 +707,7 @@ export default function LeaderboardScreen() {
                 },
               ]}
             >
-              No scores yet
+              No scores yet.
             </Text>
 
             <Text
@@ -740,8 +719,9 @@ export default function LeaderboardScreen() {
                 },
               ]}
             >
-              Play a game to appear on
-              the leaderboard.
+              Play a game to
+              appear on the
+              leaderboard!
             </Text>
           </View>
         ) : (
@@ -757,37 +737,16 @@ export default function LeaderboardScreen() {
             ]}
           >
             {rows.map(
-              (entry, index) => {
+              (
+                entry,
+                index
+              ) => {
                 const rank =
                   index + 1;
-
-                const medalColor =
-                  getRankColor(
-                    rank,
-                  );
 
                 const isMe =
                   entry.player_id ===
                   myId;
-
-                /*
-                 * Your row uses the global
-                 * accent as its background.
-                 */
-                const rowBackground =
-                  isMe
-                    ? colors.accent
-                    : colors.card;
-
-                const primaryText =
-                  isMe
-                    ? colors.onAccent
-                    : colors.text;
-
-                const secondaryText =
-                  isMe
-                    ? colors.onAccent
-                    : colors.muted;
 
                 return (
                   <View
@@ -796,20 +755,29 @@ export default function LeaderboardScreen() {
                     }
                     style={[
                       styles.row,
+
                       {
                         backgroundColor:
-                          rowBackground,
+                          isMe
+                            ? colors.accent
+                            : colors.card,
+                      },
+
+                      index <
+                        rows.length -
+                          1 && {
+                        borderBottomWidth:
+                          1,
+
                         borderBottomColor:
                           isMe
                             ? colors.onAccent
                             : colors.border,
                       },
-                      index <
-                        rows.length - 1 && {
-                        borderBottomWidth: 1,
-                      },
                     ]}
                   >
+                    {/* Rank */}
+
                     <Text
                       style={[
                         styles.rank,
@@ -817,13 +785,19 @@ export default function LeaderboardScreen() {
                           color:
                             isMe
                               ? colors.onAccent
-                              : medalColor ||
-                                colors.text,
+                              : colors.text,
                         },
+
+                        rank <= 3 &&
+                          styles.medalRank,
                       ]}
                     >
-                      #{rank}
+                      {getRankDisplay(
+                        rank
+                      )}
                     </Text>
+
+                    {/* Player */}
 
                     <View
                       style={
@@ -835,14 +809,17 @@ export default function LeaderboardScreen() {
                           styles.playerName,
                           {
                             color:
-                              primaryText,
+                              isMe
+                                ? colors.onAccent
+                                : colors.text,
                           },
                         ]}
-                        numberOfLines={1}
-                      >
-                        {
-                          entry.display_name
+                        numberOfLines={
+                          1
                         }
+                      >
+                        {entry.display_name ??
+                          'Player'}
 
                         {isMe
                           ? ' (You)'
@@ -854,12 +831,21 @@ export default function LeaderboardScreen() {
                           styles.gameStats,
                           {
                             color:
-                              secondaryText,
+                              isMe
+                                ? colors.onAccent
+                                : colors.muted,
+
+                            opacity:
+                              isMe
+                                ? 0.9
+                                : 1,
                           },
                         ]}
                       >
-                        {entry.wins}W ·{' '}
-                        {entry.draws}D ·{' '}
+                        {entry.wins}
+                        W ·{' '}
+                        {entry.draws}
+                        D ·{' '}
                         {
                           entry.games_played
                         }{' '}
@@ -867,41 +853,24 @@ export default function LeaderboardScreen() {
                       </Text>
                     </View>
 
-                    <View
-                      style={
-                        styles.scoreWrap
-                      }
-                    >
-                      <Text
-                        style={[
-                          styles.score,
-                          {
-                            color:
-                              isMe
-                                ? colors.onAccent
-                                : medalColor ||
-                                  colors.text,
-                          },
-                        ]}
-                      >
-                        {entry.total_points.toLocaleString()}
-                      </Text>
+                    {/* Score */}
 
-                      <Text
-                        style={[
-                          styles.pointsLabel,
-                          {
-                            color:
-                              secondaryText,
-                          },
-                        ]}
-                      >
-                        pts
-                      </Text>
-                    </View>
+                    <Text
+                      style={[
+                        styles.score,
+                        {
+                          color:
+                            isMe
+                              ? colors.onAccent
+                              : colors.text,
+                        },
+                      ]}
+                    >
+                      {entry.total_points.toLocaleString()}
+                    </Text>
                   </View>
                 );
-              },
+              }
             )}
           </View>
         )}
@@ -910,150 +879,231 @@ export default function LeaderboardScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
+const styles =
+  StyleSheet.create({
+    container: {
+      flex: 1,
+    },
 
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 28,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-  },
+    header: {
+      flexDirection:
+        'row',
 
-  headerBack: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+      alignItems:
+        'center',
 
-  headerRight: {
-    width: 38,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+      justifyContent:
+        'space-between',
 
-  headerTitle: {
-    fontFamily: 'Poppins-ExtraBold',
-    fontSize: 16,
-    letterSpacing: 1.5,
-  },
+      paddingHorizontal:
+        16,
 
-  filterScroll: {
-    flexGrow: 0,
-    borderBottomWidth: 1,
-  },
+      paddingTop: 28,
 
-  filterRow: {
-    flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
+      paddingVertical:
+        14,
 
-  filterPill: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 18,
-    borderWidth: 1,
-  },
+      borderBottomWidth:
+        1,
+    },
 
-  filterPillText: {
-    fontFamily: 'Poppins-Medium',
-    fontSize: 12,
-  },
+    headerBack: {
+      width: 38,
 
-  scroll: {
-    flex: 1,
-  },
+      height: 38,
 
-  scrollContent: {
-    padding: 16,
-    paddingBottom: 40,
-  },
+      borderRadius: 19,
 
-  card: {
-    borderRadius: 12,
-    borderWidth: 1,
-    overflow: 'hidden',
-  },
+      alignItems:
+        'center',
 
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 13,
-    gap: 12,
-  },
+      justifyContent:
+        'center',
+    },
 
-  rank: {
-    fontFamily: 'Poppins-Bold',
-    fontSize: 14,
-    width: 32,
-  },
+    headerRight: {
+      width: 38,
 
-  rowMiddle: {
-    flex: 1,
-    gap: 2,
-  },
+      alignItems:
+        'center',
 
-  playerName: {
-    fontFamily: 'Poppins-SemiBold',
-    fontSize: 14,
-  },
+      justifyContent:
+        'center',
+    },
 
-  gameStats: {
-    fontFamily: 'Poppins-Regular',
-    fontSize: 11,
-  },
+    headerTitle: {
+      fontFamily:
+        'Poppins-ExtraBold',
 
-  scoreWrap: {
-    alignItems: 'flex-end',
-    minWidth: 60,
-  },
+      fontSize: 16,
 
-  score: {
-    fontFamily: 'Poppins-Bold',
-    fontSize: 15,
-    textAlign: 'right',
-  },
+      letterSpacing: 1.5,
+    },
 
-  pointsLabel: {
-    fontFamily: 'Poppins-Regular',
-    fontSize: 9,
-  },
+    filterScroll: {
+      flexGrow: 0,
 
-  emptyState: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 60,
-    paddingHorizontal: 30,
-    gap: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
+      borderBottomWidth:
+        1,
+    },
 
-  emptyText: {
-    fontFamily: 'Poppins-SemiBold',
-    fontSize: 16,
-  },
+    filterRow: {
+      flexDirection:
+        'row',
 
-  mutedText: {
-    fontFamily: 'Poppins-Regular',
-    fontSize: 13,
-    textAlign: 'center',
-  },
+      gap: 8,
 
-  centerState: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: 80,
-    gap: 12,
-  },
-});
+      paddingHorizontal:
+        16,
+
+      paddingVertical:
+        12,
+    },
+
+    filterPill: {
+      paddingHorizontal:
+        14,
+
+      paddingVertical:
+        7,
+
+      borderRadius: 18,
+
+      borderWidth: 1,
+    },
+
+    filterPillText: {
+      fontFamily:
+        'Poppins-Medium',
+
+      fontSize: 12,
+    },
+
+    scroll: {
+      flex: 1,
+    },
+
+    scrollContent: {
+      padding: 16,
+
+      paddingBottom: 40,
+    },
+
+    card: {
+      borderRadius: 12,
+
+      borderWidth: 1,
+
+      overflow: 'hidden',
+    },
+
+    row: {
+      flexDirection:
+        'row',
+
+      alignItems:
+        'center',
+
+      paddingHorizontal:
+        16,
+
+      paddingVertical:
+        12,
+
+      gap: 12,
+    },
+
+    rank: {
+      fontFamily:
+        'Poppins-Bold',
+
+      fontSize: 14,
+
+      width: 32,
+
+      textAlign:
+        'left',
+    },
+
+    medalRank: {
+      fontSize: 21,
+
+      lineHeight: 25,
+    },
+
+    rowMiddle: {
+      flex: 1,
+
+      gap: 2,
+    },
+
+    playerName: {
+      fontFamily:
+        'Poppins-Medium',
+
+      fontSize: 14,
+    },
+
+    gameStats: {
+      fontFamily:
+        'Poppins-Regular',
+
+      fontSize: 11,
+    },
+
+    score: {
+      fontFamily:
+        'Poppins-Bold',
+
+      fontSize: 15,
+
+      textAlign:
+        'right',
+
+      minWidth: 56,
+    },
+
+    emptyState: {
+      alignItems:
+        'center',
+
+      justifyContent:
+        'center',
+
+      paddingVertical:
+        60,
+
+      gap: 10,
+    },
+
+    emptyText: {
+      fontFamily:
+        'Poppins-SemiBold',
+
+      fontSize: 16,
+    },
+
+    mutedText: {
+      fontFamily:
+        'Poppins-Regular',
+
+      fontSize: 13,
+
+      textAlign:
+        'center',
+    },
+
+    centerState: {
+      flex: 1,
+
+      alignItems:
+        'center',
+
+      justifyContent:
+        'center',
+
+      paddingTop: 80,
+
+      gap: 12,
+    },
+  });

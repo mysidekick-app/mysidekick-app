@@ -1,5 +1,4 @@
-
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   Modal,
@@ -13,12 +12,14 @@ import {
 
 import { ChevronLeft } from 'lucide-react-native';
 import { useLocalSearchParams, router } from 'expo-router';
+
 import { supabase } from '@/lib/supabase';
 import { useApp } from '@/components/AppProvider';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 type Opponent = 'computer' | 'friend';
+
 type Cell = 'X' | 'O' | null;
 
 type SessionState = {
@@ -30,7 +31,12 @@ type SessionResult = 'x_wins' | 'o_wins' | 'draw';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const WIN_POINTS = 100;
+const WIN_POINTS_BY_DIFFICULTY: Record<string, number> = {
+  easy: 100,
+  medium: 200,
+  hard: 300,
+};
+
 const DRAW_POINTS = 10;
 
 // ─── Difficulty ──────────────────────────────────────────────────────────────
@@ -512,6 +518,9 @@ export default function TicTacToe() {
   const [exitModalVisible, setExitModalVisible] =
     useState(false);
 
+  // Prevent any pending async/realtime work from completing after the player exits.
+  const exitConfirmedRef = useRef(false);
+
   const isComputerTurn =
     opp === 'computer' &&
     !xIsNext &&
@@ -578,6 +587,7 @@ export default function TicTacToe() {
 
       if (state) {
         setBoard(state.board);
+
         setXIsNext(
           state.xIsNext,
         );
@@ -637,10 +647,11 @@ export default function TicTacToe() {
       ) {
         const initState:
           SessionState = {
-            board:
-              makeBoard(size),
-            xIsNext: true,
-          };
+          board:
+            makeBoard(size),
+
+          xIsNext: true,
+        };
 
         const {
           data: seeded,
@@ -648,8 +659,10 @@ export default function TicTacToe() {
           .from('game_sessions')
           .update({
             state: initState,
+
             turn_user_id:
               rowData.created_by,
+
             status: 'active',
           })
           .eq(
@@ -673,11 +686,22 @@ export default function TicTacToe() {
 
       setSessionLoaded(true);
 
-      channel =
+      if (cancelled) {
+        return;
+      }
+
+      // Use a unique channel name for each mounted screen instance.
+      // This prevents Supabase from reusing a previously subscribed channel
+      // when opening the same game again from Your Games.
+
+      const channelName =
+        `tictactoe_session_${sessionId}_${Date.now()}_${Math.random()
+          .toString(36)
+          .slice(2)}`;
+
+      const nextChannel =
         supabase
-          .channel(
-            `tictactoe_session_${sessionId}`,
-          )
+          .channel(channelName)
           .on(
             'postgres_changes',
             {
@@ -692,6 +716,8 @@ export default function TicTacToe() {
               ),
           )
           .subscribe();
+
+      channel = nextChannel;
     }
 
     init();
@@ -712,6 +738,30 @@ export default function TicTacToe() {
     sessionId,
     myId,
   ]);
+
+  // ─── Session lifecycle ───────────────────────────────────────────────────
+
+  const abandonSession = useCallback(async () => {
+    if (!sessionId) return;
+
+    const { error } =
+      await supabase
+        .from('game_sessions')
+        .update({
+          status: 'abandoned',
+          result: 'abandoned',
+          turn_user_id: null,
+        })
+        .eq('id', sessionId)
+        .eq('status', 'active');
+
+    if (error) {
+      console.error(
+        'TIC-TAC-TOE ABANDON SESSION ERROR:',
+        error,
+      );
+    }
+  }, [sessionId]);
 
   // ─── Save score ──────────────────────────────────────────────────────────
 
@@ -790,7 +840,10 @@ export default function TicTacToe() {
   // ─── Solo scoring ─────────────────────────────────────────────────────────
 
   useEffect(() => {
-    if (!isVsComputer) {
+    if (
+      !isVsComputer ||
+      exitConfirmedRef.current
+    ) {
       return;
     }
 
@@ -815,10 +868,38 @@ export default function TicTacToe() {
           playerWon
             ? 'win'
             : 'loss',
+
           playerWon
-            ? WIN_POINTS
+            ? WIN_POINTS_BY_DIFFICULTY[
+                difficultyLevel
+              ] ?? 100
             : 0,
         );
+
+        if (sessionId) {
+          supabase
+            .from('game_sessions')
+            .update({
+              status: 'completed',
+
+              result:
+                playerWon
+                  ? 'x_wins'
+                  : 'o_wins',
+
+              winner_id:
+                playerWon
+                  ? myId
+                  : null,
+
+              winning_cells:
+                result.cells,
+
+              turn_user_id: null,
+            })
+            .eq('id', sessionId)
+            .eq('status', 'active');
+        }
       }
 
       return;
@@ -835,6 +916,20 @@ export default function TicTacToe() {
           'draw',
           DRAW_POINTS,
         );
+
+        if (sessionId) {
+          supabase
+            .from('game_sessions')
+            .update({
+              status: 'completed',
+              result: 'draw',
+              winner_id: null,
+              winning_cells: null,
+              turn_user_id: null,
+            })
+            .eq('id', sessionId)
+            .eq('status', 'active');
+        }
       }
     }
   }, [
@@ -844,6 +939,9 @@ export default function TicTacToe() {
     config.win,
     scoreSaved,
     saveScore,
+    difficultyLevel,
+    sessionId,
+    myId,
   ]);
 
   // ─── Multiplayer completed state ─────────────────────────────────────────
@@ -923,10 +1021,11 @@ export default function TicTacToe() {
 
         const nextState:
           SessionState = {
-            board: nextBoard,
-            xIsNext:
-              nextXIsNext,
-          };
+          board: nextBoard,
+
+          xIsNext:
+            nextXIsNext,
+        };
 
         const winner =
           checkWinner(
@@ -948,6 +1047,7 @@ export default function TicTacToe() {
             .from('game_sessions')
             .update({
               state: nextState,
+
               turn_user_id:
                 nextTurnUser,
             })
@@ -961,6 +1061,7 @@ export default function TicTacToe() {
             );
 
           setBoard(nextBoard);
+
           setXIsNext(
             nextXIsNext,
           );
@@ -991,13 +1092,18 @@ export default function TicTacToe() {
           .from('game_sessions')
           .update({
             state: nextState,
+
             status: 'completed',
+
             result,
+
             winner_id:
               winnerId,
+
             winning_cells:
               winner?.cells ??
               null,
+
             turn_user_id:
               null,
           })
@@ -1013,6 +1119,7 @@ export default function TicTacToe() {
           .maybeSingle();
 
         setBoard(nextBoard);
+
         setXIsNext(
           nextXIsNext,
         );
@@ -1047,7 +1154,11 @@ export default function TicTacToe() {
           } else {
             await saveScore(
               'win',
-              WIN_POINTS,
+
+              WIN_POINTS_BY_DIFFICULTY[
+                difficultyLevel
+              ] ?? 100,
+
               winnerId ??
                 undefined,
             );
@@ -1073,6 +1184,7 @@ export default function TicTacToe() {
         config.size,
         config.win,
         saveScore,
+        difficultyLevel,
       ],
     );
 
@@ -1159,9 +1271,18 @@ export default function TicTacToe() {
       setDraw(false);
       setModalVisible(false);
       setScoreSaved(false);
+
+      exitConfirmedRef.current = false;
     };
 
   // ─── Exit confirmation ───────────────────────────────────────────────────
+
+  const handleExitCompleted = useCallback(() => {
+    setModalVisible(false);
+    setExitModalVisible(false);
+
+    router.replace('/modules/games');
+  }, []);
 
   const handleExitPress =
     () => {
@@ -1180,19 +1301,19 @@ export default function TicTacToe() {
     };
 
   const handleConfirmExit =
-    () => {
-      // Closing the local game without completing it means
-      // no score is awarded.
-      setExitModalVisible(
-        false,
-      );
+    async () => {
+      // Mark this game as abandoned BEFORE leaving so no score can be
+      // written for an incomplete game and the realtime session is closed.
 
-      setModalVisible(
-        false,
-      );
+      exitConfirmedRef.current = true;
 
-      router.push(
-        '/modules',
+      setExitModalVisible(false);
+      setModalVisible(false);
+
+      await abandonSession();
+
+      router.replace(
+        '/modules/games',
       );
     };
 
@@ -1271,6 +1392,11 @@ export default function TicTacToe() {
     cellSize *
     config.size;
 
+  const winningPoints =
+    WIN_POINTS_BY_DIFFICULTY[
+      difficultyLevel
+    ] ?? 100;
+
   return (
     <SafeAreaView
       style={[
@@ -1282,6 +1408,7 @@ export default function TicTacToe() {
       ]}
     >
       {/* Header */}
+
       <View
         style={[
           styles.header,
@@ -1347,6 +1474,7 @@ export default function TicTacToe() {
       </View>
 
       {/* Status */}
+
       <View
         style={[
           styles.statusBar,
@@ -1370,6 +1498,7 @@ export default function TicTacToe() {
       </View>
 
       {/* Board */}
+
       <View
         style={
           styles.boardContainer
@@ -1433,6 +1562,7 @@ export default function TicTacToe() {
                             borderColor:
                               colors.border,
                           },
+
                           isWinCell && {
                             backgroundColor:
                               colors.accent,
@@ -1447,6 +1577,7 @@ export default function TicTacToe() {
                               {
                                 color:
                                   colors.accent,
+
                                 fontSize:
                                   cellSize *
                                   0.45,
@@ -1468,6 +1599,7 @@ export default function TicTacToe() {
                               {
                                 color:
                                   colors.text,
+
                                 fontSize:
                                   cellSize *
                                   0.45,
@@ -1492,7 +1624,7 @@ export default function TicTacToe() {
 
       {/* ───────────────────────────────────────────────────────────────────
           GAME OVER MODAL
-      ──────────────────────────────────────────────────────────────────── */}
+      ─────────────────────────────────────────────────────────────────── */}
 
       <Modal
         transparent
@@ -1513,6 +1645,7 @@ export default function TicTacToe() {
               {
                 backgroundColor:
                   colors.card,
+
                 borderColor:
                   colors.border,
               },
@@ -1590,7 +1723,7 @@ export default function TicTacToe() {
                     },
                   ]}
                 >
-                  +{WIN_POINTS}{' '}
+                  +{winningPoints}{' '}
                   points ·{' '}
                   {difficultyLevel.toUpperCase()}
                 </Text>
@@ -1669,7 +1802,7 @@ export default function TicTacToe() {
               {isVsComputer && (
                 <Pressable
                   onPress={
-                    handleExitPress
+                    handleExitCompleted
                   }
                   style={[
                     styles.btnSecondary,
@@ -1688,7 +1821,7 @@ export default function TicTacToe() {
                       },
                     ]}
                   >
-                    Exit
+                    Exit Game
                   </Text>
                 </Pressable>
               )}
@@ -1699,7 +1832,7 @@ export default function TicTacToe() {
 
       {/* ───────────────────────────────────────────────────────────────────
           EXIT CONFIRMATION MODAL
-      ──────────────────────────────────────────────────────────────────── */}
+      ─────────────────────────────────────────────────────────────────── */}
 
       <Modal
         transparent
@@ -1722,6 +1855,7 @@ export default function TicTacToe() {
               {
                 backgroundColor:
                   colors.card,
+
                 borderColor:
                   colors.border,
               },
@@ -1839,22 +1973,32 @@ const styles =
     header: {
       flexDirection:
         'row',
+
       alignItems:
         'center',
+
       justifyContent:
         'space-between',
+
       paddingHorizontal: 16,
+
       paddingTop: 28,
+
       paddingVertical: 12,
+
       borderBottomWidth: 1,
     },
 
     headerBack: {
       width: 38,
+
       height: 38,
+
       borderRadius: 19,
+
       alignItems:
         'center',
+
       justifyContent:
         'center',
     },
@@ -1862,43 +2006,56 @@ const styles =
     headerTitle: {
       fontFamily:
         'Poppins-ExtraBold',
+
       fontSize: 16,
+
       letterSpacing: 1,
     },
 
     levelBadge: {
       borderRadius: 20,
+
       paddingHorizontal: 10,
+
       paddingVertical: 4,
     },
 
     levelLabel: {
       fontFamily:
         'Poppins-Bold',
+
       fontSize: 11,
+
       letterSpacing: 0.5,
     },
 
     statusBar: {
       alignItems:
         'center',
+
       paddingVertical: 10,
+
       borderBottomWidth: 1,
     },
 
     statusText: {
       fontFamily:
         'Poppins-Medium',
+
       fontSize: 14,
     },
 
     boardContainer: {
       flex: 1,
+
       alignItems:
         'center',
+
       justifyContent:
         'center',
+
       paddingHorizontal: 16,
+
       paddingVertical: 8,
     },
 
@@ -1910,18 +2067,25 @@ const styles =
     boardRow: {
       flexDirection:
         'row',
+
       flex: 1,
+
       width: '100%',
     },
 
     cell: {
       flex: 1,
+
       borderWidth: 1,
+
       borderRadius: 6,
+
       alignItems:
         'center',
+
       justifyContent:
         'center',
+
       margin: 1,
     },
 
@@ -1932,34 +2096,46 @@ const styles =
 
     overlay: {
       flex: 1,
+
       backgroundColor:
         'rgba(0,0,0,0.75)',
+
       alignItems:
         'center',
+
       justifyContent:
         'center',
+
       padding: 24,
     },
 
     modal: {
       width: '100%',
+
       borderRadius: 20,
+
       padding: 28,
+
       alignItems:
         'center',
+
       borderWidth: 1,
     },
 
     modalEmoji: {
       fontSize: 48,
+
       marginBottom: 8,
     },
 
     modalTitle: {
       fontFamily:
         'Poppins-ExtraBold',
+
       fontSize: 26,
+
       marginBottom: 6,
+
       textAlign:
         'center',
     },
@@ -1967,21 +2143,28 @@ const styles =
     modalSub: {
       fontFamily:
         'Poppins-Medium',
+
       fontSize: 15,
+
       marginBottom: 4,
+
       textAlign:
         'center',
     },
 
     modalBtns: {
       width: '100%',
+
       gap: 12,
+
       marginTop: 16,
     },
 
     btnPrimary: {
       borderRadius: 12,
+
       paddingVertical: 14,
+
       alignItems:
         'center',
     },
@@ -1989,12 +2172,15 @@ const styles =
     btnPrimaryText: {
       fontFamily:
         'Poppins-Bold',
+
       fontSize: 16,
     },
 
     btnSecondary: {
       borderRadius: 12,
+
       paddingVertical: 14,
+
       alignItems:
         'center',
     },
@@ -2002,51 +2188,69 @@ const styles =
     btnSecondaryText: {
       fontFamily:
         'Poppins-SemiBold',
+
       fontSize: 16,
     },
 
     // Exit confirmation popup.
     exitModal: {
       width: '100%',
+
       maxWidth: 420,
+
       borderRadius: 20,
+
       padding: 28,
+
       alignItems:
         'center',
+
       borderWidth: 1,
     },
 
     exitTitle: {
       fontFamily:
         'Poppins-ExtraBold',
+
       fontSize: 25,
+
       textAlign:
         'center',
+
       marginBottom: 8,
     },
 
     exitSub: {
       fontFamily:
         'Poppins-Medium',
+
       fontSize: 15,
+
       textAlign:
         'center',
+
       lineHeight: 22,
     },
 
     exitWarning: {
       fontFamily:
         'Poppins-Regular',
+
       fontSize: 13,
+
       textAlign:
         'center',
+
       lineHeight: 20,
+
       marginTop: 8,
     },
 
     exitButtons: {
       width: '100%',
+
       gap: 12,
+
       marginTop: 22,
     },
   });

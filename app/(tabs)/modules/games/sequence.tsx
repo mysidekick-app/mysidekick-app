@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+
 import {
   Modal,
   Pressable,
@@ -7,9 +8,9 @@ import {
   Text,
   View,
 } from 'react-native';
+
 import { ChevronLeft } from 'lucide-react-native';
 import { useLocalSearchParams, router } from 'expo-router';
-
 import { supabase } from '@/lib/supabase';
 import { useApp } from '@/components/AppProvider';
 
@@ -24,9 +25,14 @@ type Question = {
 };
 
 const SESSION_SECONDS = 180;
-const POINTS_PER_CORRECT = 10;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function getPointsPerCorrect(difficulty: Difficulty): number {
+  if (difficulty === 'easy') return 10;
+  if (difficulty === 'medium') return 20;
+  return 30;
+}
 
 function randInt(min: number, max: number): number {
   return min + Math.floor(Math.random() * (max - min + 1));
@@ -136,9 +142,11 @@ function generateMedium(): Question {
 
   const distractors = [
     `${answerNum + numStep}${answerLetter}`,
+
     `${answerNum}${letterAt(
       letterStart + 4 * letterStep + letterStep,
     )}`,
+
     `${answerNum - numStep}${letterAt(
       letterStart + 4 * letterStep - letterStep,
     )}`,
@@ -164,7 +172,9 @@ function generateHard(): Question {
 
   const terms = [0, 1, 2, 3].map(
     (i) =>
-      `${upperAt(upperStart + i * upperStep)}${letterAt(
+      `${upperAt(
+        upperStart + i * upperStep,
+      )}${letterAt(
         lowerStart + i * lowerStep,
       )}${numStart + i * numStep}`,
   );
@@ -204,6 +214,7 @@ function generateHard(): Question {
 
 function generateQuestion(difficulty: Difficulty): Question {
   if (difficulty === 'easy') return generateEasy();
+
   if (difficulty === 'medium') return generateMedium();
 
   return generateHard();
@@ -227,9 +238,25 @@ function difficultyFromLevel(
   const n = parseInt(level ?? '1', 10);
 
   if (n <= 1) return 'easy';
+
   if (n <= 3) return 'medium';
 
   return 'hard';
+}
+
+function difficultyFromParams(
+  difficultyParam: string | undefined,
+  levelParam: string | undefined,
+): Difficulty {
+  if (
+    difficultyParam === 'easy' ||
+    difficultyParam === 'medium' ||
+    difficultyParam === 'hard'
+  ) {
+    return difficultyParam;
+  }
+
+  return difficultyFromLevel(levelParam);
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -238,9 +265,13 @@ export default function SequenceScreen() {
   const params = useLocalSearchParams<{
     sessionId?: string;
     level?: string;
+    difficulty?: string;
   }>();
 
-  const difficulty = difficultyFromLevel(params.level);
+  const difficulty = difficultyFromParams(
+    params.difficulty,
+    params.level,
+  );
 
   const { isDark, accentForeground, onAccent } = useApp();
 
@@ -273,11 +304,57 @@ export default function SequenceScreen() {
 
   // Exit confirmation modal
   const [showExitModal, setShowExitModal] = useState(false);
-
   const [scoreSaved, setScoreSaved] = useState(false);
+
+  const exitConfirmedRef = useRef(false);
 
   const timerRef =
     useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const sessionId =
+    params.sessionId && params.sessionId !== 'undefined'
+      ? params.sessionId
+      : null;
+
+  const abandonSession = useCallback(async () => {
+    if (!sessionId) return;
+
+    const { error } = await supabase
+      .from('game_sessions')
+      .update({
+        status: 'abandoned',
+        result: 'abandoned',
+      })
+      .eq('id', sessionId)
+      .eq('status', 'active');
+
+    if (error) {
+      console.error(
+        'SEQUENCE ABANDON SESSION ERROR:',
+        error,
+      );
+    }
+  }, [sessionId]);
+
+  const completeSession = useCallback(async () => {
+    if (!sessionId) return;
+
+    const { error } = await supabase
+      .from('game_sessions')
+      .update({
+        status: 'completed',
+        result: 'completed',
+      })
+      .eq('id', sessionId)
+      .eq('status', 'active');
+
+    if (error) {
+      console.error(
+        'SEQUENCE COMPLETE SESSION ERROR:',
+        error,
+      );
+    }
+  }, [sessionId]);
 
   // ─── Timer ────────────────────────────────────────────────────────────────
 
@@ -316,14 +393,13 @@ export default function SequenceScreen() {
         timerRef.current = null;
       }
     };
-  }, [gameOver, showExitModal]);
+  }, [gameOver, showExitModal, completeSession]);
 
   // ─── Exit handling ───────────────────────────────────────────────────────
 
   const handleRequestExit = useCallback(() => {
     if (gameOver) {
-      // If the game has already ended, no confirmation is needed.
-      router.push('/modules');
+      router.replace('/modules/games');
       return;
     }
 
@@ -334,20 +410,20 @@ export default function SequenceScreen() {
     setShowExitModal(false);
   }, []);
 
-  const handleConfirmExit = useCallback(() => {
-    // Cancel the game completely.
-    // Because score saving only happens when gameOver becomes true,
-    // this unfinished game will not receive a score.
+  const handleConfirmExit = useCallback(async () => {
+    exitConfirmedRef.current = true;
+
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
 
     setShowExitModal(false);
-    setGameOver(true);
 
-    router.push('/modules');
-  }, []);
+    await abandonSession();
+
+    router.replace('/modules/games');
+  }, [abandonSession]);
 
   // ─── Answer handling ─────────────────────────────────────────────────────
 
@@ -394,7 +470,7 @@ export default function SequenceScreen() {
   }, [difficulty, gameOver]);
 
   const finalScore =
-    correctCount * POINTS_PER_CORRECT;
+    correctCount * getPointsPerCorrect(difficulty);
 
   // ─── Score saving ────────────────────────────────────────────────────────
 
@@ -411,18 +487,27 @@ export default function SequenceScreen() {
 
     if (!playerId) return;
 
-    await supabase.from('game_scores').insert({
-      session_id:
-        params.sessionId &&
-        params.sessionId !== 'undefined'
-          ? params.sessionId
-          : null,
-      player_id: playerId,
-      game: 'sequence',
-      mode: 'solo',
-      points: finalScore,
-      difficulty,
-    });
+    const { error } = await supabase
+      .from('game_scores')
+      .insert({
+        session_id:
+          params.sessionId &&
+          params.sessionId !== 'undefined'
+            ? params.sessionId
+            : null,
+        player_id: playerId,
+        game: 'sequence',
+        mode: 'solo',
+        points: finalScore,
+        difficulty,
+      });
+
+    if (error) {
+      console.error(
+        'SEQUENCE SAVE SCORE ERROR:',
+        error,
+      );
+    }
   }, [
     scoreSaved,
     finalScore,
@@ -431,7 +516,11 @@ export default function SequenceScreen() {
   ]);
 
   useEffect(() => {
-    if (gameOver && !showExitModal) {
+    if (
+      gameOver &&
+      !showExitModal &&
+      !exitConfirmedRef.current
+    ) {
       saveScore();
     }
   }, [gameOver, showExitModal, saveScore]);
@@ -455,6 +544,8 @@ export default function SequenceScreen() {
     setSelected(null);
     setChecked(false);
     setShowExitModal(false);
+
+    exitConfirmedRef.current = false;
   }, [difficulty]);
 
   // ─── UI ───────────────────────────────────────────────────────────────────
@@ -467,6 +558,7 @@ export default function SequenceScreen() {
       ]}
     >
       {/* Header */}
+
       <View
         style={[
           styles.header,
@@ -534,6 +626,7 @@ export default function SequenceScreen() {
       </View>
 
       {/* Score strip */}
+
       <View
         style={[
           styles.scoreStrip,
@@ -553,6 +646,7 @@ export default function SequenceScreen() {
 
       <View style={styles.content}>
         {/* Sequence */}
+
         <View style={styles.sequenceRow}>
           {question.terms.map((term, index) => (
             <View
@@ -604,9 +698,11 @@ export default function SequenceScreen() {
         </Text>
 
         {/* Options */}
+
         <View style={styles.optionsGrid}>
           {question.options.map((opt) => {
             const isSelected = selected === opt;
+
             const isCorrectOption =
               opt === question.answer;
 
@@ -725,8 +821,6 @@ export default function SequenceScreen() {
               },
             ]}
           >
-            <Text style={styles.exitEmoji}>⚠️</Text>
-
             <Text
               style={[
                 styles.modalTitle,
@@ -868,7 +962,9 @@ export default function SequenceScreen() {
                     borderColor: colors.border,
                   },
                 ]}
-                onPress={() => router.push('/modules')}
+                onPress={() =>
+                  router.replace('/modules/games')
+                }
               >
                 <Text
                   style={[
@@ -876,7 +972,7 @@ export default function SequenceScreen() {
                     { color: colors.text },
                   ]}
                 >
-                  Exit
+                  Exit Game
                 </Text>
               </Pressable>
             </View>
@@ -961,6 +1057,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 20,
+    paddingTop: 60,
     gap: 20,
   },
 

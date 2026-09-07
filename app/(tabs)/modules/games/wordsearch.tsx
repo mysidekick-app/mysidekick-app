@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
 import {
   Modal,
+  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -8,12 +10,18 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+
 import { SafeAreaView } from 'react-native-safe-area-context';
+
 import { ChevronLeft } from 'lucide-react-native';
+
 import { useLocalSearchParams, router } from 'expo-router';
+
 import { supabase } from '@/lib/supabase';
+
 import { useApp } from '@/components/AppProvider';
-import { randomWordsForLevel, randInt, shuffle } from '@/components/games-utils';
+
+import { randomWordsForLevel, shuffle } from '@/components/games-utils';
 
 type Difficulty = 'easy' | 'medium' | 'hard';
 
@@ -27,6 +35,7 @@ type Placement = {
 };
 
 const TIME_LIMIT = 180;
+
 const POINTS_PER_WORD = 10;
 
 const WORD_COUNT_BY_DIFFICULTY: Record<Difficulty, number> = {
@@ -47,6 +56,17 @@ const GEN_LEVEL_BY_DIFFICULTY: Record<Difficulty, number> = {
   hard: 5,
 };
 
+const DIRECTIONS = [
+  [0, 1],
+  [1, 0],
+  [1, 1],
+  [1, -1],
+  [0, -1],
+  [-1, 0],
+  [-1, -1],
+  [-1, 1],
+] as const;
+
 function difficultyFromParams(
   difficultyParam?: string,
   levelParam?: string,
@@ -63,127 +83,197 @@ function difficultyFromParams(
 
   if (n <= 1) return 'easy';
   if (n <= 3) return 'medium';
+
   return 'hard';
 }
 
-function difficultyLabel(difficulty: Difficulty): string {
-  return difficulty.charAt(0).toUpperCase() + difficulty.slice(1);
+function difficultyLabel(d: Difficulty) {
+  return d.charAt(0).toUpperCase() + d.slice(1);
 }
 
-function formatTime(seconds: number): string {
-  const minutes = Math.floor(seconds / 60)
+function formatTime(seconds: number) {
+  return `${Math.floor(seconds / 60)
     .toString()
-    .padStart(2, '0');
-
-  const remainingSeconds = (seconds % 60)
-    .toString()
-    .padStart(2, '0');
-
-  return `${minutes}:${remainingSeconds}`;
+    .padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}`;
 }
 
+/**
+ * Generates a word-search puzzle where words ARE allowed to overlap.
+ *
+ * Same letter on the same cell = allowed.
+ * Different letter on the same cell = not allowed.
+ * Words can cross horizontally, vertically and diagonally.
+ */
 function generateGrid(
   words: string[],
   gridSize: number,
-): {
-  grid: string[];
-  placements: Placement[];
-} {
-  const grid: string[] = Array(gridSize * gridSize).fill('');
-  const placements: Placement[] = [];
+): { grid: string[]; placements: Placement[] } {
+  const cleanedWords = words
+    .map((word) => word.toUpperCase().replace(/[^A-Z]/g, ''))
+    .filter((word) => word.length >= 2 && word.length <= gridSize);
 
-  const directions = shuffle([
-    [0, 1],
-    [1, 0],
-    [1, 1],
-    [1, -1],
-    [0, -1],
-    [-1, 0],
-    [-1, -1],
-    [-1, 1],
-  ]);
-
-  for (const word of words) {
-    let placed = false;
-
-    for (let attempt = 0; attempt < 100 && !placed; attempt++) {
-      const [dr, dc] = directions[attempt % directions.length];
-
-      const maxRow =
-        dr > 0
-          ? gridSize - word.length
-          : dr < 0
-            ? word.length - 1
-            : gridSize - 1;
-
-      const minRow = dr < 0 ? word.length - 1 : 0;
-
-      const maxCol =
-        dc > 0
-          ? gridSize - word.length
-          : dc < 0
-            ? word.length - 1
-            : gridSize - 1;
-
-      const minCol = dc < 0 ? word.length - 1 : 0;
-
-      if (maxRow < minRow || maxCol < minCol) {
-        continue;
-      }
-
-      const row = randInt(minRow, maxRow);
-      const col = randInt(minCol, maxCol);
-
-      let canPlace = true;
-      const cells: number[] = [];
-
-      for (let i = 0; i < word.length; i++) {
-        const r = row + dr * i;
-        const c = col + dc * i;
-        const index = r * gridSize + c;
-
-        if (grid[index] !== '' && grid[index] !== word[i]) {
-          canPlace = false;
-          break;
-        }
-
-        cells.push(index);
-      }
-
-      if (canPlace) {
-        for (let i = 0; i < word.length; i++) {
-          const r = row + dr * i;
-          const c = col + dc * i;
-
-          grid[r * gridSize + c] = word[i];
-        }
-
-        placements.push({
-          word,
-          row,
-          col,
-          dr,
-          dc,
-          cells,
-        });
-
-        placed = true;
-      }
-    }
+  if (!cleanedWords.length) {
+    return {
+      grid: [],
+      placements: [],
+    };
   }
 
-  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  for (
+    let generationAttempt = 0;
+    generationAttempt < 200;
+    generationAttempt++
+  ) {
+    const grid = Array(gridSize * gridSize).fill('');
+    const placements: Placement[] = [];
 
-  for (let i = 0; i < grid.length; i++) {
-    if (grid[i] === '') {
-      grid[i] =
-        letters[Math.floor(Math.random() * letters.length)];
+    const wordsToPlace = [...cleanedWords].sort(
+      (a, b) => b.length - a.length,
+    );
+
+    let failed = false;
+
+    for (const word of wordsToPlace) {
+      const candidates: Array<{
+        row: number;
+        col: number;
+        dr: number;
+        dc: number;
+        cells: number[];
+        overlapCount: number;
+      }> = [];
+
+      for (const [dr, dc] of DIRECTIONS) {
+        for (let row = 0; row < gridSize; row++) {
+          for (let col = 0; col < gridSize; col++) {
+            const endRow = row + dr * (word.length - 1);
+            const endCol = col + dc * (word.length - 1);
+
+            if (
+              endRow < 0 ||
+              endRow >= gridSize ||
+              endCol < 0 ||
+              endCol >= gridSize
+            ) {
+              continue;
+            }
+
+            const cells: number[] = [];
+
+            let valid = true;
+            let overlapCount = 0;
+
+            for (let i = 0; i < word.length; i++) {
+              const r = row + dr * i;
+              const c = col + dc * i;
+              const index = r * gridSize + c;
+
+              const existingLetter = grid[index];
+
+              if (
+                existingLetter !== '' &&
+                existingLetter !== word[i]
+              ) {
+                valid = false;
+                break;
+              }
+
+              if (existingLetter === word[i]) {
+                overlapCount++;
+              }
+
+              cells.push(index);
+            }
+
+            if (valid) {
+              candidates.push({
+                row,
+                col,
+                dr,
+                dc,
+                cells,
+                overlapCount,
+              });
+            }
+          }
+        }
+      }
+
+      if (!candidates.length) {
+        failed = true;
+        break;
+      }
+
+      candidates.sort((a, b) => {
+        if (b.overlapCount !== a.overlapCount) {
+          return b.overlapCount - a.overlapCount;
+        }
+
+        return Math.random() - 0.5;
+      });
+
+      const bestOverlap = candidates[0].overlapCount;
+
+      const bestCandidates = candidates.filter(
+        (candidate) =>
+          candidate.overlapCount >= Math.max(0, bestOverlap - 1),
+      );
+
+      const selected =
+        bestCandidates[
+          Math.floor(Math.random() * bestCandidates.length)
+        ];
+
+      for (let i = 0; i < word.length; i++) {
+        const r = selected.row + selected.dr * i;
+        const c = selected.col + selected.dc * i;
+
+        grid[r * gridSize + c] = word[i];
+      }
+
+      placements.push({
+        word,
+        row: selected.row,
+        col: selected.col,
+        dr: selected.dr,
+        dc: selected.dc,
+        cells: selected.cells,
+      });
+    }
+
+    if (
+      !failed &&
+      placements.length === cleanedWords.length
+    ) {
+      const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+      for (let i = 0; i < grid.length; i++) {
+        if (grid[i] === '') {
+          grid[i] =
+            letters[
+              Math.floor(Math.random() * letters.length)
+            ];
+        }
+      }
+
+      const orderedPlacements = cleanedWords
+        .map((word) =>
+          placements.find(
+            (placement) => placement.word === word,
+          ),
+        )
+        .filter(Boolean) as Placement[];
+
+      return {
+        grid,
+        placements: orderedPlacements,
+      };
     }
   }
 
   return {
-    grid,
-    placements,
+    grid: [],
+    placements: [],
   };
 }
 
@@ -195,6 +285,7 @@ export default function WordSearchScreen() {
   }>();
 
   const { isDark, accentForeground, onAccent } = useApp();
+
   const { width, height } = useWindowDimensions();
 
   const colors = {
@@ -208,7 +299,10 @@ export default function WordSearchScreen() {
   };
 
   const [difficulty] = useState<Difficulty>(() =>
-    difficultyFromParams(params.difficulty, params.level),
+    difficultyFromParams(
+      params.difficulty,
+      params.level,
+    ),
   );
 
   const sessionId =
@@ -216,20 +310,24 @@ export default function WordSearchScreen() {
       ? params.sessionId
       : '';
 
-  const gridSize = GRID_SIZE_BY_DIFFICULTY[difficulty];
-  const wordCount = WORD_COUNT_BY_DIFFICULTY[difficulty];
-  const genLevel = GEN_LEVEL_BY_DIFFICULTY[difficulty];
+  const gridSize =
+    GRID_SIZE_BY_DIFFICULTY[difficulty];
 
-  /*
-   * The puzzle is initialized explicitly.
-   *
-   * Nothing is rendered until initialization succeeds.
-   */
-  const [initializing, setInitializing] = useState(true);
+  const wordCount =
+    WORD_COUNT_BY_DIFFICULTY[difficulty];
+
+  const genLevel =
+    GEN_LEVEL_BY_DIFFICULTY[difficulty];
+
+  const [initializing, setInitializing] =
+    useState(true);
+
   const [initializationError, setInitializationError] =
     useState<string | null>(null);
 
-  const [words, setWords] = useState<string[]>([]);
+  const [words, setWords] =
+    useState<string[]>([]);
+
   const [puzzle, setPuzzle] = useState<{
     grid: string[];
     placements: Placement[];
@@ -238,15 +336,24 @@ export default function WordSearchScreen() {
   const [selectedCells, setSelectedCells] =
     useState<Set<number>>(new Set());
 
+  const [foundCells, setFoundCells] =
+    useState<Set<number>>(new Set());
+
   const [foundWords, setFoundWords] =
     useState<Set<string>>(new Set());
 
-  const [showWin, setShowWin] = useState(false);
-  const [showTimeUp, setShowTimeUp] = useState(false);
+  const [showWin, setShowWin] =
+    useState(false);
+
+  const [showTimeUp, setShowTimeUp] =
+    useState(false);
+
   const [showExitConfirm, setShowExitConfirm] =
     useState(false);
 
-  const [scoreSaved, setScoreSaved] = useState(false);
+  const [scoreSaved, setScoreSaved] =
+    useState(false);
+
   const [secondsLeft, setSecondsLeft] =
     useState(TIME_LIMIT);
 
@@ -254,26 +361,57 @@ export default function WordSearchScreen() {
     useState(false);
 
   const timerRef =
-    useRef<ReturnType<typeof setInterval> | null>(null);
+    useRef<ReturnType<typeof setInterval> | null>(
+      null,
+    );
 
-  const gameEndedRef = useRef(false);
-  const scoreSavingRef = useRef(false);
+  const gameEndedRef =
+    useRef(false);
 
-  /*
-   * Explicit game initialization.
+  const exitConfirmedRef =
+    useRef(false);
+
+  const scoreSavingRef =
+    useRef(false);
+
+  const scoreFinalizedRef =
+    useRef(false);
+
+  const activeSessionIdRef =
+    useRef<string>(sessionId);
+
+  const foundWordsRef =
+    useRef<Set<string>>(new Set());
+
+  const dragStartRef =
+    useRef<number | null>(null);
+
+  /**
+   * Always keep the synchronous ref up to date.
    *
-   * 1. Verify the authenticated user.
-   * 2. Create the game session if one wasn't supplied.
-   * 3. Generate the puzzle.
-   * 4. Only then start the game.
+   * The timer uses this ref so it cannot accidentally
+   * save an older React state value when time reaches zero.
+   */
+  useEffect(() => {
+    foundWordsRef.current = foundWords;
+  }, [foundWords]);
+
+  /**
+   * Initialize the game and create a session when
+   * one was not supplied by the route.
    */
   useEffect(() => {
     let cancelled = false;
 
-    const initializeGame = async () => {
+    (async () => {
       try {
         setInitializing(true);
         setInitializationError(null);
+
+        scoreFinalizedRef.current = false;
+        scoreSavingRef.current = false;
+        exitConfirmedRef.current = false;
+        gameEndedRef.current = false;
 
         const {
           data: { user },
@@ -294,12 +432,12 @@ export default function WordSearchScreen() {
 
         let activeSessionId = sessionId;
 
-        /*
-         * If Games already created a session and passed its ID,
-         * use it. Otherwise create one here.
+        /**
+         * If there is no session ID in the route,
+         * create the session now.
          */
         if (!activeSessionId) {
-          const { data: session, error: sessionError } =
+          const { data: session, error } =
             await supabase
               .from('game_sessions')
               .insert({
@@ -311,88 +449,111 @@ export default function WordSearchScreen() {
               .select('id')
               .single();
 
-          if (sessionError) {
-            console.error(
-              'CREATE GAME SESSION ERROR:',
-              sessionError,
-            );
-
+          if (error) {
             throw new Error(
-              `Could not create game session: ${sessionError.message}`,
+              `Could not create game session: ${error.message}`,
             );
           }
 
           activeSessionId = session.id;
         }
 
-        /*
-         * Generate words only after authentication/session
-         * initialization succeeds.
+        /**
+         * IMPORTANT:
+         *
+         * Always store the real session ID.
+         *
+         * This is the ID that must be used when inserting
+         * game_scores and completing the session.
          */
-        const generatedWords = randomWordsForLevel(
-          genLevel,
-          wordCount,
-        );
+        activeSessionIdRef.current =
+          activeSessionId;
 
-        if (
-          !generatedWords ||
-          generatedWords.length === 0
-        ) {
+        const generatedWords =
+          randomWordsForLevel(
+            genLevel,
+            wordCount,
+          ).map((word) =>
+            word
+              .toUpperCase()
+              .replace(/[^A-Z]/g, ''),
+          );
+
+        if (!generatedWords?.length) {
           throw new Error(
             'Could not generate words for this puzzle.',
           );
         }
 
-        const generatedPuzzle = generateGrid(
-          generatedWords,
-          gridSize,
-        );
+        const generatedPuzzle =
+          generateGrid(
+            generatedWords,
+            gridSize,
+          );
 
         if (
           !generatedPuzzle.grid.length ||
-          !generatedPuzzle.placements.length
+          generatedPuzzle.placements.length !==
+            generatedWords.length
         ) {
           throw new Error(
-            'Could not generate the Word Search puzzle.',
+            'Could not generate a complete Word Search puzzle. Please try again.',
           );
         }
 
-        if (cancelled) return;
+        if (
+          cancelled ||
+          exitConfirmedRef.current
+        ) {
+          return;
+        }
+
+        foundWordsRef.current =
+          new Set();
 
         setWords(generatedWords);
+
         setPuzzle(generatedPuzzle);
 
-        /*
-         * Initialization is complete.
-         * Now the game can start.
-         */
+        setSelectedCells(new Set());
+
+        setFoundCells(new Set());
+
+        setFoundWords(new Set());
+
         setSecondsLeft(TIME_LIMIT);
-        setTimerRunning(true);
+
+        setScoreSaved(false);
+
+        setShowWin(false);
+
+        setShowTimeUp(false);
+
         gameEndedRef.current = false;
+
+        setTimerRunning(true);
       } catch (error) {
-        console.error(
-          'WORD SEARCH INITIALIZATION ERROR:',
-          error,
-        );
-
-        if (cancelled) return;
-
-        setInitializationError(
-          error instanceof Error
-            ? error.message
-            : 'Could not start the game.',
-        );
+        if (!cancelled) {
+          setInitializationError(
+            error instanceof Error
+              ? error.message
+              : 'Could not start the game.',
+          );
+        }
       } finally {
         if (!cancelled) {
           setInitializing(false);
         }
       }
-    };
-
-    initializeGame();
+    })();
 
     return () => {
       cancelled = true;
+
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
     };
   }, [
     sessionId,
@@ -402,61 +563,25 @@ export default function WordSearchScreen() {
     wordCount,
   ]);
 
-  /*
-   * Timer.
-   */
-  useEffect(() => {
-    if (!timerRunning) {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-
-      return;
-    }
-
-    timerRef.current = setInterval(() => {
-      setSecondsLeft((current) => {
-        if (current <= 1) {
-          if (timerRef.current) {
-            clearInterval(timerRef.current);
-            timerRef.current = null;
-          }
-
-          gameEndedRef.current = true;
-          setTimerRunning(false);
-          setShowTimeUp(true);
-
-          return 0;
-        }
-
-        return current - 1;
-      });
-    }, 1000);
-
-    return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-    };
-  }, [timerRunning]);
-
-  /*
-   * Record the completed game in game_scores.
+  /**
+   * Save the score.
    *
-   * IMPORTANT:
-   * game_leaderboard is a VIEW.
-   * We never insert/update it directly.
+   * This is used for:
+   * - completing all words
+   * - running out of time
    *
-   * game_scores is the actual source table.
+   * Time-up is a COMPLETED game, not an abandoned game.
    */
   const recordScore = useCallback(
     async (
       wordsFound: number,
-      result: 'win' | 'time_up',
+      result: 'win' | 'loss',
     ) => {
-      if (scoreSavingRef.current || scoreSaved) {
+      if (
+        exitConfirmedRef.current ||
+        scoreSavingRef.current ||
+        scoreFinalizedRef.current
+      ) {
         return;
       }
 
@@ -468,362 +593,814 @@ export default function WordSearchScreen() {
           error: authError,
         } = await supabase.auth.getUser();
 
-        if (authError) {
+        if (authError || !user?.id) {
           throw new Error(
-            `Could not identify player: ${authError.message}`,
+            authError?.message ??
+              'No authenticated player was found.',
           );
         }
 
-        const playerId = user?.id;
+        if (exitConfirmedRef.current) {
+          return;
+        }
 
-        if (!playerId) {
+        /**
+         * Read the REAL session ID.
+         */
+        const activeSessionId =
+          activeSessionIdRef.current;
+
+        if (!activeSessionId) {
           throw new Error(
-            'No authenticated player was found.',
+            'No active game session ID was found.',
           );
         }
 
         const points =
           wordsFound * POINTS_PER_WORD;
 
-        /*
-         * The session ID may have been supplied by the
-         * Games screen. If not, this score can still be
-         * recorded with a null session_id.
+        /**
+         * Save the player's score.
          */
-        const scorePayload = {
-          session_id: sessionId || null,
-          player_id: playerId,
-          game: 'wordsearch',
-          mode: 'solo',
-          result,
-          points,
-          difficulty,
-          level: genLevel,
-        };
-
-        console.log(
-          'RECORDING WORD SEARCH SCORE:',
-          scorePayload,
-        );
-
-        const { error: scoreError } =
-          await supabase
-            .from('game_scores')
-            .insert(scorePayload);
+        const {
+          error: scoreError,
+        } = await supabase
+          .from('game_scores')
+          .insert({
+            session_id: activeSessionId,
+            player_id: user.id,
+            game: 'wordsearch',
+            mode: 'solo',
+            result,
+            points,
+            difficulty,
+            level: genLevel,
+          });
 
         if (scoreError) {
-          console.error(
-            'RECORD GAME SCORE ERROR:',
-            scoreError,
-          );
-
           throw new Error(
             `Could not save score: ${scoreError.message}`,
           );
         }
 
-        /*
-         * Mark the session as completed after the score
-         * has successfully been written.
+        /**
+         * The score was successfully inserted.
+         * Now mark the session completed.
          */
-        if (sessionId) {
+        if (
+          !exitConfirmedRef.current
+        ) {
           const {
-            error: sessionUpdateError,
+            error: sessionError,
           } = await supabase
             .from('game_sessions')
             .update({
               status: 'completed',
               winner_id:
                 result === 'win'
-                  ? playerId
+                  ? user.id
                   : null,
               result,
             })
-            .eq('id', sessionId)
-            .eq('created_by', playerId);
+            .eq(
+              'id',
+              activeSessionId,
+            )
+            .eq(
+              'created_by',
+              user.id,
+            );
 
-          if (sessionUpdateError) {
+          if (sessionError) {
             console.error(
-              'UPDATE GAME SESSION ERROR:',
-              sessionUpdateError,
+              'WORD SEARCH COMPLETE SESSION ERROR:',
+              sessionError,
             );
           }
         }
 
-        setScoreSaved(true);
+        scoreFinalizedRef.current =
+          true;
 
-        console.log(
-          'WORD SEARCH SCORE SAVED SUCCESSFULLY:',
-          points,
-        );
+        if (
+          !exitConfirmedRef.current
+        ) {
+          setScoreSaved(true);
+        }
       } catch (error) {
+        /**
+         * IMPORTANT:
+         *
+         * Do NOT permanently mark the score as finalized
+         * when the database insert fails.
+         *
+         * This allows the time-up effect to retry if necessary.
+         */
+        scoreFinalizedRef.current =
+          false;
+
         console.error(
           'WORD SEARCH SCORE SAVE ERROR:',
           error,
         );
-
-        /*
-         * We intentionally don't set scoreSaved on failure.
-         * That means the app can retry instead of permanently
-         * losing the score.
-         */
       } finally {
-        scoreSavingRef.current = false;
+        scoreSavingRef.current =
+          false;
       }
     },
-    [
-      difficulty,
-      genLevel,
-      scoreSaved,
-      sessionId,
-    ],
+    [difficulty, genLevel],
   );
 
-  /*
-   * Save score after winning.
+  /**
+   * TIMER
+   *
+   * The timer ONLY counts down here.
+   *
+   * When it reaches zero, it stops the game and changes
+   * secondsLeft to 0.
+   *
+   * The separate time-up effect below is responsible
+   * for saving the score.
    */
   useEffect(() => {
-    if (!showWin) return;
-
-    recordScore(foundWords.size, 'win');
-  }, [
-    showWin,
-    foundWords.size,
-    recordScore,
-  ]);
-
-  /*
-   * Save score when time runs out.
-   */
-  useEffect(() => {
-    if (!showTimeUp) return;
-
-    recordScore(foundWords.size, 'time_up');
-  }, [
-    showTimeUp,
-    foundWords.size,
-    recordScore,
-  ]);
-
-  /*
-   * Select/deselect a cell.
-   */
-  const handleCellPress = useCallback(
-    (index: number) => {
-      if (
-        !timerRunning ||
-        gameEndedRef.current
-      ) {
-        return;
-      }
-
-      setSelectedCells((previous) => {
-        const next = new Set(previous);
-
-        if (next.has(index)) {
-          next.delete(index);
-        } else {
-          next.add(index);
-        }
-
-        return next;
-      });
-    },
-    [timerRunning],
-  );
-
-  /*
-   * Check selected word.
-   */
-  const checkSelection = useCallback(() => {
     if (
       !timerRunning ||
       gameEndedRef.current ||
-      !puzzle
+      exitConfirmedRef.current
+    ) {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+
+      return;
+    }
+
+    timerRef.current =
+      setInterval(() => {
+        setSecondsLeft(
+          (current) => {
+            if (current <= 1) {
+              if (timerRef.current) {
+                clearInterval(
+                  timerRef.current,
+                );
+
+                timerRef.current = null;
+              }
+
+              gameEndedRef.current =
+                true;
+
+              setTimerRunning(false);
+
+              return 0;
+            }
+
+            return current - 1;
+          },
+        );
+      }, 1000);
+
+    return () => {
+      if (timerRef.current) {
+        clearInterval(
+          timerRef.current,
+        );
+
+        timerRef.current = null;
+      }
+    };
+  }, [timerRunning]);
+
+  /**
+   * TIME-UP FINALIZATION
+   *
+   * This is the important fix.
+   *
+   * When secondsLeft becomes 0:
+   *
+   * 1. Read foundWordsRef.current.
+   * 2. Calculate points from the words already found.
+   * 3. Save the score.
+   * 4. Mark the game session completed.
+   * 5. Show the Time's Up modal.
+   *
+   * Example:
+   * 6 words found = 60 points.
+   */
+  useEffect(() => {
+    if (
+      secondsLeft !== 0 ||
+      exitConfirmedRef.current ||
+      scoreFinalizedRef.current
     ) {
       return;
     }
 
-    if (selectedCells.size < 2) {
-      return;
-    }
+    const wordsFoundAtTimeUp =
+      foundWordsRef.current.size;
 
-    const selected = [...selectedCells];
+    setShowTimeUp(true);
 
-    const first = selected[0];
-    const last =
-      selected[selected.length - 1];
+    // Try more than once in case the first Supabase request is interrupted
+    // exactly when the timer reaches zero. The score is only finalized after
+    // the database insert succeeds, so a retry cannot intentionally replace a
+    // failed save with a completed/abandoned state.
+    let cancelled = false;
 
-    const r1 = Math.floor(first / gridSize);
-    const c1 = first % gridSize;
-
-    const r2 = Math.floor(last / gridSize);
-    const c2 = last % gridSize;
-
-    const dr = Math.sign(r2 - r1);
-    const dc = Math.sign(c2 - c1);
-
-    const len =
-      Math.max(
-        Math.abs(r2 - r1),
-        Math.abs(c2 - c1),
-      ) + 1;
-
-    if (len < 2) {
-      setSelectedCells(new Set());
-      return;
-    }
-
-    const cells: number[] = [];
-
-    for (let i = 0; i < len; i++) {
-      cells.push(
-        (r1 + dr * i) * gridSize +
-          (c1 + dc * i),
-      );
-    }
-
-    const word = cells
-      .map((index) => puzzle.grid[index])
-      .join('');
-
-    const reversed = word
-      .split('')
-      .reverse()
-      .join('');
-
-    for (const placement of puzzle.placements) {
-      if (
-        placement.word === word ||
-        placement.word === reversed
-      ) {
-        if (!foundWords.has(placement.word)) {
-          const newFound = new Set(foundWords);
-
-          newFound.add(placement.word);
-
-          setFoundWords(newFound);
-
-          if (
-            newFound.size ===
-            puzzle.placements.length
-          ) {
-            gameEndedRef.current = true;
-            setTimerRunning(false);
-            setShowWin(true);
-          }
+    const saveTimeUpScore = async () => {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        if (cancelled || exitConfirmedRef.current || scoreFinalizedRef.current) {
+          return;
         }
 
-        break;
+        await recordScore(wordsFoundAtTimeUp, 'loss');
+
+        if (scoreFinalizedRef.current) {
+          return;
+        }
+
+        if (attempt < 2) {
+          await new Promise((resolve) => setTimeout(resolve, 750));
+        }
       }
-    }
+    };
 
-    setSelectedCells(new Set());
-  }, [
-    foundWords,
-    gridSize,
-    puzzle,
-    selectedCells,
-    timerRunning,
-  ]);
+    void saveTimeUpScore();
 
-  /*
-   * Exit game.
-   */
-  const handleExitGame = async () => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-
-    setTimerRunning(false);
-    gameEndedRef.current = true;
-    setShowExitConfirm(false);
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (sessionId && user?.id) {
-      const { error } = await supabase
-        .from('game_sessions')
-        .update({
-          status: 'abandoned',
-          winner_id: null,
-          result: 'abandoned',
-        })
-        .eq('id', sessionId)
-        .eq('created_by', user.id);
-
-      if (error) {
-        console.error(
-          'ABANDON GAME SESSION ERROR:',
-          error,
-        );
-      }
-    }
-
-    router.replace('/modules/games');
-  };
-
-  /*
-   * Play another game.
-   */
-  const handlePlayAgain = () => {
-    router.replace({
-      pathname: '/modules/games/wordsearch',
-      params: {
-        difficulty,
-      },
-    });
-  };
+    return () => {
+      cancelled = true;
+    };
+  }, [secondsLeft, recordScore]);
 
   const currentScore =
-    foundWords.size * POINTS_PER_WORD;
+    foundWords.size *
+    POINTS_PER_WORD;
 
   const HEADER_HEIGHT = 74;
-  const WORDS_AREA_HEIGHT = 72;
-  const BUTTON_AREA_HEIGHT = 86;
-  const BODY_VERTICAL_PADDING = 24;
 
-  const availableGridHeight = Math.max(
-    120,
-    height -
-      HEADER_HEIGHT -
-      WORDS_AREA_HEIGHT -
-      BUTTON_AREA_HEIGHT -
-      BODY_VERTICAL_PADDING,
-  );
+  const WORDS_AREA_HEIGHT = 72;
+
+  const BOTTOM_CONTROLS_HEIGHT = 96;
+
+  const availableGridHeight =
+    Math.max(
+      120,
+      height -
+        HEADER_HEIGHT -
+        WORDS_AREA_HEIGHT -
+        BOTTOM_CONTROLS_HEIGHT -
+        24,
+    );
 
   const MAX_BOARD_SIZE = 520;
 
-  const availableGridWidth = Math.max(
-    120,
-    Math.min(width - 24, MAX_BOARD_SIZE),
-  );
-
-  const availableGridHeightCapped =
-    Math.min(
-      availableGridHeight,
-      MAX_BOARD_SIZE,
+  const availableGridWidth =
+    Math.max(
+      120,
+      Math.min(
+        width - 24,
+        MAX_BOARD_SIZE,
+      ),
     );
 
-  const cellSize = Math.max(
-    12,
-    Math.floor(
-      Math.min(
-        availableGridWidth,
-        availableGridHeightCapped,
-      ) / gridSize,
-    ),
-  );
+  const cellSize =
+    Math.max(
+      12,
+      Math.floor(
+        Math.min(
+          availableGridWidth,
+          Math.min(
+            availableGridHeight,
+            MAX_BOARD_SIZE,
+          ),
+        ) / gridSize,
+      ),
+    );
 
-  /*
-   * Initialization screen.
+  const getCellFromPosition =
+    useCallback(
+      (
+        locationX: number,
+        locationY: number,
+      ): number | null => {
+        if (!puzzle) {
+          return null;
+        }
+
+        const column =
+          Math.floor(
+            locationX / cellSize,
+          );
+
+        const row =
+          Math.floor(
+            locationY / cellSize,
+          );
+
+        if (
+          row < 0 ||
+          row >= gridSize ||
+          column < 0 ||
+          column >= gridSize
+        ) {
+          return null;
+        }
+
+        return (
+          row * gridSize +
+          column
+        );
+      },
+      [
+        cellSize,
+        gridSize,
+        puzzle,
+      ],
+    );
+
+  const buildDragSelection =
+    useCallback(
+      (
+        startIndex: number,
+        endIndex: number,
+      ) => {
+        const sr =
+          Math.floor(
+            startIndex / gridSize,
+          );
+
+        const sc =
+          startIndex % gridSize;
+
+        const er =
+          Math.floor(
+            endIndex / gridSize,
+          );
+
+        const ec =
+          endIndex % gridSize;
+
+        const rd = er - sr;
+
+        const cd = ec - sc;
+
+        const ar = Math.abs(rd);
+
+        const ac = Math.abs(cd);
+
+        if (ar === 0) {
+          const dc =
+            Math.sign(cd);
+
+          return Array.from(
+            { length: ac + 1 },
+            (_, i) =>
+              sr * gridSize +
+              sc +
+              dc * i,
+          );
+        }
+
+        if (ac === 0) {
+          const dr =
+            Math.sign(rd);
+
+          return Array.from(
+            { length: ar + 1 },
+            (_, i) =>
+              (sr + dr * i) *
+                gridSize +
+              sc,
+          );
+        }
+
+        const dr =
+          Math.sign(rd);
+
+        const dc =
+          Math.sign(cd);
+
+        const length =
+          Math.min(ar, ac) + 1;
+
+        return Array.from(
+          { length },
+          (_, i) =>
+            (sr + dr * i) *
+              gridSize +
+            (sc + dc * i),
+        );
+      },
+      [gridSize],
+    );
+
+  const handleDragStart =
+    useCallback(
+      (
+        x: number,
+        y: number,
+      ) => {
+        if (
+          !timerRunning ||
+          gameEndedRef.current ||
+          exitConfirmedRef.current ||
+          !puzzle
+        ) {
+          return;
+        }
+
+        const index =
+          getCellFromPosition(
+            x,
+            y,
+          );
+
+        if (index === null) {
+          return;
+        }
+
+        dragStartRef.current =
+          index;
+
+        setSelectedCells(
+          new Set([index]),
+        );
+      },
+      [
+        getCellFromPosition,
+        puzzle,
+        timerRunning,
+      ],
+    );
+
+  const handleDragMove =
+    useCallback(
+      (
+        x: number,
+        y: number,
+      ) => {
+        if (
+          dragStartRef.current ===
+            null ||
+          !timerRunning ||
+          gameEndedRef.current ||
+          exitConfirmedRef.current
+        ) {
+          return;
+        }
+
+        const index =
+          getCellFromPosition(
+            x,
+            y,
+          );
+
+        if (index === null) {
+          return;
+        }
+
+        setSelectedCells(
+          new Set(
+            buildDragSelection(
+              dragStartRef.current,
+              index,
+            ),
+          ),
+        );
+      },
+      [
+        buildDragSelection,
+        getCellFromPosition,
+        timerRunning,
+      ],
+    );
+
+  const handleDragEnd =
+    useCallback(() => {
+      dragStartRef.current =
+        null;
+    }, []);
+
+  const panResponder =
+    useMemo(
+      () =>
+        PanResponder.create({
+          onStartShouldSetPanResponder:
+            () => true,
+
+          onMoveShouldSetPanResponder:
+            () => true,
+
+          onPanResponderGrant:
+            (e) =>
+              handleDragStart(
+                e.nativeEvent
+                  .locationX,
+                e.nativeEvent
+                  .locationY,
+              ),
+
+          onPanResponderMove:
+            (e) =>
+              handleDragMove(
+                e.nativeEvent
+                  .locationX,
+                e.nativeEvent
+                  .locationY,
+              ),
+
+          onPanResponderRelease:
+            handleDragEnd,
+
+          onPanResponderTerminate:
+            handleDragEnd,
+
+          onPanResponderTerminationRequest:
+            () => false,
+        }),
+      [
+        handleDragEnd,
+        handleDragMove,
+        handleDragStart,
+      ],
+    );
+
+  const checkSelection =
+    useCallback(() => {
+      if (
+        !timerRunning ||
+        gameEndedRef.current ||
+        exitConfirmedRef.current ||
+        !puzzle ||
+        selectedCells.size < 2
+      ) {
+        return;
+      }
+
+      const selected = [
+        ...selectedCells,
+      ];
+
+      const first =
+        selected[0];
+
+      const last =
+        selected[
+          selected.length - 1
+        ];
+
+      const r1 =
+        Math.floor(
+          first / gridSize,
+        );
+
+      const c1 =
+        first % gridSize;
+
+      const r2 =
+        Math.floor(
+          last / gridSize,
+        );
+
+      const c2 =
+        last % gridSize;
+
+      const ard =
+        Math.abs(r2 - r1);
+
+      const acd =
+        Math.abs(c2 - c1);
+
+      const dr =
+        ard === 0
+          ? 0
+          : Math.sign(r2 - r1);
+
+      const dc =
+        acd === 0
+          ? 0
+          : Math.sign(c2 - c1);
+
+      const len =
+        ard === 0
+          ? acd + 1
+          : acd === 0
+            ? ard + 1
+            : Math.min(
+                ard,
+                acd,
+              ) + 1;
+
+      const cells: number[] =
+        [];
+
+      for (
+        let i = 0;
+        i < len;
+        i++
+      ) {
+        cells.push(
+          (r1 + dr * i) *
+            gridSize +
+            (c1 + dc * i),
+        );
+      }
+
+      const word = cells
+        .map(
+          (i) =>
+            puzzle.grid[i],
+        )
+        .join('');
+
+      const reversed =
+        word
+          .split('')
+          .reverse()
+          .join('');
+
+      const placement =
+        puzzle.placements.find(
+          (p) =>
+            p.word === word ||
+            p.word === reversed,
+        );
+
+      if (
+        placement &&
+        !foundWords.has(
+          placement.word,
+        )
+      ) {
+        const next =
+          new Set(foundWords);
+
+        next.add(
+          placement.word,
+        );
+
+        /**
+         * Update the ref immediately.
+         *
+         * This is critical because the timer may fire before
+         * React has rendered the new state.
+         */
+        foundWordsRef.current =
+          next;
+
+        setFoundWords(next);
+
+        setFoundCells(
+          (previous) => {
+            const nextCells =
+              new Set(previous);
+
+            placement.cells.forEach(
+              (cell) =>
+                nextCells.add(cell),
+            );
+
+            return nextCells;
+          },
+        );
+
+        /**
+         * All words found.
+         */
+        if (
+          next.size ===
+          puzzle.placements.length
+        ) {
+          gameEndedRef.current =
+            true;
+
+          if (timerRef.current) {
+            clearInterval(
+              timerRef.current,
+            );
+
+            timerRef.current =
+              null;
+          }
+
+          setTimerRunning(false);
+
+          void recordScore(
+            next.size,
+            'win',
+          );
+
+          setShowWin(true);
+        }
+      }
+
+      setSelectedCells(
+        new Set(),
+      );
+    }, [
+      foundWords,
+      gridSize,
+      puzzle,
+      recordScore,
+      selectedCells,
+      timerRunning,
+    ]);
+
+  /**
+   * Explicit exit remains ABANDONED.
    *
-   * The actual puzzle is NOT rendered until
-   * initialization has succeeded.
+   * This is different from time-up.
    */
+  const handleExitGame =
+    useCallback(async () => {
+      if (
+        exitConfirmedRef.current
+      ) {
+        return;
+      }
+
+      exitConfirmedRef.current =
+        true;
+
+      gameEndedRef.current =
+        true;
+
+      dragStartRef.current =
+        null;
+
+      if (timerRef.current) {
+        clearInterval(
+          timerRef.current,
+        );
+
+        timerRef.current = null;
+      }
+
+      setTimerRunning(false);
+
+      setShowExitConfirm(false);
+
+      setShowWin(false);
+
+      setShowTimeUp(false);
+
+      const {
+        data: { user },
+      } =
+        await supabase.auth.getUser();
+
+      const activeSessionId =
+        activeSessionIdRef.current;
+
+      if (
+        activeSessionId &&
+        user?.id
+      ) {
+        const { error } =
+          await supabase
+            .from('game_sessions')
+            .update({
+              status: 'abandoned',
+              winner_id: null,
+              result: 'abandoned',
+            })
+            .eq(
+              'id',
+              activeSessionId,
+            )
+            .eq(
+              'created_by',
+              user.id,
+            );
+
+        if (error) {
+          console.error(
+            'ABANDON GAME SESSION ERROR:',
+            error,
+          );
+        }
+      }
+
+      router.replace(
+        '/modules/games',
+      );
+    }, []);
+
+  const handlePlayAgain =
+    useCallback(
+      () =>
+        router.replace({
+          pathname:
+            '/modules/games/wordsearch',
+          params: {
+            difficulty,
+          },
+        }),
+      [difficulty],
+    );
+
   if (initializing) {
     return (
       <SafeAreaView
@@ -835,7 +1412,11 @@ export default function WordSearchScreen() {
           },
         ]}
       >
-        <View style={styles.initializing}>
+        <View
+          style={
+            styles.initializing
+          }
+        >
           <View
             style={[
               styles.initializingIcon,
@@ -849,7 +1430,8 @@ export default function WordSearchScreen() {
               style={[
                 styles.initializingIconText,
                 {
-                  color: colors.onAccent,
+                  color:
+                    colors.onAccent,
                 },
               ]}
             >
@@ -861,7 +1443,8 @@ export default function WordSearchScreen() {
             style={[
               styles.initializingTitle,
               {
-                color: colors.text,
+                color:
+                  colors.text,
               },
             ]}
           >
@@ -872,7 +1455,8 @@ export default function WordSearchScreen() {
             style={[
               styles.initializingSub,
               {
-                color: colors.muted,
+                color:
+                  colors.muted,
               },
             ]}
           >
@@ -883,13 +1467,10 @@ export default function WordSearchScreen() {
     );
   }
 
-  /*
-   * Initialization failed.
-   */
   if (
     initializationError ||
     !puzzle ||
-    words.length === 0
+    !words.length
   ) {
     return (
       <SafeAreaView
@@ -936,7 +1517,8 @@ export default function WordSearchScreen() {
             style={[
               styles.headerTitle,
               {
-                color: colors.accent,
+                color:
+                  colors.accent,
               },
             ]}
           >
@@ -944,16 +1526,23 @@ export default function WordSearchScreen() {
           </Text>
 
           <View
-            style={styles.headerRight}
+            style={
+              styles.headerRight
+            }
           />
         </View>
 
-        <View style={styles.errorState}>
+        <View
+          style={
+            styles.errorState
+          }
+        >
           <Text
             style={[
               styles.errorTitle,
               {
-                color: colors.text,
+                color:
+                  colors.text,
               },
             ]}
           >
@@ -964,7 +1553,8 @@ export default function WordSearchScreen() {
             style={[
               styles.errorMessage,
               {
-                color: colors.muted,
+                color:
+                  colors.muted,
               },
             ]}
           >
@@ -994,7 +1584,8 @@ export default function WordSearchScreen() {
               style={[
                 styles.checkBtnText,
                 {
-                  color: colors.onAccent,
+                  color:
+                    colors.onAccent,
                 },
               ]}
             >
@@ -1017,213 +1608,261 @@ export default function WordSearchScreen() {
       ]}
     >
       <View
-        style={[
-          styles.header,
-          {
-            borderBottomColor:
-              colors.border,
-          },
-        ]}
+        style={
+          styles.screenContent
+        }
       >
-        <Pressable
-          onPress={() =>
-            setShowExitConfirm(true)
-          }
-          style={[
-            styles.headerBack,
-            {
-              backgroundColor:
-                colors.accent,
-            },
-          ]}
-          hitSlop={10}
-        >
-          <ChevronLeft
-            color="#FFFFFF"
-            size={22}
-            strokeWidth={2.4}
-          />
-        </Pressable>
-
-        <Text
-          style={[
-            styles.headerTitle,
-            {
-              color: colors.accent,
-            },
-          ]}
-        >
-          WORD SEARCH
-        </Text>
-
         <View
-          style={styles.headerRight}
+          style={[
+            styles.header,
+            {
+              borderBottomColor:
+                colors.border,
+            },
+          ]}
         >
-          <View
+          <Pressable
+            onPress={() =>
+              setShowExitConfirm(
+                true,
+              )
+            }
             style={[
-              styles.levelPill,
+              styles.headerBack,
               {
                 backgroundColor:
-                  colors.section,
-                borderColor:
-                  colors.border,
+                  colors.accent,
               },
             ]}
+            hitSlop={10}
           >
-            <Text
-              style={[
-                styles.levelText,
-                {
-                  color: colors.muted,
-                },
-              ]}
-            >
-              {difficultyLabel(
-                difficulty,
-              )}
-            </Text>
-          </View>
+            <ChevronLeft
+              color="#FFFFFF"
+              size={22}
+              strokeWidth={2.4}
+            />
+          </Pressable>
 
           <Text
             style={[
-              styles.timerText,
+              styles.headerTitle,
               {
                 color:
-                  secondsLeft <= 20
-                    ? '#FF6B6B'
-                    : colors.text,
+                  colors.accent,
               },
             ]}
           >
-            {formatTime(secondsLeft)}
+            WORD SEARCH
           </Text>
-        </View>
-      </View>
 
-      <View style={styles.body}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={
-            false
-          }
-          style={styles.wordsScroll}
-          contentContainerStyle={
-            styles.wordsRow
-          }
-        >
-          {words.map((word) => {
-            const found =
-              foundWords.has(word);
-
-            return (
-              <View
-                key={word}
+          <View
+            style={
+              styles.headerRight
+            }
+          >
+            <View
+              style={[
+                styles.levelPill,
+                {
+                  backgroundColor:
+                    colors.section,
+                  borderColor:
+                    colors.border,
+                },
+              ]}
+            >
+              <Text
                 style={[
-                  styles.wordChip,
+                  styles.levelText,
                   {
-                    backgroundColor:
-                      found
-                        ? colors.accent
-                        : colors.section,
-                    borderColor:
-                      found
-                        ? colors.accent
-                        : colors.border,
+                    color:
+                      colors.muted,
                   },
                 ]}
               >
-                <Text
-                  style={[
-                    styles.wordChipText,
-                    {
-                      color: found
-                        ? colors.onAccent
-                        : colors.text,
-                    },
-                    found && {
-                      textDecorationLine:
-                        'line-through',
-                    },
-                  ]}
-                >
-                  {word}
-                </Text>
-              </View>
-            );
-          })}
-        </ScrollView>
+                {difficultyLabel(
+                  difficulty,
+                )}
+              </Text>
+            </View>
 
-        <View style={styles.gridWrap}>
-          <View
-            style={[
-              styles.grid,
-              {
-                width:
-                  cellSize * gridSize,
-              },
-            ]}
+            <Text
+              style={[
+                styles.timerText,
+                {
+                  color:
+                    secondsLeft <= 20
+                      ? '#FF6B6B'
+                      : colors.text,
+                },
+              ]}
+            >
+              {formatTime(
+                secondsLeft,
+              )}
+            </Text>
+          </View>
+        </View>
+
+        <View
+          style={
+            styles.gameArea
+          }
+        >
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={
+              false
+            }
+            style={
+              styles.wordsScroll
+            }
+            contentContainerStyle={
+              styles.wordsRow
+            }
           >
-            {puzzle.grid.map(
-              (letter, index) => {
-                const isSelected =
-                  selectedCells.has(index);
+            {words.map(
+              (word) => {
+                const found =
+                  foundWords.has(
+                    word,
+                  );
 
                 return (
-                  <Pressable
-                    key={index}
-                    onPress={() =>
-                      handleCellPress(
-                        index,
-                      )
-                    }
+                  <View
+                    key={word}
                     style={[
-                      styles.cell,
+                      styles.wordChip,
                       {
-                        width: cellSize,
-                        height: cellSize,
                         backgroundColor:
-                          isSelected
+                          found
                             ? colors.accent
                             : colors.section,
                         borderColor:
-                          colors.border,
+                          found
+                            ? colors.accent
+                            : colors.border,
                       },
                     ]}
                   >
                     <Text
                       style={[
-                        styles.cellText,
+                        styles.wordChipText,
                         {
                           color:
-                            isSelected
+                            found
                               ? colors.onAccent
                               : colors.text,
-                          fontSize:
-                            Math.max(
-                              9,
-                              cellSize *
-                                0.42,
-                            ),
+                        },
+                        found && {
+                          textDecorationLine:
+                            'line-through',
                         },
                       ]}
                     >
-                      {letter}
+                      {word}
                     </Text>
-                  </Pressable>
+                  </View>
                 );
               },
             )}
+          </ScrollView>
+
+          <View
+            style={
+              styles.gridWrap
+            }
+          >
+            <View
+              {...panResponder.panHandlers}
+              style={[
+                styles.grid,
+                {
+                  width:
+                    cellSize *
+                    gridSize,
+                  height:
+                    cellSize *
+                    gridSize,
+                },
+              ]}
+            >
+              {puzzle.grid.map(
+                (
+                  letter,
+                  index,
+                ) => {
+                  const highlighted =
+                    foundCells.has(
+                      index,
+                    ) ||
+                    selectedCells.has(
+                      index,
+                    );
+
+                  return (
+                    <View
+                      key={index}
+                      style={[
+                        styles.cell,
+                        {
+                          width:
+                            cellSize,
+                          height:
+                            cellSize,
+                          backgroundColor:
+                            highlighted
+                              ? colors.accent
+                              : colors.section,
+                          borderColor:
+                            colors.border,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.cellText,
+                          {
+                            color:
+                              highlighted
+                                ? colors.onAccent
+                                : colors.text,
+                            fontSize:
+                              Math.max(
+                                9,
+                                cellSize *
+                                  0.42,
+                              ),
+                          },
+                        ]}
+                      >
+                        {letter}
+                      </Text>
+                    </View>
+                  );
+                },
+              )}
+            </View>
           </View>
         </View>
 
         <View
-          style={styles.buttonArea}
+          style={[
+            styles.bottomControls,
+            {
+              backgroundColor:
+                colors.background,
+              borderTopColor:
+                colors.border,
+            },
+          ]}
         >
           <Text
             style={[
               styles.scoreText,
               {
-                color: colors.muted,
+                color:
+                  colors.muted,
               },
             ]}
           >
@@ -1240,7 +1879,9 @@ export default function WordSearchScreen() {
                   colors.accent,
               },
             ]}
-            onPress={checkSelection}
+            onPress={
+              checkSelection
+            }
           >
             <Text
               style={[
@@ -1257,17 +1898,24 @@ export default function WordSearchScreen() {
         </View>
       </View>
 
-      {/* Exit confirmation */}
+      {/* EXIT CONFIRMATION */}
+
       <Modal
-        visible={showExitConfirm}
+        visible={
+          showExitConfirm
+        }
         transparent
         animationType="fade"
         onRequestClose={() =>
-          setShowExitConfirm(false)
+          setShowExitConfirm(
+            false,
+          )
         }
       >
         <View
-          style={styles.modalOverlay}
+          style={
+            styles.modalOverlay
+          }
         >
           <View
             style={[
@@ -1280,11 +1928,13 @@ export default function WordSearchScreen() {
               },
             ]}
           >
+
             <Text
               style={[
                 styles.modalTitle,
                 {
-                  color: colors.text,
+                  color:
+                    colors.text,
                 },
               ]}
             >
@@ -1295,17 +1945,33 @@ export default function WordSearchScreen() {
               style={[
                 styles.modalSub,
                 {
-                  color: colors.muted,
+                  color:
+                    colors.muted,
                 },
               ]}
             >
-              Your game will end and no
-              points will be awarded for
-              this game.
+              Are you sure you want
+              to leave this game?
+            </Text>
+
+            <Text
+              style={[
+                styles.exitWarning,
+                {
+                  color:
+                    colors.muted,
+                },
+              ]}
+            >
+              Your current game will
+              be cancelled and no
+              points will be awarded.
             </Text>
 
             <View
-              style={styles.modalBtns}
+              style={
+                styles.modalBtns
+              }
             >
               <Pressable
                 style={[
@@ -1355,7 +2021,7 @@ export default function WordSearchScreen() {
                     },
                   ]}
                 >
-                  Exit
+                  Exit Game
                 </Text>
               </Pressable>
             </View>
@@ -1363,7 +2029,8 @@ export default function WordSearchScreen() {
         </View>
       </Modal>
 
-      {/* Win modal */}
+      {/* WIN */}
+
       <Modal
         visible={showWin}
         transparent
@@ -1371,7 +2038,9 @@ export default function WordSearchScreen() {
         onRequestClose={() => {}}
       >
         <View
-          style={styles.modalOverlay}
+          style={
+            styles.modalOverlay
+          }
         >
           <View
             style={[
@@ -1385,7 +2054,9 @@ export default function WordSearchScreen() {
             ]}
           >
             <Text
-              style={styles.modalEmoji}
+              style={
+                styles.modalEmoji
+              }
             >
               ⭐
             </Text>
@@ -1394,7 +2065,8 @@ export default function WordSearchScreen() {
               style={[
                 styles.modalTitle,
                 {
-                  color: colors.text,
+                  color:
+                    colors.text,
                 },
               ]}
             >
@@ -1405,7 +2077,8 @@ export default function WordSearchScreen() {
               style={[
                 styles.modalSub,
                 {
-                  color: colors.muted,
+                  color:
+                    colors.muted,
                 },
               ]}
             >
@@ -1416,7 +2089,9 @@ export default function WordSearchScreen() {
             </Text>
 
             <View
-              style={styles.modalBtns}
+              style={
+                styles.modalBtns
+              }
             >
               <Pressable
                 style={[
@@ -1451,10 +2126,8 @@ export default function WordSearchScreen() {
                       colors.border,
                   },
                 ]}
-                onPress={() =>
-                  router.replace(
-                    '/modules/games',
-                  )
+                onPress={
+                  handleExitGame
                 }
               >
                 <Text
@@ -1466,7 +2139,7 @@ export default function WordSearchScreen() {
                     },
                   ]}
                 >
-                  Exit
+                  Exit Game
                 </Text>
               </Pressable>
             </View>
@@ -1474,7 +2147,8 @@ export default function WordSearchScreen() {
         </View>
       </Modal>
 
-      {/* Time-up modal */}
+      {/* TIME UP */}
+
       <Modal
         visible={showTimeUp}
         transparent
@@ -1482,7 +2156,9 @@ export default function WordSearchScreen() {
         onRequestClose={() => {}}
       >
         <View
-          style={styles.modalOverlay}
+          style={
+            styles.modalOverlay
+          }
         >
           <View
             style={[
@@ -1496,7 +2172,9 @@ export default function WordSearchScreen() {
             ]}
           >
             <Text
-              style={styles.modalEmoji}
+              style={
+                styles.modalEmoji
+              }
             >
               ⏱️
             </Text>
@@ -1505,7 +2183,8 @@ export default function WordSearchScreen() {
               style={[
                 styles.modalTitle,
                 {
-                  color: colors.text,
+                  color:
+                    colors.text,
                 },
               ]}
             >
@@ -1516,7 +2195,8 @@ export default function WordSearchScreen() {
               style={[
                 styles.modalSub,
                 {
-                  color: colors.muted,
+                  color:
+                    colors.muted,
                 },
               ]}
             >
@@ -1526,7 +2206,9 @@ export default function WordSearchScreen() {
             </Text>
 
             <View
-              style={styles.modalBtns}
+              style={
+                styles.modalBtns
+              }
             >
               <Pressable
                 style={[
@@ -1561,10 +2243,8 @@ export default function WordSearchScreen() {
                       colors.border,
                   },
                 ]}
-                onPress={() =>
-                  router.replace(
-                    '/modules/games',
-                  )
+                onPress={
+                  handleExitGame
                 }
               >
                 <Text
@@ -1576,7 +2256,7 @@ export default function WordSearchScreen() {
                     },
                   ]}
                 >
-                  Exit
+                  Exit Game
                 </Text>
               </Pressable>
             </View>
@@ -1592,6 +2272,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
+  screenContent: {
+    flex: 1,
+    minHeight: 0,
+  },
+
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1600,6 +2285,7 @@ const styles = StyleSheet.create({
     paddingTop: 28,
     paddingVertical: 12,
     borderBottomWidth: 1,
+    flexShrink: 0,
   },
 
   headerBack: {
@@ -1642,15 +2328,16 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
 
-  body: {
+  gameArea: {
     flex: 1,
+    minHeight: 0,
     paddingHorizontal: 12,
     paddingTop: 10,
-    paddingBottom: 4,
   },
 
   wordsScroll: {
     flexGrow: 0,
+    flexShrink: 0,
     height: 72,
   },
 
@@ -1678,9 +2365,15 @@ const styles = StyleSheet.create({
 
   gridWrap: {
     flex: 1,
+    minHeight: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 8,
+    paddingVertical: 4,
+    transform: [
+      {
+        translateY: -50,
+      },
+    ],
   },
 
   grid: {
@@ -1699,12 +2392,21 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins-Bold',
   },
 
-  buttonArea: {
+  bottomControls: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 58,
+    height: 96,
+    paddingHorizontal: 12,
+    paddingTop: 20,
+    paddingBottom: 20,
     alignItems: 'center',
-    gap: 7,
-    paddingTop: 6,
-    paddingBottom: 8,
-    minHeight: 86,
+    justifyContent: 'flex-end',
+    gap: 6,
+    borderTopWidth: 1,
+    zIndex: 9999,
+    elevation: 9999,
   },
 
   scoreText: {
@@ -1719,6 +2421,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: '100%',
     minHeight: 48,
+    flexShrink: 0,
   },
 
   checkBtnText: {
@@ -1814,6 +2517,13 @@ const styles = StyleSheet.create({
     fontSize: 15,
     textAlign: 'center',
     lineHeight: 22,
+  },
+
+  exitWarning: {
+    fontFamily: 'Poppins-Regular',
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 20,
   },
 
   modalBtns: {

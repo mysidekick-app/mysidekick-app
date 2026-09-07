@@ -2228,12 +2228,6 @@ export default function PlannerScreen() {
             onSelectTask={
               handleCalendarTaskSelect
             }
-            onEditTask={
-              openEditTask
-            }
-            onDelete={
-              deleteTask
-            }
             onToggleSub={
               toggleSubtask
             }
@@ -2950,6 +2944,9 @@ export default function PlannerScreen() {
                 )}
               </View>
 
+            </ScrollView>
+
+            <View style={styles.saveButtonFooter}>
               {/* SAVE */}
 
               <Pressable
@@ -2985,7 +2982,8 @@ export default function PlannerScreen() {
                     : 'Add task'}
                 </Text>
               </Pressable>
-            </ScrollView>
+            </View>
+
           </View>
         </View>
       </Modal>
@@ -3098,8 +3096,6 @@ function TimelineView({
   isDark,
   selectedTaskId,
   onSelectTask,
-  onEditTask,
-  onDelete,
   onToggleSub,
   C,
 }: {
@@ -3108,12 +3104,6 @@ function TimelineView({
   isDark: boolean;
   selectedTaskId: string | null;
   onSelectTask: (
-    task: PlannerTask,
-  ) => void;
-  onEditTask: (
-    task: PlannerTask,
-  ) => void;
-  onDelete: (
     task: PlannerTask,
   ) => void;
   onToggleSub: (
@@ -3405,53 +3395,6 @@ function TimelineView({
                       </Text>
                     )}
 
-                    {/* EDIT BUTTON */}
-
-                    <Pressable
-                      onPress={() =>
-                        onEditTask(
-                          layout.task,
-                        )
-                      }
-                      hitSlop={6}
-                      style={[
-                        styles.timelineEditButton,
-                        {
-                          backgroundColor:
-                            'rgba(0,0,0,0.28)',
-                        },
-                      ]}
-                    >
-                      <Pencil
-                        color="#FFFFFF"
-                        size={13}
-                        strokeWidth={2.5}
-                      />
-                    </Pressable>
-
-                    {/* DELETE BUTTON */}
-
-                    <Pressable
-                      onPress={() =>
-                        onDelete(
-                          layout.task,
-                        )
-                      }
-                      hitSlop={6}
-                      style={[
-                        styles.timelineDeleteButton,
-                        {
-                          backgroundColor:
-                            'rgba(0,0,0,0.28)',
-                        },
-                      ]}
-                    >
-                      <Trash2
-                        color="#FFFFFF"
-                        size={13}
-                        strokeWidth={2.5}
-                      />
-                    </Pressable>
                   </Pressable>
                 );
               },
@@ -4516,7 +4459,7 @@ const styles =
 
     timelineEditButton: {
       position: 'absolute',
-      top: 2,
+      top: 20,
       right: 3,
       width: 18,
       height: 18,
@@ -4763,25 +4706,17 @@ const styles =
 
     fab: {
       position: 'absolute',
-      bottom: 24,
-      alignSelf:
-        'center',
+      bottom: 82,
+      alignSelf: 'center',
       width: 56,
       height: 56,
       borderRadius: 28,
-      alignItems:
-        'center',
-      justifyContent:
-        'center',
-      shadowColor:
-        '#000',
-      shadowOpacity:
-        0.25,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOpacity: 0.25,
       shadowRadius: 8,
-      shadowOffset: {
-        width: 0,
-        height: 4,
-      },
+      shadowOffset: { width: 0, height: 4 },
       elevation: 6,
     },
 
@@ -4961,7 +4896,12 @@ const styles =
       paddingVertical: 14,
       alignItems:
         'center',
-      marginTop: 22,
+      marginTop: 0,
+    },
+
+    saveButtonFooter: {
+      paddingTop: 10,
+      backgroundColor: 'transparent',
     },
 
     saveButtonDisabled: {

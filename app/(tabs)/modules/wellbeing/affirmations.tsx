@@ -8,7 +8,7 @@ import {
   View,
 } from 'react-native';
 import { router } from 'expo-router';
-import { Bell, ChevronLeft } from 'lucide-react-native';
+import { ChevronLeft, MoreVertical } from 'lucide-react-native';
 import { useApp } from '@/components/AppProvider';
 import { supabase } from '@/lib/supabase';
 
@@ -93,22 +93,28 @@ function todayDate(): string {
 
 function pickRandomIndex(exclude: number | null): number {
   if (AFFIRMATIONS.length === 1) return 0;
+
   let idx = Math.floor(Math.random() * AFFIRMATIONS.length);
+
   if (exclude !== null && AFFIRMATIONS.length > 1) {
     let guard = 0;
+
     while (idx === exclude && guard < 12) {
       idx = Math.floor(Math.random() * AFFIRMATIONS.length);
       guard += 1;
     }
   }
+
   return idx;
 }
 
 function formatCountdown(remainingMs: number): string {
   if (remainingMs <= 0) return 'New affirmation ready';
+
   const totalMinutes = Math.floor(remainingMs / (60 * 1000));
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
+
   return `New affirmation in ${hours}h ${minutes}m`;
 }
 
@@ -128,12 +134,14 @@ export default function AffirmationsScreen() {
   const [saving, setSaving] = useState<boolean>(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState<boolean>(false);
 
   /* ---- persist affirmation to wellbeing_entries ---- */
   const saveAffirmation = useCallback(async (text: string) => {
     setSaving(true);
     setSaveMsg(null);
     setError(null);
+
     const { error: upsertErr } = await supabase
       .from('wellbeing_entries')
       .upsert(
@@ -150,6 +158,7 @@ export default function AffirmationsScreen() {
     } else {
       setSaveMsg('Saved.');
     }
+
     setSaving(false);
   }, []);
 
@@ -158,12 +167,15 @@ export default function AffirmationsScreen() {
     (opts?: { fromAuto?: boolean }) => {
       const nextIdx = pickRandomIndex(affirmationIdx);
       const nextText = AFFIRMATIONS[nextIdx];
+
       setAffirmationIdx(nextIdx);
       setAffirmation(nextText);
       setLastGenerated(Date.now());
       setSaveMsg(null);
       setError(null);
+
       void saveAffirmation(nextText);
+
       if (opts?.fromAuto) {
         // silent auto-generation
       }
@@ -174,9 +186,11 @@ export default function AffirmationsScreen() {
   /* ---- on mount: auto-generate if 5 hours have passed ---- */
   useEffect(() => {
     const elapsed = Date.now() - lastGenerated;
+
     if (elapsed >= REGEN_INTERVAL_MS) {
       generateNew({ fromAuto: true });
     }
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -184,7 +198,8 @@ export default function AffirmationsScreen() {
   useEffect(() => {
     const interval = setInterval(() => {
       setNow(Date.now());
-    }, 30 * 1000); // update every 30s
+    }, 30 * 1000);
+
     return () => clearInterval(interval);
   }, []);
 
@@ -195,24 +210,64 @@ export default function AffirmationsScreen() {
 
   const countdownText = formatCountdown(remainingMs);
 
+  const openSettings = useCallback(() => {
+    setMenuOpen(false);
+    router.push('/(tabs)/profile');
+  }, []);
+
   /* ---------------------------------------------------------------- */
   return (
     <View style={styles.safe}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: 28 }]}>
         <Pressable
-          onPress={() => router.push('/modules')}
+          onPress={() => router.push('/(tabs)/modules/wellbeing')}
           style={[styles.backBtn, { backgroundColor: accent }]}
           hitSlop={12}
           accessibilityLabel="Go back"
         >
           <ChevronLeft color="#FFFFFF" size={22} strokeWidth={2.4} />
         </Pressable>
-        <Text style={styles.headerTitle}>AFFIRMATIONS</Text>
-        <Pressable style={styles.bellBtn} hitSlop={12} accessibilityLabel="Notifications">
-          <Bell color={COLORS.text} size={20} />
+
+        <View style={styles.headerTitleWrap}>
+          <Text style={styles.headerTitle}>AFFIRMATIONS</Text>
+        </View>
+
+        <Pressable
+          onPress={() => setMenuOpen(prev => !prev)}
+          style={styles.menuBtn}
+          hitSlop={12}
+          accessibilityLabel="Open settings menu"
+        >
+          <MoreVertical
+            color={COLORS.text}
+            size={22}
+            strokeWidth={2.3}
+          />
         </Pressable>
       </View>
+
+      {menuOpen ? (
+        <View
+          style={[
+            styles.menu,
+            {
+              backgroundColor: COLORS.card,
+              borderColor: COLORS.cardBorder,
+            },
+          ]}
+        >
+          <Pressable
+            onPress={openSettings}
+            style={({ pressed }) => [
+              styles.menuItem,
+              pressed && styles.menuItemPressed,
+            ]}
+          >
+            <Text style={styles.menuItemText}>Settings</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <ScrollView
         contentContainerStyle={styles.scroll}
@@ -233,6 +288,7 @@ export default function AffirmationsScreen() {
         {saveMsg ? (
           <Text style={[styles.saveMsg, { color: accent }]}>{saveMsg}</Text>
         ) : null}
+
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
         {/* Spacer pushes button + countdown toward the bottom */}
@@ -256,7 +312,14 @@ export default function AffirmationsScreen() {
           {saving ? (
             <ActivityIndicator size="small" color={onAccent} />
           ) : (
-            <Text style={[styles.generateBtnText, { color: onAccent }]}>GENERATE NEW AFFIRMATION</Text>
+            <Text
+              style={[
+                styles.generateBtnText,
+                { color: onAccent },
+              ]}
+            >
+              GENERATE NEW AFFIRMATION
+            </Text>
           )}
         </Pressable>
       </ScrollView>
@@ -268,9 +331,13 @@ export default function AffirmationsScreen() {
 /* Styles                                                              */
 /* ------------------------------------------------------------------ */
 type Palette = typeof DARK_PALETTE;
+
 function makeStyles(C: Palette) {
   return StyleSheet.create({
-    safe: { flex: 1, backgroundColor: C.bg },
+    safe: {
+      flex: 1,
+      backgroundColor: C.bg,
+    },
 
     /* Header */
     header: {
@@ -281,7 +348,10 @@ function makeStyles(C: Palette) {
       paddingVertical: 12,
       borderBottomWidth: 1,
       borderBottomColor: C.divider,
+      position: 'relative',
+      zIndex: 20,
     },
+
     backBtn: {
       width: 38,
       height: 38,
@@ -289,24 +359,66 @@ function makeStyles(C: Palette) {
       alignItems: 'center',
       justifyContent: 'center',
     },
+
+    headerTitleWrap: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+
     headerTitle: {
       fontFamily: FONT_XB,
       fontSize: 16,
       letterSpacing: 1.4,
       color: C.text,
+      textAlign: 'center',
     },
-    bellBtn: {
+
+    menuBtn: {
       width: 38,
       height: 38,
       alignItems: 'center',
       justifyContent: 'center',
     },
 
+    menu: {
+      position: 'absolute',
+      top: 76,
+      right: 14,
+      minWidth: 150,
+      borderWidth: 1,
+      borderRadius: 14,
+      paddingVertical: 6,
+      zIndex: 1000,
+      elevation: 8,
+      shadowOffset: {
+        width: 0,
+        height: 4,
+      },
+      shadowOpacity: 0.18,
+      shadowRadius: 10,
+    },
+
+    menuItem: {
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+    },
+
+    menuItemPressed: {
+      opacity: 0.6,
+    },
+
+    menuItemText: {
+      fontFamily: FONT_MEDIUM,
+      fontSize: 13.5,
+      color: C.text,
+    },
+
     /* Scroll */
     scroll: {
       flexGrow: 1,
       padding: 20,
-      paddingBottom: 40,
+      paddingBottom: 110,
       justifyContent: 'center',
     },
 
@@ -330,6 +442,7 @@ function makeStyles(C: Palette) {
       paddingTop: 26,
       overflow: 'hidden',
     },
+
     cardAccent: {
       position: 'absolute',
       top: 0,
@@ -337,6 +450,7 @@ function makeStyles(C: Palette) {
       right: 0,
       height: 4,
     },
+
     affirmationText: {
       fontFamily: FONT_MEDIUM,
       fontSize: 18,
@@ -352,6 +466,7 @@ function makeStyles(C: Palette) {
       marginTop: 14,
       textAlign: 'center',
     },
+
     errorText: {
       fontFamily: FONT_MEDIUM,
       fontSize: 12.5,
@@ -383,13 +498,17 @@ function makeStyles(C: Palette) {
       justifyContent: 'center',
       paddingVertical: 16,
       borderRadius: 14,
+      marginBottom: 12,
     },
+
     generateBtnDisabled: {
       opacity: 0.5,
     },
+
     generateBtnPressed: {
       opacity: 0.82,
     },
+
     generateBtnText: {
       fontFamily: FONT_BOLD,
       fontSize: 13,

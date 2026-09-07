@@ -35,24 +35,29 @@ import {
   Play,
   Send,
   Square,
-  Tag,
   X,
 } from 'lucide-react-native';
 
 import { useApp } from '@/components/AppProvider';
 import { supabase } from '@/lib/supabase';
+
 import {
   ensureDirectConversation,
-  getConversationReadMap,
   loadChatMessages,
   markConversationRead,
   sendChatMessage,
 } from './chatHelpers';
 
+/*
+ * Poppins
+ *
+ * These names match the font aliases registered in app/_layout.tsx.
+ */
 const FONT = 'Poppins-Regular';
 const FONT_MED = 'Poppins-Medium';
 const FONT_SEMI = 'Poppins-SemiBold';
 const FONT_BOLD = 'Poppins-Bold';
+const FONT_EXTRA_BOLD = 'Poppins-ExtraBold';
 
 type Profile = {
   user_id: string;
@@ -66,7 +71,11 @@ type Profile = {
   profile_title?: string | null;
 } | null;
 
-type AttachmentType = 'image' | 'video' | 'audio' | 'document';
+type AttachmentType =
+  | 'image'
+  | 'video'
+  | 'audio'
+  | 'document';
 
 type Message = {
   id: string;
@@ -79,59 +88,34 @@ type Message = {
   attachment_name?: string | null;
 };
 
-type AttachmentOption = {
-  key: 'image' | 'audio' | 'document' | 'poll' | 'event';
-  label: string;
-  Icon: typeof ImageIcon;
-};
-
-const ATTACHMENT_OPTIONS: AttachmentOption[] = [
-  {
-    key: 'image',
-    label: 'Photo',
-    Icon: ImageIcon,
-  },
-  {
-    key: 'audio',
-    label: 'Audio',
-    Icon: Mic,
-  },
-  {
-    key: 'document',
-    label: 'Document',
-    Icon: FileText,
-  },
-  {
-    key: 'poll',
-    label: 'Poll',
-    Icon: BarChart3,
-  },
-  {
-    key: 'event',
-    label: 'Event',
-    Icon: Calendar,
-  },
-];
-
 const SYSTEM_CHAT_TITLES: Record<string, string> = {
   sidekick: 'Sidekick',
 };
 
 export default function ChatDetailScreen() {
-  const { id, from } = useLocalSearchParams<{ id: string; from?: string }>();
+  const { id, from } =
+    useLocalSearchParams<{
+      id: string;
+      from?: string;
+    }>();
 
   const appContext = useApp() as any;
+
   const {
     isDark,
     accentForeground,
-    accentWash,
     onAccent,
   } = appContext;
-  const isBlackDark = isDark && appContext.accent_family === 'black';
 
-  const normalizedId = (id ?? '').toLowerCase();
+  const isBlackDark =
+    isDark &&
+    appContext.accent_family === 'black';
 
-  const isSidekick = normalizedId === 'sidekick';
+  const normalizedId =
+    (id ?? '').toLowerCase();
+
+  const isSidekick =
+    normalizedId === 'sidekick';
 
   const colors = isDark
     ? {
@@ -149,722 +133,1318 @@ export default function ChatDetailScreen() {
         muted: '#8F8A82',
       };
 
-  const [profile, setProfile] = useState<Profile>(null);
-  const [profileLoading, setProfileLoading] = useState(!isSidekick);
-  const [profileError, setProfileError] = useState<string | null>(null);
+  const [profile, setProfile] =
+    useState<Profile>(null);
 
-  const [myId, setMyId] = useState<string | null>(null);
-  const [otherUserActive, setOtherUserActive] = useState(false);
+  const [profileLoading, setProfileLoading] =
+    useState(!isSidekick);
 
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [messagesLoading, setMessagesLoading] = useState(!isSidekick);
-  const [messagesError, setMessagesError] = useState<string | null>(null);
+  const [profileError, setProfileError] =
+    useState<string | null>(null);
 
-  const [draft, setDraft] = useState('');
-  const [sending, setSending] = useState(false);
+  const [myId, setMyId] =
+    useState<string | null>(null);
 
-  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [otherUserActive, setOtherUserActive] =
+    useState(false);
 
-  const [pendingAttachment, setPendingAttachment] = useState<{
-    uri: string;
-    type: AttachmentType;
-    name: string;
-    mimeType: string;
-  } | null>(null);
-  const [attachmentReviewOpen, setAttachmentReviewOpen] = useState(false);
-  const [attachmentSending, setAttachmentSending] = useState(false);
-  const [reviewPlaying, setReviewPlaying] = useState(false);
+  const [messages, setMessages] =
+    useState<Message[]>([]);
 
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [messagesLoading, setMessagesLoading] =
+    useState(!isSidekick);
 
-  const [playingMessageId, setPlayingMessageId] = useState<string | null>(
-    null,
+  const [messagesError, setMessagesError] =
+    useState<string | null>(null);
+
+  const [draft, setDraft] =
+    useState('');
+
+  const [sending, setSending] =
+    useState(false);
+
+  const [uploadingAttachment, setUploadingAttachment] =
+    useState(false);
+
+  const [pendingAttachment, setPendingAttachment] =
+    useState<{
+      uri: string;
+      type: AttachmentType;
+      name: string;
+      mimeType: string;
+    } | null>(null);
+
+  const [attachmentReviewOpen, setAttachmentReviewOpen] =
+    useState(false);
+
+  const [attachmentSending, setAttachmentSending] =
+    useState(false);
+
+  const [reviewPlaying, setReviewPlaying] =
+    useState(false);
+
+  const [isRecording, setIsRecording] =
+    useState(false);
+
+  const [recordingSeconds, setRecordingSeconds] =
+    useState(0);
+
+  const [playingMessageId, setPlayingMessageId] =
+    useState<string | null>(null);
+
+  const recordingRef =
+    useRef<Audio.Recording | null>(null);
+
+  const recordingTimerRef =
+    useRef<ReturnType<typeof setInterval> | null>(
+      null,
+    );
+
+  const soundRef =
+    useRef<Audio.Sound | null>(null);
+
+  const [menuOpen, setMenuOpen] =
+    useState(false);
+
+  const [reportOpen, setReportOpen] =
+    useState(false);
+
+  const [reportReason, setReportReason] =
+    useState('');
+
+  const [reportSubmitting, setReportSubmitting] =
+    useState(false);
+
+  const [reportSuccess, setReportSuccess] =
+    useState(false);
+
+  const [groupName, setGroupName] =
+    useState('');
+
+  const [groupSubmitting, setGroupSubmitting] =
+    useState(false);
+
+  const [groupSuccess, setGroupSuccess] =
+    useState<string | null>(null);
+
+  const [pollOpen, setPollOpen] =
+    useState(false);
+
+  const [eventOpen, setEventOpen] =
+    useState(false);
+
+  const [tagModalOpen, setTagModalOpen] =
+    useState(false);
+
+  const [chatTags, setChatTags] =
+    useState<
+      {
+        id: string;
+        name: string;
+      }[]
+    >([]);
+
+  const [assignedTagIds, setAssignedTagIds] =
+    useState<string[]>([]);
+
+  const [pollQuestion, setPollQuestion] =
+    useState('');
+
+  const [pollOptions, setPollOptions] =
+    useState<string[]>(['', '']);
+
+  const [eventTitle, setEventTitle] =
+    useState('');
+
+  const [eventDate, setEventDate] =
+    useState('');
+
+  const [eventTime, setEventTime] =
+    useState('');
+
+  const [eventDesc, setEventDesc] =
+    useState('');
+
+  const [toast, setToast] =
+    useState<string | null>(null);
+
+  const [actionLoading, setActionLoading] =
+    useState<string | null>(null);
+
+  const listRef =
+    useRef<FlatList<Message>>(null);
+
+  const [conversationId, setConversationId] =
+    useState('');
+
+  const showToast = useCallback(
+    (message: string) => {
+      setToast(message);
+
+      setTimeout(() => {
+        setToast(null);
+      }, 2500);
+    },
+    [],
   );
 
-  const recordingRef = useRef<Audio.Recording | null>(null);
-  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(
-    null,
+  const scrollToBottom =
+    useCallback((animated = true) => {
+      setTimeout(() => {
+        listRef.current?.scrollToEnd({
+          animated,
+        });
+      }, 60);
+    }, []);
+
+  /*
+   * TAGS
+   */
+  const loadChatTags = useCallback(
+    async () => {
+      if (!myId) return;
+
+      const [
+        { data: tags },
+        { data: assignments },
+      ] = await Promise.all([
+        supabase
+          .from('social_chat_tags')
+          .select('id, name')
+          .eq('user_id', myId)
+          .order('created_at', {
+            ascending: true,
+          }),
+
+        supabase
+          .from('social_chat_tag_assignments')
+          .select('tag_id')
+          .eq('user_id', myId)
+          .eq('chat_id', id ?? ''),
+      ]);
+
+      setChatTags(
+        (tags ?? []) as {
+          id: string;
+          name: string;
+        }[],
+      );
+
+      setAssignedTagIds(
+        (assignments ?? []).map(
+          (row: any) => row.tag_id,
+        ),
+      );
+    },
+    [myId, id],
   );
-  const soundRef = useRef<Audio.Sound | null>(null);
 
-  const [menuOpen, setMenuOpen] = useState(false);
+  const toggleChatTag =
+    async (tagId: string) => {
+      if (!myId || !id) return;
 
-  const [reportOpen, setReportOpen] = useState(false);
+      const assigned =
+        assignedTagIds.includes(tagId);
 
-  const [reportReason, setReportReason] = useState('');
-  const [reportSubmitting, setReportSubmitting] = useState(false);
-  const [reportSuccess, setReportSuccess] = useState(false);
+      if (assigned) {
+        const { error } =
+          await supabase
+            .from(
+              'social_chat_tag_assignments',
+            )
+            .delete()
+            .eq('user_id', myId)
+            .eq('chat_id', id)
+            .eq('tag_id', tagId);
 
-  const [groupName, setGroupName] = useState('');
-  const [groupSubmitting, setGroupSubmitting] = useState(false);
-  const [groupSuccess, setGroupSuccess] = useState<string | null>(null);
+        if (error) {
+          showToast(
+            error.message ||
+              'Could not remove tag.',
+          );
+          return;
+        }
 
-  const [pollOpen, setPollOpen] = useState(false);
-  const [eventOpen, setEventOpen] = useState(false);
-  const [tagModalOpen, setTagModalOpen] = useState(false);
-  const [chatTags, setChatTags] = useState<{ id: string; name: string }[]>([]);
-  const [assignedTagIds, setAssignedTagIds] = useState<string[]>([]);
+        setAssignedTagIds(
+          previous =>
+            previous.filter(
+              value => value !== tagId,
+            ),
+        );
+      } else {
+        const { error } =
+          await supabase
+            .from(
+              'social_chat_tag_assignments',
+            )
+            .insert({
+              user_id: myId,
+              chat_id: id,
+              tag_id: tagId,
+            });
 
-  const [pollQuestion, setPollQuestion] = useState('');
-  const [pollOptions, setPollOptions] = useState<string[]>(['', '']);
+        if (
+          error &&
+          error.code !== '23505'
+        ) {
+          showToast(
+            error.message ||
+              'Could not add tag.',
+          );
+          return;
+        }
 
-  const [eventTitle, setEventTitle] = useState('');
-  const [eventDate, setEventDate] = useState('');
-  const [eventTime, setEventTime] = useState('');
-  const [eventDesc, setEventDesc] = useState('');
+        setAssignedTagIds(
+          previous =>
+            previous.includes(tagId)
+              ? previous
+              : [...previous, tagId],
+        );
+      }
+    };
 
-  const [toast, setToast] = useState<string | null>(null);
-  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  /*
+   * PROFILE
+   */
+  const loadProfile =
+    useCallback(async () => {
+      if (
+        isSidekick ||
+        SYSTEM_CHAT_TITLES[
+          normalizedId
+        ]
+      ) {
+        setProfile(null);
+        setProfileLoading(false);
+        return;
+      }
 
-  const listRef = useRef<FlatList<Message>>(null);
+      if (!id) {
+        setProfileLoading(false);
+        return;
+      }
 
-  const [conversationId, setConversationId] = useState<string>('');
+      setProfileLoading(true);
+      setProfileError(null);
 
-  const showToast = useCallback((message: string) => {
-    setToast(message);
+      const { data, error } =
+        await supabase
+          .from('social_profiles')
+          .select('*')
+          .eq('user_id', id)
+          .maybeSingle();
 
-    setTimeout(() => {
-      setToast(null);
-    }, 2500);
-  }, []);
+      if (error) {
+        console.error(
+          'Profile load error:',
+          error,
+        );
 
-  const scrollToBottom = useCallback((animated = true) => {
-    setTimeout(() => {
-      listRef.current?.scrollToEnd({ animated });
-    }, 60);
-  }, []);
+        setProfile(null);
+        setProfileError(
+          'Could not load profile.',
+        );
+      } else {
+        setProfile(
+          data as Profile,
+        );
+      }
 
-  const loadChatTags = useCallback(async () => {
-    if (!myId) return;
-    const [{ data: tags }, { data: assignments }] = await Promise.all([
-      supabase.from('social_chat_tags').select('id, name').eq('user_id', myId).order('created_at', { ascending: true }),
-      supabase.from('social_chat_tag_assignments').select('tag_id').eq('user_id', myId).eq('chat_id', id ?? ''),
+      setProfileLoading(false);
+    }, [
+      id,
+      isSidekick,
+      normalizedId,
     ]);
-    setChatTags((tags ?? []) as { id: string; name: string }[]);
-    setAssignedTagIds((assignments ?? []).map((row: any) => row.tag_id));
-  }, [myId, id]);
-
-  const toggleChatTag = async (tagId: string) => {
-    if (!myId || !id) return;
-    const assigned = assignedTagIds.includes(tagId);
-    if (assigned) {
-      const { error } = await supabase.from('social_chat_tag_assignments').delete().eq('user_id', myId).eq('chat_id', id).eq('tag_id', tagId);
-      if (error) { showToast(error.message || 'Could not remove tag.'); return; }
-      setAssignedTagIds((previous) => previous.filter((value) => value !== tagId));
-    } else {
-      const { error } = await supabase.from('social_chat_tag_assignments').insert({ user_id: myId, chat_id: id, tag_id: tagId });
-      if (error && error.code !== '23505') { showToast(error.message || 'Could not add tag.'); return; }
-      setAssignedTagIds((previous) => previous.includes(tagId) ? previous : [...previous, tagId]);
-    }
-  };
 
   /*
-   * Load the person being chatted with.
+   * MESSAGES
    */
-  const loadProfile = useCallback(async () => {
-    if (isSidekick || SYSTEM_CHAT_TITLES[normalizedId]) {
-      setProfile(null);
-      setProfileLoading(false);
-      return;
-    }
+  const loadMessages =
+    useCallback(async () => {
+      if (isSidekick) {
+        setMessages([]);
+        setMessagesLoading(false);
+        setMessagesError(null);
+        return;
+      }
 
-    if (!id) {
-      setProfileLoading(false);
-      return;
-    }
+      if (!conversationId) {
+        setMessagesLoading(false);
+        return;
+      }
 
-    setProfileLoading(true);
-    setProfileError(null);
-
-    const { data, error } = await supabase
-      .from('social_profiles')
-      .select('*')
-      .eq('user_id', id)
-      .maybeSingle();
-
-    if (error) {
-      console.error('Profile load error:', error);
-      setProfile(null);
-      setProfileError('Could not load profile.');
-    } else {
-      setProfile(data as Profile);
-    }
-
-    setProfileLoading(false);
-  }, [id, isSidekick, normalizedId]);
-
-  /*
-   * Load direct messages.
-   *
-   * Sidekick does not use social_messages.
-   */
-  const loadMessages = useCallback(async () => {
-    if (isSidekick) {
-      setMessages([]);
-      setMessagesLoading(false);
+      setMessagesLoading(true);
       setMessagesError(null);
-      return;
-    }
 
-    if (!conversationId) {
+      const result =
+        await loadChatMessages(
+          conversationId,
+        );
+
+      if (result.error) {
+        console.error(
+          'Messages load error:',
+          result.error,
+        );
+
+        setMessagesError(
+          'Could not load messages.',
+        );
+      } else {
+        setMessages(
+          result.messages as Message[],
+        );
+      }
+
       setMessagesLoading(false);
-      return;
-    }
-
-    setMessagesLoading(true);
-    setMessagesError(null);
-    const result = await loadChatMessages(conversationId);
-    if (result.error) {
-      console.error('Messages load error:', result.error);
-      setMessagesError('Could not load messages.');
-    } else {
-      setMessages(result.messages as Message[]);
-    }
-    setMessagesLoading(false);
-  }, [conversationId, isSidekick]);
+    }, [
+      conversationId,
+      isSidekick,
+    ]);
 
   /*
-   * Load current authenticated user.
+   * CURRENT USER
    */
   useEffect(() => {
     let mounted = true;
 
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (mounted) {
-        setMyId(user?.id ?? null);
-      }
-    });
+    supabase.auth
+      .getUser()
+      .then(
+        ({
+          data: { user },
+        }) => {
+          if (mounted) {
+            setMyId(
+              user?.id ?? null,
+            );
+          }
+        },
+      );
 
     return () => {
       mounted = false;
     };
   }, []);
 
+  /*
+   * PRESENCE
+   */
   useEffect(() => {
-    if (!myId || !id || isSidekick || SYSTEM_CHAT_TITLES[normalizedId]) {
+    if (
+      !myId ||
+      !id ||
+      isSidekick ||
+      SYSTEM_CHAT_TITLES[
+        normalizedId
+      ]
+    ) {
       setOtherUserActive(false);
       return;
     }
 
     let cancelled = false;
-    const presenceTopic = `chat-presence-${[myId, id].sort().join('-')}`;
-    const channel = supabase.channel(presenceTopic, {
-      config: { presence: { key: myId } },
-    });
+
+    const presenceTopic =
+      `chat-presence-${[
+        myId,
+        id,
+      ].sort().join('-')}`;
+
+    const channel =
+      supabase.channel(
+        presenceTopic,
+        {
+          config: {
+            presence: {
+              key: myId,
+            },
+          },
+        },
+      );
 
     const checkPresence = () => {
       if (cancelled) return;
-      const state = channel.presenceState() as Record<string, unknown[]>;
-      setOtherUserActive(Array.isArray(state[id]) && state[id].length > 0);
+
+      const state =
+        channel.presenceState() as Record<
+          string,
+          unknown[]
+        >;
+
+      setOtherUserActive(
+        Array.isArray(
+          state[id],
+        ) &&
+          state[id].length > 0,
+      );
     };
 
-    void channel.subscribe(async (status) => {
-      if (status === 'SUBSCRIBED' && !cancelled) {
-        try {
-          await channel.track({
-            user_id: myId,
-            online_at: new Date().toISOString(),
-          });
-          checkPresence();
-        } catch (error) {
-          console.warn('Presence track failed:', error);
-        }
-      }
-    });
+    void channel.subscribe(
+      async status => {
+        if (
+          status === 'SUBSCRIBED' &&
+          !cancelled
+        ) {
+          try {
+            await channel.track({
+              user_id: myId,
+              online_at:
+                new Date().toISOString(),
+            });
 
-    const interval = setInterval(checkPresence, 5000);
+            checkPresence();
+          } catch (error) {
+            console.warn(
+              'Presence track failed:',
+              error,
+            );
+          }
+        }
+      },
+    );
+
+    const interval =
+      setInterval(
+        checkPresence,
+        5000,
+      );
 
     return () => {
       cancelled = true;
       clearInterval(interval);
       setOtherUserActive(false);
-      void supabase.removeChannel(channel);
+      void supabase.removeChannel(
+        channel,
+      );
     };
-  }, [myId, id, isSidekick, normalizedId]);
+  }, [
+    myId,
+    id,
+    isSidekick,
+    normalizedId,
+  ]);
 
+  /*
+   * DIRECT CONVERSATION
+   */
   useEffect(() => {
-    if (!myId || !id || isSidekick) return;
+    if (
+      !myId ||
+      !id ||
+      isSidekick
+    ) {
+      return;
+    }
+
     let cancelled = false;
+
     (async () => {
-      const result = await ensureDirectConversation(myId, id);
+      const result =
+        await ensureDirectConversation(
+          myId,
+          id,
+        );
+
       if (!cancelled) {
-        if (result.error || !result.id) {
-          setMessagesError(result.error?.message || 'Could not open conversation.');
+        if (
+          result.error ||
+          !result.id
+        ) {
+          setMessagesError(
+            result.error?.message ||
+              'Could not open conversation.',
+          );
+
           setConversationId('');
         } else {
-          setConversationId(result.id);
-          await markConversationRead(result.id, myId);
+          setConversationId(
+            result.id,
+          );
+
+          await markConversationRead(
+            result.id,
+            myId,
+          );
         }
       }
     })();
-    return () => { cancelled = true; };
-  }, [myId, id, isSidekick]);
 
-  /*
-   * Load profile and messages.
-   */
-  useEffect(() => {
-    loadProfile();
-    loadMessages();
-  }, [loadProfile, loadMessages]);
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    myId,
+    id,
+    isSidekick,
+  ]);
 
   useEffect(() => {
-    if (myId && !isSidekick) void loadChatTags();
-  }, [myId, isSidekick, loadChatTags]);
+    void loadProfile();
+    void loadMessages();
+  }, [
+    loadProfile,
+    loadMessages,
+  ]);
+
+  useEffect(() => {
+    if (
+      myId &&
+      !isSidekick
+    ) {
+      void loadChatTags();
+    }
+  }, [
+    myId,
+    isSidekick,
+    loadChatTags,
+  ]);
 
   useEffect(() => {
     if (messages.length > 0) {
       scrollToBottom(false);
     }
-  }, [messages.length, scrollToBottom]);
+  }, [
+    messages.length,
+    scrollToBottom,
+  ]);
 
   /*
    * SIDEKICK
    */
-  const handleSendSidekick = async (text: string) => {
-    if (!text || sending) {
-      return;
-    }
+  const handleSendSidekick =
+    async (text: string) => {
+      if (!text || sending) {
+        return;
+      }
 
-    setSending(true);
-    setMessagesError(null);
+      setSending(true);
+      setMessagesError(null);
 
-    const userId = myId ?? `user-${Date.now()}`;
+      const userId =
+        myId ??
+        `user-${Date.now()}`;
 
-    const optimisticUserMessage: Message = {
-      id: `local-user-${Date.now()}`,
-      conversation_id: 'sidekick',
-      sender_id: userId,
-      content: text,
-      created_at: new Date().toISOString(),
-    };
-
-    setMessages((previous) => [
-      ...previous,
-      optimisticUserMessage,
-    ]);
-
-    setDraft('');
-    scrollToBottom();
-
-    try {
-      const { data, error } = await supabase.functions.invoke(
-        'sidekick-chat',
+      const optimisticUserMessage: Message =
         {
-          body: {
-            message: text,
-          },
-        },
-      );
+          id: `local-user-${Date.now()}`,
+          conversation_id:
+            'sidekick',
+          sender_id: userId,
+          content: text,
+          created_at:
+            new Date().toISOString(),
+        };
 
-      if (error) {
-        console.error('Sidekick Edge Function error:', error);
-
-        setMessages((previous) =>
-          previous.filter(
-            (message) =>
-              message.id !== optimisticUserMessage.id,
-          ),
-        );
-
-        showToast(
-          'Sidekick is unavailable right now. Please try again later.',
-        );
-
-        return;
-      }
-
-      const reply =
-        typeof data?.reply === 'string'
-          ? data.reply.trim()
-          : '';
-
-      if (!reply) {
-        console.error('Sidekick returned no reply:', data);
-
-        setMessages((previous) =>
-          previous.filter(
-            (message) =>
-              message.id !== optimisticUserMessage.id,
-          ),
-        );
-
-        showToast(
-          'Sidekick is unavailable right now. Please try again later.',
-        );
-
-        return;
-      }
-
-      const sidekickMessage: Message = {
-        id: `sidekick-${Date.now()}`,
-        conversation_id: 'sidekick',
-        sender_id: 'sidekick',
-        content: reply,
-        created_at: new Date().toISOString(),
-      };
-
-      setMessages((previous) => [
+      setMessages(previous => [
         ...previous,
-        sidekickMessage,
+        optimisticUserMessage,
       ]);
 
+      setDraft('');
       scrollToBottom();
-    } catch (error) {
-      console.error('Sidekick request failed:', error);
 
-      setMessages((previous) =>
-        previous.filter(
-          (message) =>
-            message.id !== optimisticUserMessage.id,
-        ),
-      );
+      try {
+        const {
+          data,
+          error,
+        } =
+          await supabase.functions.invoke(
+            'sidekick-chat',
+            {
+              body: {
+                message: text,
+              },
+            },
+          );
 
-      showToast(
-        'Sidekick is unavailable right now. Please try again later.',
-      );
-    } finally {
-      setSending(false);
-    }
-  };
+        if (error) {
+          console.error(
+            'Sidekick Edge Function error:',
+            error,
+          );
+
+          setMessages(
+            previous =>
+              previous.filter(
+                message =>
+                  message.id !==
+                  optimisticUserMessage.id,
+              ),
+          );
+
+          showToast(
+            'Sidekick is unavailable right now. Please try again later.',
+          );
+
+          return;
+        }
+
+        const reply =
+          typeof data?.reply ===
+          'string'
+            ? data.reply.trim()
+            : '';
+
+        if (!reply) {
+          console.error(
+            'Sidekick returned no reply:',
+            data,
+          );
+
+          setMessages(
+            previous =>
+              previous.filter(
+                message =>
+                  message.id !==
+                  optimisticUserMessage.id,
+              ),
+          );
+
+          showToast(
+            'Sidekick is unavailable right now. Please try again later.',
+          );
+
+          return;
+        }
+
+        const sidekickMessage: Message =
+          {
+            id: `sidekick-${Date.now()}`,
+            conversation_id:
+              'sidekick',
+            sender_id:
+              'sidekick',
+            content: reply,
+            created_at:
+              new Date().toISOString(),
+          };
+
+        setMessages(previous => [
+          ...previous,
+          sidekickMessage,
+        ]);
+
+        scrollToBottom();
+      } catch (error) {
+        console.error(
+          'Sidekick request failed:',
+          error,
+        );
+
+        setMessages(
+          previous =>
+            previous.filter(
+              message =>
+                message.id !==
+                optimisticUserMessage.id,
+            ),
+        );
+
+        showToast(
+          'Sidekick is unavailable right now. Please try again later.',
+        );
+      } finally {
+        setSending(false);
+      }
+    };
 
   /*
    * NORMAL CHAT
    */
-  const handleSendNormalChat = async (text: string) => {
-    if (!text || sending || !myId || !conversationId) return;
-    setSending(true);
-    const optimistic: Message = {
-      id: `local-${Date.now()}`,
-      conversation_id: conversationId,
-      sender_id: myId,
-      content: text,
-      created_at: new Date().toISOString(),
+  const handleSendNormalChat =
+    async (text: string) => {
+      if (
+        !text ||
+        sending ||
+        !myId ||
+        !conversationId
+      ) {
+        return;
+      }
+
+      setSending(true);
+
+      const optimistic: Message = {
+        id: `local-${Date.now()}`,
+        conversation_id:
+          conversationId,
+        sender_id: myId,
+        content: text,
+        created_at:
+          new Date().toISOString(),
+      };
+
+      setMessages(previous => [
+        ...previous,
+        optimistic,
+      ]);
+
+      setDraft('');
+      scrollToBottom();
+
+      const result =
+        await sendChatMessage(
+          conversationId,
+          myId,
+          text,
+        );
+
+      if (result.error) {
+        console.error(
+          'Send message error:',
+          result.error,
+        );
+
+        setMessages(
+          previous =>
+            previous.filter(
+              message =>
+                message.id !==
+                optimistic.id,
+            ),
+        );
+
+        showToast(
+          'Failed to send message.',
+        );
+      } else if (
+        result.message
+      ) {
+        setMessages(
+          previous =>
+            previous.map(
+              message =>
+                message.id ===
+                optimistic.id
+                  ? result.message as Message
+                  : message,
+            ),
+        );
+      }
+
+      setSending(false);
     };
-    setMessages((previous) => [...previous, optimistic]);
-    setDraft('');
-    scrollToBottom();
-    const result = await sendChatMessage(conversationId, myId, text);
-    if (result.error) {
-      console.error('Send message error:', result.error);
-      setMessages((previous) => previous.filter((message) => message.id !== optimistic.id));
-      showToast('Failed to send message.');
-    } else if (result.message) {
-      setMessages((previous) => previous.map((message) => message.id === optimistic.id ? result.message as Message : message));
-    }
-    setSending(false);
-  };
 
-  const handleSend = async () => {
-    const text = draft.trim();
+  const handleSend =
+    async () => {
+      const text =
+        draft.trim();
 
-    if (!text || sending) {
-      return;
-    }
+      if (
+        !text ||
+        sending
+      ) {
+        return;
+      }
 
-    if (isSidekick) {
-      await handleSendSidekick(text);
-    } else {
-      await handleSendNormalChat(text);
-    }
-  };
+      if (isSidekick) {
+        await handleSendSidekick(
+          text,
+        );
+      } else {
+        await handleSendNormalChat(
+          text,
+        );
+      }
+    };
 
   /*
    * ATTACHMENTS
    */
-  const uploadAttachment = async (
-    uri: string,
-    type: AttachmentType,
-    fileName: string,
-    mimeType: string,
-  ): Promise<string | null> => {
-    if (!myId) {
-      return null;
-    }
+  const uploadAttachment =
+    async (
+      uri: string,
+      type: AttachmentType,
+      fileName: string,
+      mimeType: string,
+    ): Promise<string | null> => {
+      if (!myId) {
+        return null;
+      }
 
-    try {
-      const response = await fetch(uri);
-      const blob = await response.blob();
+      try {
+        const response =
+          await fetch(uri);
 
-      const path = `${myId}/${Date.now()}-${fileName}`;
+        const blob =
+          await response.blob();
 
-      const { error: uploadError } = await supabase.storage
-        .from('chat-attachments')
-        .upload(path, blob, {
-          contentType: mimeType,
-          upsert: false,
-        });
+        const path =
+          `${myId}/${Date.now()}-${fileName}`;
 
-      if (uploadError) {
+        const {
+          error: uploadError,
+        } =
+          await supabase.storage
+            .from(
+              'chat-attachments',
+            )
+            .upload(
+              path,
+              blob,
+              {
+                contentType:
+                  mimeType,
+                upsert: false,
+              },
+            );
+
+        if (uploadError) {
+          console.error(
+            'ATTACHMENT UPLOAD ERROR:',
+            uploadError,
+          );
+
+          return null;
+        }
+
+        const { data } =
+          supabase.storage
+            .from(
+              'chat-attachments',
+            )
+            .getPublicUrl(path);
+
+        return data.publicUrl;
+      } catch (error) {
         console.error(
-          'ATTACHMENT UPLOAD ERROR:',
-          uploadError,
+          'ATTACHMENT UPLOAD EXCEPTION:',
+          error,
         );
 
         return null;
       }
-
-      const { data } = supabase.storage
-        .from('chat-attachments')
-        .getPublicUrl(path);
-
-      return data.publicUrl;
-    } catch (error) {
-      console.error(
-        'ATTACHMENT UPLOAD EXCEPTION:',
-        error,
-      );
-
-      return null;
-    }
-  };
-
-  const sendAttachmentMessage = async (
-    type: AttachmentType,
-    url: string,
-    fileName: string,
-  ) => {
-    if (!myId || !conversationId) return;
-    const fallbackContent = type === 'image' ? '📷 Photo' : type === 'video' ? '🎬 Video' : type === 'audio' ? '🎤 Voice message' : `📄 ${fileName}`;
-    const optimistic: Message = {
-      id: `local-${Date.now()}`,
-      conversation_id: conversationId,
-      sender_id: myId,
-      content: fallbackContent,
-      created_at: new Date().toISOString(),
-      attachment_url: url,
-      attachment_type: type,
-      attachment_name: fileName,
     };
-    setMessages((previous) => [...previous, optimistic]);
-    scrollToBottom();
-    const result = await sendChatMessage(conversationId, myId, fallbackContent, { url, name: fileName, type: type === 'image' ? 'image/jpeg' : type === 'video' ? 'video/mp4' : type === 'audio' ? 'audio/m4a' : 'application/octet-stream' });
-    if (result.error) {
-      console.error('SEND ATTACHMENT MESSAGE ERROR:', result.error);
-      setMessages((previous) => previous.filter((message) => message.id !== optimistic.id));
-      showToast('Failed to send attachment.');
-    } else if (result.message) {
-      setMessages((previous) => previous.map((message) => message.id === optimistic.id ? result.message as Message : message));
-    }
-  };
 
-  const handlePickDocument = async (
-    audioOnly: boolean,
-  ) => {
-    if (!myId || !conversationId || uploadingAttachment || attachmentSending) return;
+  const sendAttachmentMessage =
+    async (
+      type: AttachmentType,
+      url: string,
+      fileName: string,
+    ) => {
+      if (
+        !myId ||
+        !conversationId
+      ) {
+        return;
+      }
 
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: audioOnly ? 'audio/*' : '*/*',
-        copyToCacheDirectory: true,
-        multiple: false,
-      });
+      const fallbackContent =
+        type === 'image'
+          ? '📷 Photo'
+          : type === 'video'
+            ? '🎬 Video'
+            : type === 'audio'
+              ? '🎤 Voice message'
+              : `📄 ${fileName}`;
 
-      if (result.canceled || !result.assets?.length) return;
+      const optimistic: Message = {
+        id: `local-${Date.now()}`,
+        conversation_id:
+          conversationId,
+        sender_id: myId,
+        content:
+          fallbackContent,
+        created_at:
+          new Date().toISOString(),
+        attachment_url: url,
+        attachment_type:
+          type,
+        attachment_name:
+          fileName,
+      };
 
-      const asset = result.assets[0];
-      const fileName = asset.name ?? `file-${Date.now()}`;
-      const mimeType = asset.mimeType ?? 'application/octet-stream';
-      const type: AttachmentType = audioOnly ? 'audio' : (
-        mimeType.startsWith('image/')
-          ? 'image'
-          : mimeType.startsWith('video/')
-            ? 'video'
-            : mimeType.startsWith('audio/')
-              ? 'audio'
-              : 'document'
-      );
+      setMessages(previous => [
+        ...previous,
+        optimistic,
+      ]);
 
-      setPendingAttachment({ uri: asset.uri, type, name: fileName, mimeType });
-      setAttachmentReviewOpen(true);
-    } catch (error) {
-      console.error('PICK DOCUMENT ERROR:', error);
-      showToast('Could not select attachment.');
-    }
-  };
+      scrollToBottom();
+
+      const result =
+        await sendChatMessage(
+          conversationId,
+          myId,
+          fallbackContent,
+          {
+            url,
+            name: fileName,
+            type:
+              type === 'image'
+                ? 'image/jpeg'
+                : type === 'video'
+                  ? 'video/mp4'
+                  : type === 'audio'
+                    ? 'audio/m4a'
+                    : 'application/octet-stream',
+          },
+        );
+
+      if (result.error) {
+        console.error(
+          'SEND ATTACHMENT MESSAGE ERROR:',
+          result.error,
+        );
+
+        setMessages(
+          previous =>
+            previous.filter(
+              message =>
+                message.id !==
+                optimistic.id,
+            ),
+        );
+
+        showToast(
+          'Failed to send attachment.',
+        );
+      } else if (
+        result.message
+      ) {
+        setMessages(
+          previous =>
+            previous.map(
+              message =>
+                message.id ===
+                optimistic.id
+                  ? result.message as Message
+                  : message,
+            ),
+        );
+      }
+    };
+
+  const handlePickDocument =
+    async (
+      audioOnly: boolean,
+    ) => {
+      if (
+        !myId ||
+        !conversationId ||
+        uploadingAttachment ||
+        attachmentSending
+      ) {
+        return;
+      }
+
+      try {
+        const result =
+          await DocumentPicker.getDocumentAsync(
+            {
+              type: audioOnly
+                ? 'audio/*'
+                : '*/*',
+              copyToCacheDirectory:
+                true,
+              multiple: false,
+            },
+          );
+
+        if (
+          result.canceled ||
+          !result.assets?.length
+        ) {
+          return;
+        }
+
+        const asset =
+          result.assets[0];
+
+        const fileName =
+          asset.name ??
+          `file-${Date.now()}`;
+
+        const mimeType =
+          asset.mimeType ??
+          'application/octet-stream';
+
+        const type: AttachmentType =
+          audioOnly
+            ? 'audio'
+            : mimeType.startsWith(
+                'image/',
+              )
+              ? 'image'
+              : mimeType.startsWith(
+                  'video/',
+                )
+                ? 'video'
+                : mimeType.startsWith(
+                    'audio/',
+                  )
+                  ? 'audio'
+                  : 'document';
+
+        setPendingAttachment({
+          uri: asset.uri,
+          type,
+          name: fileName,
+          mimeType,
+        });
+
+        setAttachmentReviewOpen(
+          true,
+        );
+      } catch (error) {
+        console.error(
+          'PICK DOCUMENT ERROR:',
+          error,
+        );
+
+        showToast(
+          'Could not select attachment.',
+        );
+      }
+    };
 
   /*
    * VOICE RECORDING
    */
-  const startRecording = async () => {
-    const permission =
-      await Audio.requestPermissionsAsync();
+  const startRecording =
+    async () => {
+      const permission =
+        await Audio.requestPermissionsAsync();
 
-    if (!permission.granted) {
-      showToast(
-        'Microphone access is needed to record a voice note.',
-      );
-
-      return;
-    }
-
-    try {
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-      });
-
-      const { recording } =
-        await Audio.Recording.createAsync(
-          Audio.RecordingOptionsPresets.HIGH_QUALITY,
+      if (!permission.granted) {
+        showToast(
+          'Microphone access is needed to record a voice note.',
         );
 
-      recordingRef.current = recording;
+        return;
+      }
 
-      setIsRecording(true);
-      setRecordingSeconds(0);
+      try {
+        await Audio.setAudioModeAsync(
+          {
+            allowsRecordingIOS:
+              true,
+            playsInSilentModeIOS:
+              true,
+          },
+        );
 
-      recordingTimerRef.current =
-        setInterval(() => {
-          setRecordingSeconds(
-            (seconds) => seconds + 1,
+        const { recording } =
+          await Audio.Recording.createAsync(
+            Audio.RecordingOptionsPresets
+              .HIGH_QUALITY,
           );
-        }, 1000);
-    } catch (error) {
-      console.error(
-        'START RECORDING ERROR:',
-        error,
-      );
 
-      showToast(
-        'Could not start recording.',
-      );
-    }
-  };
+        recordingRef.current =
+          recording;
 
-  const cancelRecording = async () => {
-    if (recordingTimerRef.current) {
-      clearInterval(
-        recordingTimerRef.current,
-      );
+        setIsRecording(true);
+        setRecordingSeconds(0);
 
-      recordingTimerRef.current = null;
-    }
+        recordingTimerRef.current =
+          setInterval(() => {
+            setRecordingSeconds(
+              seconds =>
+                seconds + 1,
+            );
+          }, 1000);
+      } catch (error) {
+        console.error(
+          'START RECORDING ERROR:',
+          error,
+        );
 
-    setIsRecording(false);
-    setRecordingSeconds(0);
+        showToast(
+          'Could not start recording.',
+        );
+      }
+    };
 
-    try {
-      await recordingRef.current?.stopAndUnloadAsync();
-    } catch {
-      // Recording may already have stopped.
-    }
+  const cancelRecording =
+    async () => {
+      if (
+        recordingTimerRef.current
+      ) {
+        clearInterval(
+          recordingTimerRef.current,
+        );
 
-    recordingRef.current = null;
-  };
+        recordingTimerRef.current =
+          null;
+      }
 
-  const stopRecordingAndSend = async () => {
-    if (recordingTimerRef.current) {
-      clearInterval(recordingTimerRef.current);
-      recordingTimerRef.current = null;
-    }
-
-    setIsRecording(false);
-
-    const recording = recordingRef.current;
-    if (!recording) return;
-
-    try {
-      await recording.stopAndUnloadAsync();
-      const uri = recording.getURI();
-      recordingRef.current = null;
+      setIsRecording(false);
       setRecordingSeconds(0);
 
-      if (!uri) return;
+      try {
+        await recordingRef.current?.stopAndUnloadAsync();
+      } catch {}
 
-      const fileName = `voice-${Date.now()}.m4a`;
-      setPendingAttachment({
-        uri,
-        type: 'audio',
-        name: fileName,
-        mimeType: 'audio/m4a',
-      });
-      setAttachmentReviewOpen(true);
-    } catch (error) {
-      console.error('STOP RECORDING ERROR:', error);
-      showToast('Could not save voice note.');
-    }
-  };
+      recordingRef.current =
+        null;
+    };
 
-  const togglePlayback = async (
-    message: Message,
-  ) => {
-    if (!message.attachment_url) {
-      return;
-    }
+  const stopRecordingAndSend =
+    async () => {
+      if (
+        recordingTimerRef.current
+      ) {
+        clearInterval(
+          recordingTimerRef.current,
+        );
 
-    if (
-      playingMessageId === message.id
-    ) {
-      await soundRef.current?.stopAsync();
-      await soundRef.current?.unloadAsync();
+        recordingTimerRef.current =
+          null;
+      }
 
-      soundRef.current = null;
-      setPlayingMessageId(null);
+      setIsRecording(false);
 
-      return;
-    }
+      const recording =
+        recordingRef.current;
 
-    if (soundRef.current) {
-      await soundRef.current.stopAsync();
-      await soundRef.current.unloadAsync();
+      if (!recording) {
+        return;
+      }
 
-      soundRef.current = null;
-    }
+      try {
+        await recording.stopAndUnloadAsync();
 
-    try {
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: false,
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
-      });
+        const uri =
+          recording.getURI();
 
-      const { sound } =
-        await Audio.Sound.createAsync(
+        recordingRef.current =
+          null;
+
+        setRecordingSeconds(0);
+
+        if (!uri) return;
+
+        const fileName =
+          `voice-${Date.now()}.m4a`;
+
+        setPendingAttachment({
+          uri,
+          type: 'audio',
+          name: fileName,
+          mimeType:
+            'audio/m4a',
+        });
+
+        setAttachmentReviewOpen(
+          true,
+        );
+      } catch (error) {
+        console.error(
+          'STOP RECORDING ERROR:',
+          error,
+        );
+
+        showToast(
+          'Could not save voice note.',
+        );
+      }
+    };
+
+  const togglePlayback =
+    async (
+      message: Message,
+    ) => {
+      if (
+        !message.attachment_url
+      ) {
+        return;
+      }
+
+      if (
+        playingMessageId ===
+        message.id
+      ) {
+        await soundRef.current?.stopAsync();
+        await soundRef.current?.unloadAsync();
+
+        soundRef.current =
+          null;
+
+        setPlayingMessageId(
+          null,
+        );
+
+        return;
+      }
+
+      if (soundRef.current) {
+        await soundRef.current.stopAsync();
+        await soundRef.current.unloadAsync();
+
+        soundRef.current =
+          null;
+      }
+
+      try {
+        await Audio.setAudioModeAsync(
           {
-            uri: message.attachment_url,
-          },
-          {
-            shouldPlay: true,
+            allowsRecordingIOS:
+              false,
+            playsInSilentModeIOS:
+              true,
+            staysActiveInBackground:
+              false,
+            shouldDuckAndroid:
+              true,
+            playThroughEarpieceAndroid:
+              false,
           },
         );
 
-      soundRef.current = sound;
-      setPlayingMessageId(message.id);
+        const { sound } =
+          await Audio.Sound.createAsync(
+            {
+              uri: message.attachment_url,
+            },
+            {
+              shouldPlay: true,
+            },
+          );
 
-      sound.setOnPlaybackStatusUpdate(
-        (status) => {
-          if (
-            status.isLoaded &&
-            status.didJustFinish
-          ) {
-            setPlayingMessageId(null);
+        soundRef.current =
+          sound;
 
-            sound.unloadAsync();
-            soundRef.current = null;
-          }
-        },
-      );
-    } catch (error) {
-      console.error(
-        'PLAYBACK ERROR:',
-        error,
-      );
+        setPlayingMessageId(
+          message.id,
+        );
 
-      showToast(
-        'Could not play voice note.',
-      );
-    }
-  };
+        sound.setOnPlaybackStatusUpdate(
+          status => {
+            if (
+              status.isLoaded &&
+              status.didJustFinish
+            ) {
+              setPlayingMessageId(
+                null,
+              );
+
+              void sound.unloadAsync();
+
+              soundRef.current =
+                null;
+            }
+          },
+        );
+      } catch (error) {
+        console.error(
+          'PLAYBACK ERROR:',
+          error,
+        );
+
+        showToast(
+          'Could not play voice note.',
+        );
+      }
+    };
 
   useEffect(() => {
     return () => {
-      soundRef.current?.unloadAsync();
+      void soundRef.current?.unloadAsync();
 
-      if (recordingTimerRef.current) {
+      if (
+        recordingTimerRef.current
+      ) {
         clearInterval(
           recordingTimerRef.current,
         );
@@ -877,566 +1457,983 @@ export default function ChatDetailScreen() {
   }, []);
 
   /*
-   * ATTACHMENTS
-   * Open the device file picker directly. No bottom attachment sheet.
+   * ATTACHMENT PICKER
    */
-  const handlePickAttachment = async () => {
-    if (uploadingAttachment || attachmentSending || !myId || !conversationId) return;
-
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: '*/*',
-        copyToCacheDirectory: true,
-        multiple: false,
-      });
-
-      if (result.canceled || !result.assets?.length) return;
-
-      const asset = result.assets[0];
-      const fileName = asset.name ?? `file-${Date.now()}`;
-      const mimeType = asset.mimeType ?? 'application/octet-stream';
-      const type: AttachmentType = mimeType.startsWith('image/')
-        ? 'image'
-        : mimeType.startsWith('video/')
-          ? 'video'
-          : mimeType.startsWith('audio/')
-            ? 'audio'
-            : 'document';
-
-      setPendingAttachment({ uri: asset.uri, type, name: fileName, mimeType });
-      setAttachmentReviewOpen(true);
-    } catch (error) {
-      console.error('PICK ATTACHMENT ERROR:', error);
-      showToast('Could not select attachment.');
-    }
-  };
-
-  const closeAttachmentReview = async () => {
-    setAttachmentReviewOpen(false);
-    setPendingAttachment(null);
-    setReviewPlaying(false);
-  };
-
-  const toggleReviewAudio = async () => {
-    if (!pendingAttachment || pendingAttachment.type !== 'audio') return;
-
-    if (reviewPlaying) {
-      await soundRef.current?.stopAsync();
-      await soundRef.current?.unloadAsync();
-      soundRef.current = null;
-      setReviewPlaying(false);
-      return;
-    }
-
-    try {
-      await soundRef.current?.unloadAsync();
-      soundRef.current = null;
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: false,
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
-      });
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: pendingAttachment.uri },
-        { shouldPlay: true },
-      );
-      soundRef.current = sound;
-      setReviewPlaying(true);
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded && status.didJustFinish) {
-          setReviewPlaying(false);
-          void sound.unloadAsync();
-          soundRef.current = null;
-        }
-      });
-    } catch (error) {
-      console.error('REVIEW AUDIO ERROR:', error);
-      showToast('Could not play voice note preview.');
-    }
-  };
-
-  const sendPendingAttachment = async () => {
-    if (!pendingAttachment || !myId || !conversationId || attachmentSending) return;
-
-    setAttachmentSending(true);
-    setUploadingAttachment(true);
-
-    try {
-      const url = await uploadAttachment(
-        pendingAttachment.uri,
-        pendingAttachment.type,
-        pendingAttachment.name,
-        pendingAttachment.mimeType,
-      );
-
-      if (!url) {
-        showToast('Could not upload attachment.');
+  const handlePickAttachment =
+    async () => {
+      if (
+        uploadingAttachment ||
+        attachmentSending ||
+        !myId ||
+        !conversationId
+      ) {
         return;
       }
 
-      await sendAttachmentMessage(
-        pendingAttachment.type,
-        url,
-        pendingAttachment.name,
+      try {
+        const result =
+          await DocumentPicker.getDocumentAsync(
+            {
+              type: '*/*',
+              copyToCacheDirectory:
+                true,
+              multiple: false,
+            },
+          );
+
+        if (
+          result.canceled ||
+          !result.assets?.length
+        ) {
+          return;
+        }
+
+        const asset =
+          result.assets[0];
+
+        const fileName =
+          asset.name ??
+          `file-${Date.now()}`;
+
+        const mimeType =
+          asset.mimeType ??
+          'application/octet-stream';
+
+        const type: AttachmentType =
+          mimeType.startsWith(
+            'image/',
+          )
+            ? 'image'
+            : mimeType.startsWith(
+                'video/',
+              )
+              ? 'video'
+              : mimeType.startsWith(
+                  'audio/',
+                )
+                ? 'audio'
+                : 'document';
+
+        setPendingAttachment({
+          uri: asset.uri,
+          type,
+          name: fileName,
+          mimeType,
+        });
+
+        setAttachmentReviewOpen(
+          true,
+        );
+      } catch (error) {
+        console.error(
+          'PICK ATTACHMENT ERROR:',
+          error,
+        );
+
+        showToast(
+          'Could not select attachment.',
+        );
+      }
+    };
+
+  const closeAttachmentReview =
+    async () => {
+      setAttachmentReviewOpen(
+        false,
+      );
+
+      setPendingAttachment(
+        null,
+      );
+
+      setReviewPlaying(false);
+    };
+
+  const toggleReviewAudio =
+    async () => {
+      if (
+        !pendingAttachment ||
+        pendingAttachment.type !==
+          'audio'
+      ) {
+        return;
+      }
+
+      if (reviewPlaying) {
+        await soundRef.current?.stopAsync();
+        await soundRef.current?.unloadAsync();
+
+        soundRef.current =
+          null;
+
+        setReviewPlaying(false);
+
+        return;
+      }
+
+      try {
+        await soundRef.current?.unloadAsync();
+
+        soundRef.current =
+          null;
+
+        await Audio.setAudioModeAsync(
+          {
+            allowsRecordingIOS:
+              false,
+            playsInSilentModeIOS:
+              true,
+            staysActiveInBackground:
+              false,
+            shouldDuckAndroid:
+              true,
+            playThroughEarpieceAndroid:
+              false,
+          },
+        );
+
+        const { sound } =
+          await Audio.Sound.createAsync(
+            {
+              uri: pendingAttachment.uri,
+            },
+            {
+              shouldPlay: true,
+            },
+          );
+
+        soundRef.current =
+          sound;
+
+        setReviewPlaying(true);
+
+        sound.setOnPlaybackStatusUpdate(
+          status => {
+            if (
+              status.isLoaded &&
+              status.didJustFinish
+            ) {
+              setReviewPlaying(
+                false,
+              );
+
+              void sound.unloadAsync();
+
+              soundRef.current =
+                null;
+            }
+          },
+        );
+      } catch (error) {
+        console.error(
+          'REVIEW AUDIO ERROR:',
+          error,
+        );
+
+        showToast(
+          'Could not play voice note preview.',
+        );
+      }
+    };
+
+  const sendPendingAttachment =
+    async () => {
+      if (
+        !pendingAttachment ||
+        !myId ||
+        !conversationId ||
+        attachmentSending
+      ) {
+        return;
+      }
+
+      setAttachmentSending(
+        true,
+      );
+
+      setUploadingAttachment(
+        true,
       );
 
       try {
-        await soundRef.current?.stopAsync();
-      } catch {}
-      try {
-        await soundRef.current?.unloadAsync();
-      } catch {}
-      soundRef.current = null;
-      setReviewPlaying(false);
-      setAttachmentReviewOpen(false);
-      setPendingAttachment(null);
-    } catch (error) {
-      console.error('SEND PENDING ATTACHMENT ERROR:', error);
-      showToast('Failed to send attachment.');
-    } finally {
-      setUploadingAttachment(false);
-      setAttachmentSending(false);
-    }
-  };
+        const url =
+          await uploadAttachment(
+            pendingAttachment.uri,
+            pendingAttachment.type,
+            pendingAttachment.name,
+            pendingAttachment.mimeType,
+          );
+
+        if (!url) {
+          showToast(
+            'Could not upload attachment.',
+          );
+
+          return;
+        }
+
+        await sendAttachmentMessage(
+          pendingAttachment.type,
+          url,
+          pendingAttachment.name,
+        );
+
+        try {
+          await soundRef.current?.stopAsync();
+        } catch {}
+
+        try {
+          await soundRef.current?.unloadAsync();
+        } catch {}
+
+        soundRef.current =
+          null;
+
+        setReviewPlaying(
+          false,
+        );
+
+        setAttachmentReviewOpen(
+          false,
+        );
+
+        setPendingAttachment(
+          null,
+        );
+      } catch (error) {
+        console.error(
+          'SEND PENDING ATTACHMENT ERROR:',
+          error,
+        );
+
+        showToast(
+          'Failed to send attachment.',
+        );
+      } finally {
+        setUploadingAttachment(
+          false,
+        );
+
+        setAttachmentSending(
+          false,
+        );
+      }
+    };
 
   /*
    * POLL
    */
-  const sendPoll = async () => {
-    const question =
-      pollQuestion.trim();
+  const sendPoll =
+    async () => {
+      const question =
+        pollQuestion.trim();
 
-    const options =
-      pollOptions
-        .map((option) => option.trim())
-        .filter(Boolean);
+      const options =
+        pollOptions
+          .map(
+            option =>
+              option.trim(),
+          )
+          .filter(Boolean);
 
-    if (
-      !question ||
-      options.length < 2 ||
-      !myId
-    ) {
-      return;
-    }
+      if (
+        !question ||
+        options.length < 2 ||
+        !myId
+      ) {
+        return;
+      }
 
-    const content =
-      `📊 Poll: ${question}\n` +
-      options
-        .map(
-          (option, index) =>
-            `${index + 1}. ${option}`,
-        )
-        .join('\n');
+      const content =
+        `📊 Poll: ${question}\n` +
+        options
+          .map(
+            (
+              option,
+              index,
+            ) =>
+              `${index + 1}. ${option}`,
+          )
+          .join('\n');
 
-    setPollOpen(false);
+      setPollOpen(false);
 
-    const optimistic: Message = {
-      id: `local-${Date.now()}`,
-      conversation_id: conversationId,
-      sender_id: myId,
-      content,
-      created_at: new Date().toISOString(),
+      const optimistic: Message =
+        {
+          id: `local-${Date.now()}`,
+          conversation_id:
+            conversationId,
+          sender_id: myId,
+          content,
+          created_at:
+            new Date().toISOString(),
+        };
+
+      setMessages(previous => [
+        ...previous,
+        optimistic,
+      ]);
+
+      scrollToBottom();
+
+      const result =
+        await sendChatMessage(
+          conversationId,
+          myId,
+          content,
+        );
+
+      if (result.error) {
+        console.error(
+          'SEND POLL ERROR:',
+          result.error,
+        );
+
+        setMessages(
+          previous =>
+            previous.filter(
+              message =>
+                message.id !==
+                optimistic.id,
+            ),
+        );
+
+        showToast(
+          'Failed to send poll.',
+        );
+      }
     };
-
-    setMessages((previous) => [
-      ...previous,
-      optimistic,
-    ]);
-
-    scrollToBottom();
-
-    const { error } = await sendChatMessage(conversationId, myId, content).then((r) => ({ error: r.error }));
-
-    if (error) {
-      console.error(
-        'SEND POLL ERROR:',
-        error,
-      );
-
-      setMessages((previous) =>
-        previous.filter(
-          (message) =>
-            message.id !==
-            optimistic.id,
-        ),
-      );
-
-      showToast(
-        'Failed to send poll.',
-      );
-    }
-  };
 
   /*
    * EVENT
    */
-  const sendEvent = async () => {
-    const title =
-      eventTitle.trim();
+  const sendEvent =
+    async () => {
+      const title =
+        eventTitle.trim();
 
-    if (!title || !myId) {
-      return;
-    }
+      if (!title || !myId) {
+        return;
+      }
 
-    let content =
-      `📅 Event: ${title}`;
+      let content =
+        `📅 Event: ${title}`;
 
-    if (eventDate.trim()) {
+      if (
+        eventDate.trim()
+      ) {
+        content +=
+          `\nDate: ${eventDate.trim()}`;
+      }
+
+      if (
+        eventTime.trim()
+      ) {
+        content +=
+          `\nTime: ${eventTime.trim()}`;
+      }
+
+      if (
+        eventDesc.trim()
+      ) {
+        content +=
+          `\n${eventDesc.trim()}`;
+      }
+
       content +=
-        `\nDate: ${eventDate.trim()}`;
-    }
+        '\nReply YES to add to calendar';
 
-    if (eventTime.trim()) {
-      content +=
-        `\nTime: ${eventTime.trim()}`;
-    }
+      setEventOpen(false);
 
-    if (eventDesc.trim()) {
-      content +=
-        `\n${eventDesc.trim()}`;
-    }
+      const optimistic: Message =
+        {
+          id: `local-${Date.now()}`,
+          conversation_id:
+            conversationId,
+          sender_id: myId,
+          content,
+          created_at:
+            new Date().toISOString(),
+        };
 
-    content +=
-      '\nReply YES to add to calendar';
+      setMessages(previous => [
+        ...previous,
+        optimistic,
+      ]);
 
-    setEventOpen(false);
+      scrollToBottom();
 
-    const optimistic: Message = {
-      id: `local-${Date.now()}`,
-      conversation_id: conversationId,
-      sender_id: myId,
-      content,
-      created_at: new Date().toISOString(),
+      const result =
+        await sendChatMessage(
+          conversationId,
+          myId,
+          content,
+        );
+
+      if (result.error) {
+        console.error(
+          'SEND EVENT ERROR:',
+          result.error,
+        );
+
+        setMessages(
+          previous =>
+            previous.filter(
+              message =>
+                message.id !==
+                optimistic.id,
+            ),
+        );
+
+        showToast(
+          'Failed to send event.',
+        );
+      }
     };
-
-    setMessages((previous) => [
-      ...previous,
-      optimistic,
-    ]);
-
-    scrollToBottom();
-
-    const { error } = await sendChatMessage(conversationId, myId, content).then((r) => ({ error: r.error }));
-
-    if (error) {
-      console.error(
-        'SEND EVENT ERROR:',
-        error,
-      );
-
-      setMessages((previous) =>
-        previous.filter(
-          (message) =>
-            message.id !==
-            optimistic.id,
-        ),
-      );
-
-      showToast(
-        'Failed to send event.',
-      );
-    }
-  };
 
   /*
    * REPORT
    */
-  const handleReport = async () => {
-    const reason =
-      reportReason.trim();
+  const handleReport =
+    async () => {
+      const reason =
+        reportReason.trim();
 
-    if (
-      !reason ||
-      reportSubmitting ||
-      !myId ||
-      !id ||
-      isSidekick
-    ) {
-      return;
-    }
+      if (
+        !reason ||
+        reportSubmitting ||
+        !myId ||
+        !id ||
+        isSidekick
+      ) {
+        return;
+      }
 
-    setReportSubmitting(true);
-
-    const { error } =
-      await supabase
-        .from('social_reports')
-        .insert({
-          reporter_id: myId,
-          reported_id: id,
-          reason,
-        });
-
-    setReportSubmitting(false);
-
-    if (error) {
-      console.error(
-        'REPORT ERROR:',
-        error,
+      setReportSubmitting(
+        true,
       );
 
-      showToast(
-        'Could not submit report.',
+      const { error } =
+        await supabase
+          .from('social_reports')
+          .insert({
+            reporter_id: myId,
+            reported_id: id,
+            reason,
+          });
+
+      setReportSubmitting(
+        false,
       );
 
-      return;
-    }
+      if (error) {
+        console.error(
+          'REPORT ERROR:',
+          error,
+        );
 
-    setReportSuccess(true);
-    setReportReason('');
+        showToast(
+          'Could not submit report.',
+        );
 
-    setTimeout(() => {
-      setReportSuccess(false);
-      setReportOpen(false);
-    }, 1600);
-  };
+        return;
+      }
+
+      setReportSuccess(true);
+      setReportReason('');
+
+      setTimeout(() => {
+        setReportSuccess(false);
+        setReportOpen(false);
+      }, 1600);
+    };
 
   /*
    * BLOCK
    */
-  const handleBlock = async () => {
-    if (
-      !myId ||
-      !id ||
-      isSidekick
-    ) {
-      return;
-    }
+  const handleBlock =
+    async () => {
+      if (
+        !myId ||
+        !id ||
+        isSidekick
+      ) {
+        return;
+      }
 
-    setActionLoading('block');
-
-    const { error } =
-      await supabase
-        .from('social_blocks')
-        .insert({
-          blocker_id: myId,
-          blocked_id: id,
-        });
-
-    setActionLoading(null);
-
-    if (error) {
-      console.error(
-        'BLOCK ERROR:',
-        error,
+      setActionLoading(
+        'block',
       );
+
+      const { error } =
+        await supabase
+          .from('social_blocks')
+          .insert({
+            blocker_id: myId,
+            blocked_id: id,
+          });
+
+      setActionLoading(null);
+
+      if (error) {
+        console.error(
+          'BLOCK ERROR:',
+          error,
+        );
+
+        showToast(
+          'Could not block user.',
+        );
+
+        return;
+      }
 
       showToast(
-        'Could not block user.',
+        `Blocked ${
+          profile?.display_name ??
+          'user'
+        }`,
       );
 
-      return;
-    }
+      setTimeout(() => {
+        router.replace(
+          '/(tabs)' as never,
+        );
+      }, 700);
+    };
 
-    showToast(
-      `Blocked ${
-        profile?.display_name ??
-        'user'
-      }`,
-    );
+  /*
+   * DELETE CHAT
+   */
+  const handleDeleteChat =
+    async () => {
+      if (
+        !myId ||
+        !conversationId ||
+        isSidekick
+      ) {
+        return;
+      }
 
-    setTimeout(() => {
-      router.replace('/(tabs)' as never);
-    }, 700);
-  };
+      setActionLoading(
+        'delete',
+      );
 
-  const handleDeleteChat = async () => {
-    if (!myId || !conversationId || isSidekick) return;
-    setActionLoading('delete');
-    const { error } = await supabase
-      .from('chat_conversation_members')
-      .delete()
-      .eq('conversation_id', conversationId)
-      .eq('user_id', myId);
-    setActionLoading(null);
-    if (error) { showToast('Could not delete chat.'); return; }
-    router.replace('/(tabs)' as never);
-  };
+      const { error } =
+        await supabase
+          .from(
+            'chat_conversation_members',
+          )
+          .delete()
+          .eq(
+            'conversation_id',
+            conversationId,
+          )
+          .eq(
+            'user_id',
+            myId,
+          );
+
+      setActionLoading(null);
+
+      if (error) {
+        showToast(
+          'Could not delete chat.',
+        );
+        return;
+      }
+
+      router.replace(
+        '/(tabs)' as never,
+      );
+    };
 
   /*
    * UNSEND
-   * Only the sender can unsend a direct message, and only within
-   * five minutes of sending it. The database RPC enforces the same
-   * rule server-side and does not create a notification.
    */
-  const handleUnsendMessage = async (message: Message) => {
-    if (!myId || message.sender_id !== myId || message.id.startsWith('local-')) {
-      return;
-    }
+  const handleUnsendMessage =
+    async (
+      message: Message,
+    ) => {
+      if (
+        !myId ||
+        message.sender_id !==
+          myId ||
+        message.id.startsWith(
+          'local-',
+        )
+      ) {
+        return;
+      }
 
-    const age = Date.now() - new Date(message.created_at).getTime();
-    const fiveMinutes = 5 * 60 * 1000;
+      const age =
+        Date.now() -
+        new Date(
+          message.created_at,
+        ).getTime();
 
-    if (age > fiveMinutes) {
+      const fiveMinutes =
+        5 * 60 * 1000;
+
+      if (
+        age >
+        fiveMinutes
+      ) {
+        Alert.alert(
+          'Unsend unavailable',
+          'Messages can only be unsent within 5 minutes of sending.',
+        );
+
+        return;
+      }
+
       Alert.alert(
-        'Unsend unavailable',
-        'Messages can only be unsent within 5 minutes of sending.',
-      );
-      return;
-    }
-
-    Alert.alert(
-      'Message options',
-      'What would you like to do with this message?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Unsend',
-          style: 'destructive',
-          onPress: async () => {
-            const { error } = await supabase.rpc('chat_unsend_direct_message', {
-              p_message_id: message.id,
-            });
-
-            if (error) {
-              console.error('UNSEND DIRECT MESSAGE ERROR:', error);
-              Alert.alert(
-                'Could not unsend message',
-                error.message || 'Please try again.',
-              );
-              return;
-            }
-
-            setMessages((previous) =>
-              previous.filter((item) => item.id !== message.id),
-            );
+        'Message options',
+        'What would you like to do with this message?',
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
           },
-        },
-      ],
-    );
-  };
+          {
+            text: 'Unsend',
+            style: 'destructive',
+            onPress:
+              async () => {
+                const {
+                  error,
+                } =
+                  await supabase.rpc(
+                    'chat_unsend_direct_message',
+                    {
+                      p_message_id:
+                        message.id,
+                    },
+                  );
+
+                if (error) {
+                  console.error(
+                    'UNSEND DIRECT MESSAGE ERROR:',
+                    error,
+                  );
+
+                  Alert.alert(
+                    'Could not unsend message',
+                    error.message ||
+                      'Please try again.',
+                  );
+
+                  return;
+                }
+
+                setMessages(
+                  previous =>
+                    previous.filter(
+                      item =>
+                        item.id !==
+                        message.id,
+                    ),
+                );
+              },
+          },
+        ],
+      );
+    };
 
   /*
    * CLEAR CHAT
    */
-  const handleClearChat = async () => {
-    if (!myId) {
-      showToast(
-        'Could not identify your account.',
+  const handleClearChat =
+    async () => {
+      if (!myId) {
+        showToast(
+          'Could not identify your account.',
+        );
+
+        return;
+      }
+
+      setActionLoading(
+        'clear',
       );
 
-      return;
-    }
+      if (isSidekick) {
+        const { error } =
+          await supabase
+            .from('system_messages')
+            .delete()
+            .eq(
+              'user_id',
+              myId,
+            )
+            .eq(
+              'module_key',
+              'sidekick',
+            );
 
-    setActionLoading('clear');
+        setActionLoading(null);
 
-    if (isSidekick) {
+        if (error) {
+          console.error(
+            'CLEAR SIDEKICK ERROR:',
+            error,
+          );
+
+          showToast(
+            'Could not clear Sidekick chat.',
+          );
+
+          return;
+        }
+
+        setMessages([]);
+
+        showToast(
+          'Sidekick chat cleared.',
+        );
+
+        return;
+      }
+
       const { error } =
         await supabase
-          .from('system_messages')
+          .from('chat_messages')
           .delete()
-          .eq('user_id', myId)
           .eq(
-            'module_key',
-            'sidekick',
+            'conversation_id',
+            conversationId,
+          )
+          .eq(
+            'sender_id',
+            myId,
           );
 
       setActionLoading(null);
 
       if (error) {
         console.error(
-          'CLEAR SIDEKICK ERROR:',
+          'CLEAR CHAT ERROR:',
           error,
         );
 
         showToast(
-          'Could not clear Sidekick chat.',
+          'Could not clear chat.',
         );
 
         return;
       }
 
       setMessages([]);
-      showToast(
-        'Sidekick chat cleared.',
-      );
-
-      return;
-    }
-
-    const { error } = await supabase
-      .from('chat_messages')
-      .delete()
-      .eq('conversation_id', conversationId)
-      .eq('sender_id', myId);
-
-    setActionLoading(null);
-
-    if (error) {
-      console.error(
-        'CLEAR CHAT ERROR:',
-        error,
-      );
 
       showToast(
-        'Could not clear chat.',
+        'Chat cleared.',
       );
-
-      return;
-    }
-
-    setMessages([]);
-    showToast('Chat cleared.');
-  };
+    };
 
   /*
    * CREATE GROUP
    */
-  const handleCreateGroup = async () => {
-    const name = groupName.trim();
-    if (!name || groupSubmitting || !myId || !id || isSidekick) return;
-    setGroupSubmitting(true);
+  const handleCreateGroup =
+    async () => {
+      const name =
+        groupName.trim();
 
-    try {
-      const { data: groupData, error: groupError } = await supabase
-        .from('chat_groups')
-        .insert({ name, description: '', visibility: 'private', owner_id: myId })
-        .select('id')
-        .single();
-      if (groupError || !groupData) throw groupError ?? new Error('Could not create group.');
-      const groupId = groupData.id;
+      if (
+        !name ||
+        groupSubmitting ||
+        !myId ||
+        !id ||
+        isSidekick
+      ) {
+        return;
+      }
 
-      const { error: memberError } = await supabase
-        .from('chat_group_members')
-        .insert({ group_id: groupId, user_id: myId, role: 'owner' });
-      if (memberError) throw memberError;
+      setGroupSubmitting(
+        true,
+      );
 
-      const { data: channelData, error: channelError } = await supabase
-        .from('chat_channels')
-        .insert({ group_id: groupId, name, description: '', position: 0, is_default: true, created_by: myId })
-        .select('id')
-        .single();
-      if (channelError || !channelData) throw channelError ?? new Error('Could not create group channel.');
+      try {
+        const {
+          data: groupData,
+          error: groupError,
+        } =
+          await supabase
+            .from('chat_groups')
+            .insert({
+              name,
+              description: '',
+              visibility:
+                'private',
+              owner_id: myId,
+            })
+            .select('id')
+            .single();
 
-      const { data: conversationData, error: conversationError } = await supabase
-        .from('chat_conversations')
-        .insert({ type: 'channel', group_id: groupId, channel_id: channelData.id, created_by: myId })
-        .select('id')
-        .single();
-      if (conversationError || !conversationData) throw conversationError ?? new Error('Could not create group conversation.');
+        if (
+          groupError ||
+          !groupData
+        ) {
+          throw (
+            groupError ??
+            new Error(
+              'Could not create group.',
+            )
+          );
+        }
 
-      const { error: conversationMemberError } = await supabase
-        .from('chat_conversation_members')
-        .insert({ conversation_id: conversationData.id, user_id: myId });
-      if (conversationMemberError) throw conversationMemberError;
+        const groupId =
+          groupData.id;
 
-      const { data: inviteData, error: inviteError } = await supabase
-        .from('chat_group_invitations')
-        .insert({ group_id: groupId, inviter_id: myId, invitee_id: id, status: 'pending' })
-        .select('id')
-        .single();
-      if (inviteError) throw inviteError;
+        const {
+          error: memberError,
+        } =
+          await supabase
+            .from(
+              'chat_group_members',
+            )
+            .insert({
+              group_id: groupId,
+              user_id: myId,
+              role: 'owner',
+            });
 
-      setGroupSuccess(`Group created${inviteData ? ` and invite sent to ${profile?.display_name ?? 'user'}` : ''}`);
-      setGroupName('');
-    } catch (error: any) {
-      console.error('CREATE GROUP ERROR:', error);
-      showToast(error?.message || 'Could not create group.');
-    } finally {
-      setGroupSubmitting(false);
-    }
-  };
+        if (memberError) {
+          throw memberError;
+        }
+
+        const {
+          data: channelData,
+          error: channelError,
+        } =
+          await supabase
+            .from(
+              'chat_channels',
+            )
+            .insert({
+              group_id: groupId,
+              name,
+              description: '',
+              position: 0,
+              is_default: true,
+              created_by: myId,
+            })
+            .select('id')
+            .single();
+
+        if (
+          channelError ||
+          !channelData
+        ) {
+          throw (
+            channelError ??
+            new Error(
+              'Could not create group channel.',
+            )
+          );
+        }
+
+        const {
+          data: conversationData,
+          error:
+            conversationError,
+        } =
+          await supabase
+            .from(
+              'chat_conversations',
+            )
+            .insert({
+              type: 'channel',
+              group_id:
+                groupId,
+              channel_id:
+                channelData.id,
+              created_by: myId,
+            })
+            .select('id')
+            .single();
+
+        if (
+          conversationError ||
+          !conversationData
+        ) {
+          throw (
+            conversationError ??
+            new Error(
+              'Could not create group conversation.',
+            )
+          );
+        }
+
+        const {
+          error:
+            conversationMemberError,
+        } =
+          await supabase
+            .from(
+              'chat_conversation_members',
+            )
+            .insert({
+              conversation_id:
+                conversationData.id,
+              user_id: myId,
+            });
+
+        if (
+          conversationMemberError
+        ) {
+          throw conversationMemberError;
+        }
+
+        const {
+          data: inviteData,
+          error: inviteError,
+        } =
+          await supabase
+            .from(
+              'chat_group_invitations',
+            )
+            .insert({
+              group_id: groupId,
+              inviter_id: myId,
+              invitee_id: id,
+              status:
+                'pending',
+            })
+            .select('id')
+            .single();
+
+        if (inviteError) {
+          throw inviteError;
+        }
+
+        setGroupSuccess(
+          `Group created${
+            inviteData
+              ? ` and invite sent to ${
+                  profile?.display_name ??
+                  'user'
+                }`
+              : ''
+          }`,
+        );
+
+        setGroupName('');
+      } catch (error: any) {
+        console.error(
+          'CREATE GROUP ERROR:',
+          error,
+        );
+
+        showToast(
+          error?.message ||
+            'Could not create group.',
+        );
+      } finally {
+        setGroupSubmitting(
+          false,
+        );
+      }
+    };
 
   /*
    * MESSAGE RENDERING
@@ -1447,19 +2444,24 @@ export default function ChatDetailScreen() {
     item: Message;
   }) => {
     const isMine =
-      item.sender_id === myId;
+      item.sender_id ===
+      myId;
 
     const isSidekickReply =
       isSidekick &&
-      item.sender_id === 'sidekick';
+      item.sender_id ===
+        'sidekick';
 
     const time =
       new Date(
         item.created_at,
-      ).toLocaleTimeString([], {
-        hour: '2-digit',
-        minute: '2-digit',
-      });
+      ).toLocaleTimeString(
+        [],
+        {
+          hour: '2-digit',
+          minute: '2-digit',
+        },
+      );
 
     const outgoing =
       isMine &&
@@ -1481,15 +2483,26 @@ export default function ChatDetailScreen() {
       >
         <Pressable
           onLongPress={() => {
-            if (isMine && !isSidekickReply) {
-              void handleUnsendMessage(item);
+            if (
+              isMine &&
+              !isSidekickReply
+            ) {
+              void handleUnsendMessage(
+                item,
+              );
             }
           }}
           delayLongPress={350}
-          disabled={!isMine || isSidekickReply}
+          disabled={
+            !isMine ||
+            isSidekickReply
+          }
           style={({ pressed }) => [
             styles.messagePressable,
-            pressed && isMine && !isSidekickReply && styles.messagePressed,
+            pressed &&
+              isMine &&
+              !isSidekickReply &&
+              styles.messagePressed,
           ]}
         >
           <View
@@ -1497,212 +2510,248 @@ export default function ChatDetailScreen() {
               styles.bubble,
               isSidekickReply
                 ? {
-                  backgroundColor:
-                    colors.card,
-                  borderColor:
-                    colors.border,
-                  borderWidth: 1,
-                  borderBottomLeftRadius: 6,
-                }
-              : outgoing
-                ? {
-                    backgroundColor:
-                      accentForeground,
-                    borderBottomRightRadius: 6,
-                  }
-                : {
                     backgroundColor:
                       colors.card,
                     borderColor:
                       colors.border,
                     borderWidth: 1,
                     borderBottomLeftRadius: 6,
-                  },
-          ]}
-        >
-          {isSidekickReply ? (
-            <Text
-              style={[
-                styles.sidekickLabel,
-                {
-                  color:
-                    accentForeground,
-                },
-              ]}
-            >
-              SIDEKICK
-            </Text>
-          ) : null}
-
-          {item.attachment_type ===
-            'image' &&
-          item.attachment_url ? (
-            <Image
-              source={{
-                uri: item.attachment_url,
-              }}
-              style={
-                styles.attachmentImage
-              }
-              resizeMode="cover"
-            />
-          ) : null}
-
-          {item.attachment_type ===
-            'video' &&
-          item.attachment_url ? (
-            <Pressable
-              onPress={() => Linking.openURL(item.attachment_url!)}
-              style={[styles.docBubble, { borderColor: outgoing ? 'rgba(255,255,255,0.4)' : colors.border }]}
-            >
-              <Text style={[styles.docBubbleText, { color: outgoing ? onAccent : colors.text }]}>🎬 Video</Text>
-            </Pressable>
-          ) : null}
-
-          {item.attachment_type ===
-            'audio' &&
-          item.attachment_url ? (
-            <Pressable
-              onPress={() =>
-                togglePlayback(item)
-              }
-              style={[
-                styles.audioBubble,
-                {
-                  borderColor:
-                    outgoing
-                      ? 'rgba(255,255,255,0.4)'
-                      : colors.border,
-                },
-              ]}
-            >
-              {playingMessageId ===
-              item.id ? (
-                <Pause
-                  color={
-                    outgoing
-                      ? onAccent
-                      : colors.text
                   }
-                  size={18}
-                />
-              ) : (
-                <Play
-                  color={
-                    outgoing
-                      ? onAccent
-                      : colors.text
-                  }
-                  size={18}
-                />
-              )}
-
-              <Text
-                style={[
-                  styles.audioBubbleText,
-                  {
-                    color:
-                      outgoing
-                        ? onAccent
-                        : colors.text,
-                  },
-                ]}
-              >
-                Voice message
-              </Text>
-            </Pressable>
-          ) : null}
-
-          {item.attachment_type ===
-            'document' &&
-          item.attachment_url ? (
-            <Pressable
-              onPress={() =>
-                Linking.openURL(
-                  item.attachment_url!,
-                )
-              }
-              style={[
-                styles.docBubble,
-                {
-                  borderColor:
-                    outgoing
-                      ? 'rgba(255,255,255,0.4)'
-                      : colors.border,
-                },
-              ]}
-            >
-              <FileText
-                color={
-                  outgoing
-                    ? onAccent
-                    : colors.text
-                }
-                size={18}
-              />
-
-              <Text
-                numberOfLines={1}
-                style={[
-                  styles.docBubbleText,
-                  {
-                    color:
-                      outgoing
-                        ? onAccent
-                        : colors.text,
-                  },
-                ]}
-              >
-                {item.attachment_name ??
-                  'Document'}
-              </Text>
-            </Pressable>
-          ) : null}
-
-          {!item.attachment_type ? (
-            <Text
-              style={[
-                styles.bubbleText,
-                {
-                  color:
-                    contentColor,
-                },
-              ]}
-            >
-              {item.content}
-            </Text>
-          ) : null}
-
-          <Text
-            style={[
-              styles.bubbleTime,
-              {
-                color: outgoing
-                  ? 'rgba(255,255,255,0.75)'
-                  : colors.muted,
-              },
+                : outgoing
+                  ? {
+                      backgroundColor:
+                        accentForeground,
+                      borderBottomRightRadius: 6,
+                    }
+                  : {
+                      backgroundColor:
+                        colors.card,
+                      borderColor:
+                        colors.border,
+                      borderWidth: 1,
+                      borderBottomLeftRadius: 6,
+                    },
             ]}
           >
-            {time}
-          </Text>
-          {outgoing ? (
-            <CheckCheck color={accentForeground} size={14} strokeWidth={2.2} style={{ marginLeft: 4 }} />
-          ) : null}
+            {isSidekickReply ? (
+              <Text
+                style={[
+                  styles.sidekickLabel,
+                  {
+                    color:
+                      accentForeground,
+                  },
+                ]}
+              >
+                SIDEKICK
+              </Text>
+            ) : null}
+
+            {item.attachment_type ===
+              'image' &&
+            item.attachment_url ? (
+              <Image
+                source={{
+                  uri: item.attachment_url,
+                }}
+                style={
+                  styles.attachmentImage
+                }
+                resizeMode="cover"
+              />
+            ) : null}
+
+            {item.attachment_type ===
+              'video' &&
+            item.attachment_url ? (
+              <Pressable
+                onPress={() =>
+                  Linking.openURL(
+                    item.attachment_url!,
+                  )
+                }
+                style={[
+                  styles.docBubble,
+                  {
+                    borderColor:
+                      outgoing
+                        ? 'rgba(255,255,255,0.4)'
+                        : colors.border,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.docBubbleText,
+                    {
+                      color:
+                        outgoing
+                          ? onAccent
+                          : colors.text,
+                    },
+                  ]}
+                >
+                  🎬 Video
+                </Text>
+              </Pressable>
+            ) : null}
+
+            {item.attachment_type ===
+              'audio' &&
+            item.attachment_url ? (
+              <Pressable
+                onPress={() =>
+                  togglePlayback(item)
+                }
+                style={[
+                  styles.audioBubble,
+                  {
+                    borderColor:
+                      outgoing
+                        ? 'rgba(255,255,255,0.4)'
+                        : colors.border,
+                  },
+                ]}
+              >
+                {playingMessageId ===
+                item.id ? (
+                  <Pause
+                    color={
+                      outgoing
+                        ? onAccent
+                        : colors.text
+                    }
+                    size={18}
+                  />
+                ) : (
+                  <Play
+                    color={
+                      outgoing
+                        ? onAccent
+                        : colors.text
+                    }
+                    size={18}
+                  />
+                )}
+
+                <Text
+                  style={[
+                    styles.audioBubbleText,
+                    {
+                      color:
+                        outgoing
+                          ? onAccent
+                          : colors.text,
+                    },
+                  ]}
+                >
+                  Voice message
+                </Text>
+              </Pressable>
+            ) : null}
+
+            {item.attachment_type ===
+              'document' &&
+            item.attachment_url ? (
+              <Pressable
+                onPress={() =>
+                  Linking.openURL(
+                    item.attachment_url!,
+                  )
+                }
+                style={[
+                  styles.docBubble,
+                  {
+                    borderColor:
+                      outgoing
+                        ? 'rgba(255,255,255,0.4)'
+                        : colors.border,
+                  },
+                ]}
+              >
+                <FileText
+                  color={
+                    outgoing
+                      ? onAccent
+                      : colors.text
+                  }
+                  size={18}
+                />
+
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.docBubbleText,
+                    {
+                      color:
+                        outgoing
+                          ? onAccent
+                          : colors.text,
+                    },
+                  ]}
+                >
+                  {item.attachment_name ??
+                    'Document'}
+                </Text>
+              </Pressable>
+            ) : null}
+
+            {!item.attachment_type ? (
+              <Text
+                style={[
+                  styles.bubbleText,
+                  {
+                    color:
+                      contentColor,
+                  },
+                ]}
+              >
+                {item.content}
+              </Text>
+            ) : null}
+
+            <Text
+              style={[
+                styles.bubbleTime,
+                {
+                  color:
+                    outgoing
+                      ? 'rgba(255,255,255,0.75)'
+                      : colors.muted,
+                },
+              ]}
+            >
+              {time}
+            </Text>
+
+            {outgoing ? (
+              <CheckCheck
+                color={
+                  onAccent
+                }
+                size={14}
+                strokeWidth={2.2}
+                style={{
+                  marginLeft: 4,
+                }}
+              />
+            ) : null}
           </View>
         </Pressable>
       </View>
     );
   };
 
-  const headerName = isSidekick
-    ? 'SIDEKICK'
-    : (
-        profile?.display_name ??
-        SYSTEM_CHAT_TITLES[
-          normalizedId
-        ] ??
-        'Chat'
-      ).toUpperCase();
+  const headerName =
+    isSidekick
+      ? 'SIDEKICK'
+      : (
+          profile?.display_name ??
+          SYSTEM_CHAT_TITLES[
+            normalizedId
+          ] ??
+          'Chat'
+        ).toUpperCase();
 
   const showProfileButton =
     !isSidekick &&
@@ -1710,8 +2759,10 @@ export default function ChatDetailScreen() {
       normalizedId
     ];
 
-  const closeMenu = () =>
-    setMenuOpen(false);
+  const closeMenu =
+    () => {
+      setMenuOpen(false);
+    };
 
   return (
     <SafeAreaView
@@ -1735,22 +2786,32 @@ export default function ChatDetailScreen() {
         ]}
       >
         <Pressable
-          onPress={() => router.replace('/(tabs)' as never)}
+          onPress={() =>
+            router.replace(
+              '/(tabs)' as never,
+            )
+          }
           hitSlop={12}
           style={styles.headerBtn}
         >
           <ChevronLeft
-            color={colors.text}
+            color={
+              colors.text
+            }
             size={26}
           />
         </Pressable>
 
         <View
-          style={styles.headerTitleWrap}
+          style={
+            styles.headerTitleWrap
+          }
         >
           {profileLoading ? (
             <ActivityIndicator
-              color={colors.muted}
+              color={
+                colors.muted
+              }
               size="small"
             />
           ) : (
@@ -1760,7 +2821,8 @@ export default function ChatDetailScreen() {
               }
               onPress={() =>
                 router.push({
-                  pathname: '/chat/profile/[id]',
+                  pathname:
+                    '/chat/profile/[id]',
                   params: { id },
                 } as never)
               }
@@ -1772,7 +2834,10 @@ export default function ChatDetailScreen() {
                 style={[
                   styles.headerTitle,
                   {
-                    color: isBlackDark ? '#FFFFFF' : accentForeground,
+                    color:
+                      isBlackDark
+                        ? '#FFFFFF'
+                        : accentForeground,
                   },
                 ]}
                 numberOfLines={1}
@@ -1790,9 +2855,10 @@ export default function ChatDetailScreen() {
                     style={[
                       styles.activeDot,
                       {
-                        backgroundColor: otherUserActive
-                          ? '#34C759'
-                          : '#8E8E93',
+                        backgroundColor:
+                          otherUserActive
+                            ? '#34C759'
+                            : '#8E8E93',
                       },
                     ]}
                   />
@@ -1800,10 +2866,15 @@ export default function ChatDetailScreen() {
                   <Text
                     style={[
                       styles.activeText,
-                      { color: colors.muted },
+                      {
+                        color:
+                          colors.muted,
+                      },
                     ]}
                   >
-                    {otherUserActive ? 'Active now' : 'Offline'}
+                    {otherUserActive
+                      ? 'Active now'
+                      : 'Offline'}
                   </Text>
                 </View>
               ) : null}
@@ -1819,7 +2890,9 @@ export default function ChatDetailScreen() {
           style={styles.headerBtn}
         >
           <MoreVertical
-            color={colors.text}
+            color={
+              colors.text
+            }
             size={24}
           />
         </Pressable>
@@ -1830,7 +2903,9 @@ export default function ChatDetailScreen() {
       <View style={styles.body}>
         {messagesLoading ? (
           <View
-            style={styles.centerState}
+            style={
+              styles.centerState
+            }
           >
             <ActivityIndicator
               color={
@@ -1853,7 +2928,9 @@ export default function ChatDetailScreen() {
           </View>
         ) : messagesError ? (
           <View
-            style={styles.centerState}
+            style={
+              styles.centerState
+            }
           >
             <Text
               style={[
@@ -1868,7 +2945,9 @@ export default function ChatDetailScreen() {
             </Text>
 
             <Pressable
-              onPress={loadMessages}
+              onPress={
+                loadMessages
+              }
               style={[
                 styles.retryBtn,
                 {
@@ -1886,9 +2965,12 @@ export default function ChatDetailScreen() {
               </Text>
             </Pressable>
           </View>
-        ) : messages.length === 0 ? (
+        ) : messages.length ===
+          0 ? (
           <View
-            style={styles.centerState}
+            style={
+              styles.centerState
+            }
           >
             {isSidekick ? (
               <>
@@ -1935,7 +3017,7 @@ export default function ChatDetailScreen() {
           <FlatList
             ref={listRef}
             data={messages}
-            keyExtractor={(item) =>
+            keyExtractor={item =>
               item.id
             }
             renderItem={
@@ -1950,7 +3032,8 @@ export default function ChatDetailScreen() {
             onContentSizeChange={() =>
               listRef.current?.scrollToEnd(
                 {
-                  animated: false,
+                  animated:
+                    false,
                 },
               )
             }
@@ -1959,39 +3042,146 @@ export default function ChatDetailScreen() {
       </View>
 
       {/* COMPOSER */}
+
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={
+          Platform.OS === 'ios'
+            ? 'padding'
+            : undefined
+        }
         keyboardVerticalOffset={0}
       >
-        <View style={[styles.composer, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
-          {!isSidekick && !isRecording ? (
+        <View
+          style={[
+            styles.composer,
+            {
+              backgroundColor:
+                colors.card,
+              borderTopColor:
+                colors.border,
+            },
+          ]}
+        >
+          {!isSidekick &&
+          !isRecording ? (
             <Pressable
-              onPress={handlePickAttachment}
-              disabled={uploadingAttachment || sending}
+              onPress={
+                handlePickAttachment
+              }
+              disabled={
+                uploadingAttachment ||
+                sending
+              }
               hitSlop={8}
-              style={[styles.attachBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+              style={[
+                styles.attachBtn,
+                {
+                  backgroundColor:
+                    colors.card,
+                  borderColor:
+                    colors.border,
+                },
+              ]}
             >
-              {uploadingAttachment ? <ActivityIndicator color={accentForeground} size="small" /> : <Paperclip color={colors.muted} size={20} />}
+              {uploadingAttachment ? (
+                <ActivityIndicator
+                  color={
+                    accentForeground
+                  }
+                  size="small"
+                />
+              ) : (
+                <Paperclip
+                  color={
+                    colors.muted
+                  }
+                  size={20}
+                />
+              )}
             </Pressable>
           ) : null}
 
           {isRecording ? (
-            <View style={[styles.recordingRow, { borderColor: colors.border, backgroundColor: colors.bg }]}>
-              <View style={styles.recordingDot} />
-              <Text style={[styles.recordingText, { color: colors.text }]}>
-                Recording… {Math.floor(recordingSeconds / 60)}:{String(recordingSeconds % 60).padStart(2, '0')}
+            <View
+              style={[
+                styles.recordingRow,
+                {
+                  borderColor:
+                    colors.border,
+                  backgroundColor:
+                    colors.bg,
+                },
+              ]}
+            >
+              <View
+                style={
+                  styles.recordingDot
+                }
+              />
+
+              <Text
+                style={[
+                  styles.recordingText,
+                  {
+                    color:
+                      colors.text,
+                  },
+                ]}
+              >
+                Recording…{' '}
+                {Math.floor(
+                  recordingSeconds /
+                    60,
+                )}
+                :
+                {String(
+                  recordingSeconds %
+                    60,
+                ).padStart(2, '0')}
               </Text>
-              <Pressable onPress={cancelRecording} hitSlop={8} style={styles.recordingCancelBtn}>
-                <X color={colors.muted} size={18} />
+
+              <Pressable
+                onPress={
+                  cancelRecording
+                }
+                hitSlop={8}
+                style={
+                  styles.recordingCancelBtn
+                }
+              >
+                <X
+                  color={
+                    colors.muted
+                  }
+                  size={18}
+                />
               </Pressable>
             </View>
           ) : (
             <TextInput
               value={draft}
-              onChangeText={setDraft}
-              placeholder={isSidekick ? 'Message Sidekick…' : 'Type a message…'}
-              placeholderTextColor={colors.muted}
-              style={[styles.input, { color: colors.text, backgroundColor: colors.bg, borderColor: colors.border }]}
+              onChangeText={
+                setDraft
+              }
+              placeholder={
+                isSidekick
+                  ? 'Message Sidekick…'
+                  : 'Type a message…'
+              }
+              placeholderTextColor={
+                colors.muted
+              }
+              style={[
+                styles.input,
+                {
+                  color:
+                    colors.text,
+                  backgroundColor:
+                    colors.bg,
+                  borderColor:
+                    colors.border,
+                },
+              ]}
               multiline
               maxLength={2000}
               scrollEnabled={false}
@@ -2000,16 +3190,91 @@ export default function ChatDetailScreen() {
           )}
 
           {isRecording ? (
-            <Pressable onPress={stopRecordingAndSend} disabled={uploadingAttachment} hitSlop={8} style={[styles.sendBtn, { backgroundColor: accentForeground }]}>
-              {uploadingAttachment ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Square color="#FFFFFF" size={16} />}
+            <Pressable
+              onPress={
+                stopRecordingAndSend
+              }
+              disabled={
+                uploadingAttachment
+              }
+              hitSlop={8}
+              style={[
+                styles.sendBtn,
+                {
+                  backgroundColor:
+                    accentForeground,
+                },
+              ]}
+            >
+              {uploadingAttachment ? (
+                <ActivityIndicator
+                  color="#FFFFFF"
+                  size="small"
+                />
+              ) : (
+                <Square
+                  color="#FFFFFF"
+                  size={16}
+                />
+              )}
             </Pressable>
-          ) : !isSidekick && !draft.trim() ? (
-            <Pressable onPress={startRecording} disabled={uploadingAttachment} hitSlop={8} style={[styles.sendBtn, { backgroundColor: accentForeground }, uploadingAttachment && styles.sendBtnDisabled]}>
-              <Mic color="#FFFFFF" size={18} />
+          ) : !isSidekick &&
+            !draft.trim() ? (
+            <Pressable
+              onPress={
+                startRecording
+              }
+              disabled={
+                uploadingAttachment
+              }
+              hitSlop={8}
+              style={[
+                styles.sendBtn,
+                {
+                  backgroundColor:
+                    accentForeground,
+                },
+                uploadingAttachment &&
+                  styles.sendBtnDisabled,
+              ]}
+            >
+              <Mic
+                color="#FFFFFF"
+                size={18}
+              />
             </Pressable>
           ) : (
-            <Pressable onPress={handleSend} disabled={!draft.trim() || sending} hitSlop={8} style={[styles.sendBtn, { backgroundColor: accentForeground }, (!draft.trim() || sending) && styles.sendBtnDisabled]}>
-              {sending ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Send color="#FFFFFF" size={18} />}
+            <Pressable
+              onPress={
+                handleSend
+              }
+              disabled={
+                !draft.trim() ||
+                sending
+              }
+              hitSlop={8}
+              style={[
+                styles.sendBtn,
+                {
+                  backgroundColor:
+                    accentForeground,
+                },
+                (!draft.trim() ||
+                  sending) &&
+                  styles.sendBtnDisabled,
+              ]}
+            >
+              {sending ? (
+                <ActivityIndicator
+                  color="#FFFFFF"
+                  size="small"
+                />
+              ) : (
+                <Send
+                  color="#FFFFFF"
+                  size={18}
+                />
+              )}
             </Pressable>
           )}
         </View>
@@ -2049,115 +3314,562 @@ export default function ChatDetailScreen() {
         </View>
       ) : null}
 
-      {/* CHAT OPTIONS — top-right dropdown */}
+      {/* CHAT OPTIONS */}
+
       {menuOpen ? (
-        <Pressable style={styles.menuBackdrop} onPress={closeMenu}>
-          <View style={[styles.dropdownMenu, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <Pressable
+          style={
+            styles.menuBackdrop
+          }
+          onPress={closeMenu}
+        >
+          <View
+            style={[
+              styles.dropdownMenu,
+              {
+                backgroundColor:
+                  colors.card,
+                borderColor:
+                  colors.border,
+              },
+            ]}
+          >
             {!isSidekick ? (
               <>
-                <Pressable style={styles.menuItem} onPress={() => { closeMenu(); setReportOpen(true); }}>
-                  <Text style={[styles.menuItemText, { color: colors.text }]}>Report</Text>
+                <Pressable
+                  style={
+                    styles.menuItem
+                  }
+                  onPress={() => {
+                    closeMenu();
+                    setReportOpen(
+                      true,
+                    );
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.menuItemText,
+                      {
+                        color:
+                          colors.text,
+                      },
+                    ]}
+                  >
+                    Report
+                  </Text>
                 </Pressable>
-                <Pressable style={styles.menuItem} onPress={handleBlock} disabled={actionLoading === 'block'}>
-                  <Text style={[styles.menuItemText, { color: colors.text }]}>{actionLoading === 'block' ? 'Blocking…' : 'Block'}</Text>
+
+                <Pressable
+                  style={
+                    styles.menuItem
+                  }
+                  onPress={
+                    handleBlock
+                  }
+                  disabled={
+                    actionLoading ===
+                    'block'
+                  }
+                >
+                  <Text
+                    style={[
+                      styles.menuItemText,
+                      {
+                        color:
+                          colors.text,
+                      },
+                    ]}
+                  >
+                    {actionLoading ===
+                    'block'
+                      ? 'Blocking…'
+                      : 'Block'}
+                  </Text>
                 </Pressable>
-                <Pressable style={styles.menuItem} onPress={() => { closeMenu(); setTagModalOpen(true); void loadChatTags(); }}>
-                  <Text style={[styles.menuItemText, { color: colors.text }]}>Add Tag</Text>
+
+                <Pressable
+                  style={
+                    styles.menuItem
+                  }
+                  onPress={() => {
+                    closeMenu();
+                    setTagModalOpen(
+                      true,
+                    );
+                    void loadChatTags();
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.menuItemText,
+                      {
+                        color:
+                          colors.text,
+                      },
+                    ]}
+                  >
+                    Add Tag
+                  </Text>
                 </Pressable>
-                <Pressable style={styles.menuItem} onPress={() => { closeMenu(); Alert.alert('Delete chat?', 'This removes the conversation from your chat list.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Delete', style: 'destructive', onPress: handleDeleteChat }]); }}>
-                  <Text style={[styles.menuItemText, { color: '#C84D4D' }]}>Delete Chat</Text>
+
+                <Pressable
+                  style={
+                    styles.menuItem
+                  }
+                  onPress={() => {
+                    closeMenu();
+
+                    Alert.alert(
+                      'Delete chat?',
+                      'This removes the conversation from your chat list.',
+                      [
+                        {
+                          text: 'Cancel',
+                          style: 'cancel',
+                        },
+                        {
+                          text: 'Delete',
+                          style: 'destructive',
+                          onPress:
+                            handleDeleteChat,
+                        },
+                      ],
+                    );
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.menuItemText,
+                      {
+                        color:
+                          '#C84D4D',
+                      },
+                    ]}
+                  >
+                    Delete Chat
+                  </Text>
                 </Pressable>
               </>
             ) : null}
-            <Pressable style={styles.menuItem} onPress={handleClearChat} disabled={actionLoading === 'clear'}>
-              <Text style={[styles.menuItemText, { color: colors.text }]}>{actionLoading === 'clear' ? 'Clearing…' : 'Clear Chat'}</Text>
+
+            <Pressable
+              style={
+                styles.menuItem
+              }
+              onPress={
+                handleClearChat
+              }
+              disabled={
+                actionLoading ===
+                'clear'
+              }
+            >
+              <Text
+                style={[
+                  styles.menuItemText,
+                  {
+                    color:
+                      colors.text,
+                  },
+                ]}
+              >
+                {actionLoading ===
+                'clear'
+                  ? 'Clearing…'
+                  : 'Clear Chat'}
+              </Text>
             </Pressable>
           </View>
         </Pressable>
       ) : null}
 
-      <Modal visible={tagModalOpen} transparent animationType="fade" onRequestClose={() => setTagModalOpen(false)}>
-        <View style={styles.subShade}>
-          <View style={[styles.subSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <View style={styles.subHeader}>
-              <Text style={[styles.subTitle, { color: colors.text }]}>Add Tag</Text>
-              <Pressable onPress={() => setTagModalOpen(false)} hitSlop={12}><X color={colors.muted} size={22} /></Pressable>
+      {/* TAG MODAL */}
+
+      <Modal
+        visible={
+          tagModalOpen
+        }
+        transparent
+        animationType="fade"
+        onRequestClose={() =>
+          setTagModalOpen(
+            false,
+          )
+        }
+      >
+        <View
+          style={
+            styles.subShade
+          }
+        >
+          <View
+            style={[
+              styles.subSheet,
+              {
+                backgroundColor:
+                  colors.card,
+                borderColor:
+                  colors.border,
+              },
+            ]}
+          >
+            <View
+              style={
+                styles.subHeader
+              }
+            >
+              <Text
+                style={[
+                  styles.subTitle,
+                  {
+                    color:
+                      colors.text,
+                  },
+                ]}
+              >
+                Add Tag
+              </Text>
+
+              <Pressable
+                onPress={() =>
+                  setTagModalOpen(
+                    false,
+                  )
+                }
+                hitSlop={12}
+              >
+                <X
+                  color={
+                    colors.muted
+                  }
+                  size={22}
+                />
+              </Pressable>
             </View>
-            {chatTags.length === 0 ? (
-              <Text style={[styles.subHint, { color: colors.muted }]}>You haven't created any tags yet.</Text>
-            ) : chatTags.map((tag) => {
-              const selected = assignedTagIds.includes(tag.id);
-              return (
-                <Pressable key={tag.id} onPress={() => toggleChatTag(tag.id)} style={[styles.menuItem, { borderBottomColor: colors.border }]}>
-                  <Text style={[styles.menuItemText, { color: selected ? accentForeground : colors.text }]}>{selected ? '✓ ' : ''}{tag.name}</Text>
-                </Pressable>
-              );
-            })}
+
+            {chatTags.length ===
+            0 ? (
+              <Text
+                style={[
+                  styles.subHint,
+                  {
+                    color:
+                      colors.muted,
+                  },
+                ]}
+              >
+                You haven't created
+                any tags yet.
+              </Text>
+            ) : (
+              chatTags.map(tag => {
+                const selected =
+                  assignedTagIds.includes(
+                    tag.id,
+                  );
+
+                return (
+                  <Pressable
+                    key={tag.id}
+                    onPress={() =>
+                      toggleChatTag(
+                        tag.id,
+                      )
+                    }
+                    style={[
+                      styles.menuItem,
+                      {
+                        borderBottomColor:
+                          colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.menuItemText,
+                        {
+                          color:
+                            selected
+                              ? accentForeground
+                              : colors.text,
+                        },
+                      ]}
+                    >
+                      {selected
+                        ? '✓ '
+                        : ''}
+                      {tag.name}
+                    </Text>
+                  </Pressable>
+                );
+              })
+            )}
           </View>
         </View>
       </Modal>
 
+      {/* ATTACHMENT REVIEW */}
+
       <Modal
-        visible={attachmentReviewOpen}
+        visible={
+          attachmentReviewOpen
+        }
         transparent
         animationType="fade"
-        onRequestClose={closeAttachmentReview}
+        onRequestClose={
+          closeAttachmentReview
+        }
       >
-        <View style={styles.subShade}>
-          <View style={[styles.attachmentReviewSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <View style={styles.subHeader}>
-              <Text style={[styles.subTitle, { color: colors.text }]}>Review attachment</Text>
-              <Pressable onPress={closeAttachmentReview} hitSlop={12} disabled={attachmentSending}>
-                <X color={colors.muted} size={22} />
+        <View
+          style={
+            styles.subShade
+          }
+        >
+          <View
+            style={[
+              styles.attachmentReviewSheet,
+              {
+                backgroundColor:
+                  colors.card,
+                borderColor:
+                  colors.border,
+              },
+            ]}
+          >
+            <View
+              style={
+                styles.subHeader
+              }
+            >
+              <Text
+                style={[
+                  styles.subTitle,
+                  {
+                    color:
+                      colors.text,
+                  },
+                ]}
+              >
+                Review attachment
+              </Text>
+
+              <Pressable
+                onPress={
+                  closeAttachmentReview
+                }
+                hitSlop={12}
+                disabled={
+                  attachmentSending
+                }
+              >
+                <X
+                  color={
+                    colors.muted
+                  }
+                  size={22}
+                />
               </Pressable>
             </View>
 
-            {pendingAttachment?.type === 'image' ? (
+            {pendingAttachment?.type ===
+            'image' ? (
               <Image
-                source={{ uri: pendingAttachment.uri }}
-                style={styles.attachmentReviewImage}
+                source={{
+                  uri: pendingAttachment.uri,
+                }}
+                style={
+                  styles.attachmentReviewImage
+                }
                 resizeMode="contain"
               />
-            ) : pendingAttachment?.type === 'audio' ? (
-              <View style={[styles.attachmentReviewAudio, { borderColor: colors.border }]}>
+            ) : pendingAttachment?.type ===
+              'audio' ? (
+              <View
+                style={[
+                  styles.attachmentReviewAudio,
+                  {
+                    borderColor:
+                      colors.border,
+                  },
+                ]}
+              >
                 <Pressable
-                  onPress={toggleReviewAudio}
-                  style={[styles.reviewPlayButton, { backgroundColor: accentForeground }]}
+                  onPress={
+                    toggleReviewAudio
+                  }
+                  style={[
+                    styles.reviewPlayButton,
+                    {
+                      backgroundColor:
+                        accentForeground,
+                    },
+                  ]}
                 >
-                  {reviewPlaying ? <Pause color="#FFFFFF" size={20} /> : <Play color="#FFFFFF" size={20} />}
+                  {reviewPlaying ? (
+                    <Pause
+                      color="#FFFFFF"
+                      size={20}
+                    />
+                  ) : (
+                    <Play
+                      color="#FFFFFF"
+                      size={20}
+                    />
+                  )}
                 </Pressable>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.reviewFileName, { color: colors.text }]} numberOfLines={2}>
-                    {pendingAttachment.name}
+
+                <View
+                  style={{
+                    flex: 1,
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.reviewFileName,
+                      {
+                        color:
+                          colors.text,
+                      },
+                    ]}
+                    numberOfLines={2}
+                  >
+                    {
+                      pendingAttachment.name
+                    }
                   </Text>
-                  <Text style={[styles.subHint, { color: colors.muted }]}>Voice note ready to send</Text>
+
+                  <Text
+                    style={[
+                      styles.subHint,
+                      {
+                        color:
+                          colors.muted,
+                      },
+                    ]}
+                  >
+                    Voice note ready
+                    to send
+                  </Text>
                 </View>
               </View>
             ) : (
-              <View style={[styles.attachmentReviewFile, { borderColor: colors.border }]}>
-                <FileText color={accentForeground} size={30} />
-                <Text style={[styles.reviewFileName, { color: colors.text }]} numberOfLines={3}>
-                  {pendingAttachment?.name || 'Attachment'}
+              <View
+                style={[
+                  styles.attachmentReviewFile,
+                  {
+                    borderColor:
+                      colors.border,
+                  },
+                ]}
+              >
+                <FileText
+                  color={
+                    accentForeground
+                  }
+                  size={30}
+                />
+
+                <Text
+                  style={[
+                    styles.reviewFileName,
+                    {
+                      color:
+                        colors.text,
+                    },
+                  ]}
+                  numberOfLines={3}
+                >
+                  {pendingAttachment?.name ||
+                    'Attachment'}
                 </Text>
-                <Text style={[styles.subHint, { color: colors.muted }]}>Ready to send</Text>
+
+                <Text
+                  style={[
+                    styles.subHint,
+                    {
+                      color:
+                        colors.muted,
+                    },
+                  ]}
+                >
+                  Ready to send
+                </Text>
               </View>
             )}
 
-            <View style={styles.reviewActions}>
+            <View
+              style={
+                styles.reviewActions
+              }
+            >
               <Pressable
-                onPress={closeAttachmentReview}
-                disabled={attachmentSending}
-                style={[styles.reviewCancelButton, { borderColor: colors.border }]}
+                onPress={
+                  closeAttachmentReview
+                }
+                disabled={
+                  attachmentSending
+                }
+                style={[
+                  styles.reviewCancelButton,
+                  {
+                    borderColor:
+                      colors.border,
+                  },
+                ]}
               >
-                <Text style={[styles.reviewCancelText, { color: colors.text }]}>Cancel</Text>
+                <Text
+                  style={[
+                    styles.reviewCancelText,
+                    {
+                      color:
+                        colors.text,
+                    },
+                  ]}
+                >
+                  Cancel
+                </Text>
               </Pressable>
+
               <Pressable
-                onPress={sendPendingAttachment}
-                disabled={!pendingAttachment || attachmentSending}
-                style={[styles.reviewSendButton, { backgroundColor: accentForeground }, attachmentSending && styles.sendBtnDisabled]}
+                onPress={
+                  sendPendingAttachment
+                }
+                disabled={
+                  !pendingAttachment ||
+                  attachmentSending
+                }
+                style={[
+                  styles.reviewSendButton,
+                  {
+                    backgroundColor:
+                      accentForeground,
+                  },
+                  attachmentSending &&
+                    styles.sendBtnDisabled,
+                ]}
               >
-                {attachmentSending ? <ActivityIndicator color="#FFFFFF" size="small" /> : <Send color="#FFFFFF" size={17} />}
-                <Text style={styles.reviewSendText}>{attachmentSending ? 'Sending…' : 'Send'}</Text>
+                {attachmentSending ? (
+                  <ActivityIndicator
+                    color="#FFFFFF"
+                    size="small"
+                  />
+                ) : (
+                  <Send
+                    color="#FFFFFF"
+                    size={17}
+                  />
+                )}
+
+                <Text
+                  style={
+                    styles.reviewSendText
+                  }
+                >
+                  {attachmentSending
+                    ? 'Sending…'
+                    : 'Send'}
+                </Text>
               </Pressable>
             </View>
           </View>
@@ -2167,7 +3879,9 @@ export default function ChatDetailScreen() {
       {/* REPORT */}
 
       <Modal
-        visible={reportOpen}
+        visible={
+          reportOpen
+        }
         transparent
         animationType="fade"
         onRequestClose={() =>
@@ -2312,12 +4026,17 @@ export default function ChatDetailScreen() {
           </View>
         </View>
       </Modal>
-
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  /*
+   * Every text-bearing style below explicitly specifies
+   * a Poppins family. This prevents React Native/web from
+   * falling back to the platform default for this screen.
+   */
+
   safe: {
     flex: 1,
   },
@@ -2326,7 +4045,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
-    paddingTop: 36,
+    paddingTop: 50,
     paddingBottom: 12,
     borderBottomWidth: 1,
   },
@@ -2362,7 +4081,6 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#34C759',
   },
 
   activeText: {
@@ -2522,9 +4240,11 @@ const styles = StyleSheet.create({
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    gap: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 9,
+    paddingBottom: 90,
+    paddingTop: 30,
     borderTopWidth: 1,
   },
 
@@ -2552,7 +4272,8 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#FF6B6B',
+    backgroundColor:
+      '#FF6B6B',
   },
 
   recordingText: {
@@ -2575,6 +4296,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontFamily: FONT,
     fontSize: 15,
+    fontWeight: '400',
   },
 
   sendBtn: {
@@ -2611,68 +4333,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  sheetShade: {
-    flex: 1,
-    backgroundColor:
-      'rgba(0,0,0,0.45)',
-  },
-
-  sheet: {
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingTop: 10,
-    paddingHorizontal: 20,
-    paddingBottom: 34,
-    borderTopWidth: 1,
-  },
-
-  sheetHandle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    alignSelf: 'center',
-    marginBottom: 14,
-  },
-
-  sheetHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-
-  sheetTitle: {
-    fontFamily: FONT_BOLD,
-    fontSize: 18,
-  },
-
-  attachGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-  },
-
-  attachItem: {
-    width: '32%',
-    alignItems: 'center',
-    paddingVertical: 16,
-    gap: 10,
-  },
-
-  attachIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  attachLabel: {
-    fontFamily: FONT_MED,
-    fontSize: 13,
-  },
-
   menuBackdrop: {
     position: 'absolute',
     top: 0,
@@ -2692,7 +4352,10 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     shadowOpacity: 0.16,
     shadowRadius: 12,
-    shadowOffset: { width: 0, height: 5 },
+    shadowOffset: {
+      width: 0,
+      height: 5,
+    },
     elevation: 8,
   },
 
@@ -2749,6 +4412,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontFamily: FONT,
     fontSize: 14,
+    fontWeight: '400',
     marginBottom: 14,
   },
 
@@ -2776,36 +4440,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  modalShade: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor:
-      'rgba(0,0,0,0.45)',
-  },
-
-  pollOptionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 10,
-  },
-
-  addOptionBtn: {
-    alignSelf: 'flex-start',
-    paddingVertical: 8,
-  },
-
-  addOptionText: {
-    fontFamily: FONT_SEMI,
-    fontSize: 14,
-  },
-
-  eventRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 10,
-  },
-
   attachmentReviewSheet: {
     width: '92%',
     maxWidth: 460,
@@ -2813,13 +4447,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: 18,
   },
+
   attachmentReviewImage: {
     width: '100%',
     height: 300,
     borderRadius: 16,
     marginVertical: 12,
-    backgroundColor: '#111111',
+    backgroundColor:
+      '#111111',
   },
+
   attachmentReviewAudio: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2829,6 +4466,7 @@ const styles = StyleSheet.create({
     padding: 14,
     marginVertical: 16,
   },
+
   attachmentReviewFile: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -2839,6 +4477,7 @@ const styles = StyleSheet.create({
     marginVertical: 16,
     gap: 8,
   },
+
   reviewPlayButton: {
     width: 44,
     height: 44,
@@ -2846,15 +4485,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+
   reviewFileName: {
     fontFamily: FONT_SEMI,
     fontSize: 14,
   },
+
   reviewActions: {
     flexDirection: 'row',
     gap: 10,
     marginTop: 4,
   },
+
   reviewCancelButton: {
     flex: 1,
     minHeight: 48,
@@ -2863,10 +4505,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+
   reviewCancelText: {
     fontFamily: FONT_SEMI,
     fontSize: 14,
   },
+
   reviewSendButton: {
     flex: 1,
     minHeight: 48,
@@ -2876,43 +4520,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
   },
+
   reviewSendText: {
     color: '#FFFFFF',
     fontFamily: FONT_SEMI,
     fontSize: 14,
   },
 
-  profileViewBody: {
-    alignItems: 'center',
-    paddingVertical: 20,
-    gap: 8,
+  successTextAlt: {
+    fontFamily:
+      FONT_EXTRA_BOLD,
   },
-
-  profileViewAvatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
-
-  profileViewAvatarText: {
-    fontFamily: FONT_BOLD,
-    fontSize: 26,
-  },
-
-  profileName: {
-    fontFamily: FONT_BOLD,
-    fontSize: 20,
-  },
-
-  profileUsername: {
-    fontFamily: FONT,
-    fontSize: 14,
-  },
-    profileViewAvatarImage: { width: 78, height: 78, borderRadius: 39 },
-    profileFieldLabel: { fontFamily: FONT_MED, fontSize: 11, marginTop: 10, textTransform: 'uppercase', letterSpacing: 0.6 },
-  profileBadge: { fontFamily: FONT_MED, fontSize: 13, marginTop: 8 },
-    profileBio: { fontFamily: FONT, fontSize: 13, lineHeight: 20, textAlign: 'center', marginTop: 8, maxWidth: 300 },
 });

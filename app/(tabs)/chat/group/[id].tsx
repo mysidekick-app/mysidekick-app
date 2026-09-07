@@ -1900,7 +1900,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
-    paddingTop: 8,
+    paddingTop: 50,
+    paddingBottom: 30,
     borderBottomWidth: 1,
     position: 'relative',
     zIndex: 20,
@@ -2088,6 +2089,8 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 10,
     paddingVertical: 9,
+    paddingBottom: 90,
+    paddingTop: 10,
     borderTopWidth: 1,
   },
 

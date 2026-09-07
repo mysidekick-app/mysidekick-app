@@ -214,11 +214,9 @@ const groupReminders = (reminders: Reminder[]): Group[] => {
   const upcoming: Reminder[] = [];
   const overdue: Reminder[] = [];
   const later: Reminder[] = [];
-  const completed: Reminder[] = [];
-
   for (const r of reminders) {
     if (r.completed) {
-      completed.push(r);
+      continue;
     } else if (r.due_date < today) {
       overdue.push(r);
     } else if (r.due_date === today) {
@@ -251,11 +249,6 @@ const groupReminders = (reminders: Reminder[]): Group[] => {
       key: 'upcoming',
       label: 'Upcoming',
       items: later.sort(byDate),
-    },
-    {
-      key: 'completed',
-      label: 'Complete',
-      items: completed.sort(byDate).reverse(),
     },
   ].filter((g) => g.items.length > 0);
 };
@@ -663,10 +656,23 @@ export default function RemindersScreen() {
     }
   }, [reminders, filter]);
 
-  const groups = useMemo(
-    () => groupReminders(filteredReminders),
-    [filteredReminders],
-  );
+  const groups = useMemo(() => {
+    if (filter === 'completed') {
+      return [
+        {
+          key: 'completed',
+          label: 'Complete',
+          items: [...filteredReminders].sort((a, b) => {
+            const d = a.due_date.localeCompare(b.due_date);
+            if (d !== 0) return d;
+            return (a.time ?? '99:99').localeCompare(b.time ?? '99:99');
+          }).reverse(),
+        },
+      ].filter((g) => g.items.length > 0);
+    }
+
+    return groupReminders(filteredReminders);
+  }, [filteredReminders, filter]);
 
   const FILTER_TAGS: {
     key: FilterTag;
@@ -1669,16 +1675,18 @@ function makeStyles(C: Palette) {
 
     fab: {
       position: 'absolute',
-      bottom: 24,
-      left: 0,
-      right: 0,
-      alignItems: 'center',
-      justifyContent: 'center',
+      bottom: 82,
+      alignSelf: 'center',
       width: 56,
       height: 56,
       borderRadius: 28,
-      alignSelf: 'center',
-      marginHorizontal: 'auto',
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOpacity: 0.25,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 6,
     },
 
     modalShade: {

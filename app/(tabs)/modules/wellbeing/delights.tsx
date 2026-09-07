@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 
 import { router } from 'expo-router';
-import { Bell, ChevronLeft, X } from 'lucide-react-native';
+import { ChevronLeft, Info, MoreVertical, X } from 'lucide-react-native';
 
 import { useApp } from '@/components/AppProvider';
 import { useAuth } from '@/components/AuthProvider';
@@ -27,9 +27,8 @@ import {
 } from '@/components/WellbeingCalendar';
 
 /* ------------------------------------------------------------------ */
-/* Palettes                                                           */
+/* Palettes                                                            */
 /* ------------------------------------------------------------------ */
-
 const DARK_PALETTE = {
   bg: '#090909',
   card: '#151515',
@@ -59,9 +58,8 @@ const FONT_BOLD = 'Poppins-Bold';
 const FONT_XB = 'Poppins-ExtraBold';
 
 /* ------------------------------------------------------------------ */
-/* The 9 delights                                                     */
+/* The 9 delights                                                      */
 /* ------------------------------------------------------------------ */
-
 type DelightKey =
   | 'walking_around'
   | 'fellowship'
@@ -145,9 +143,8 @@ const DELIGHT_BY_KEY = new Map<DelightKey, Delight>(
 const MODULE_KEY = 'delights';
 
 /* ------------------------------------------------------------------ */
-/* Helpers                                                            */
+/* Helpers                                                             */
 /* ------------------------------------------------------------------ */
-
 function prettyDateLabel(dateStr: string): string {
   const d = parseDate(dateStr);
 
@@ -169,9 +166,8 @@ function shortDateLabel(dateStr: string): string {
 }
 
 /* ------------------------------------------------------------------ */
-/* Entry row type                                                     */
+/* Entry row type                                                      */
 /* ------------------------------------------------------------------ */
-
 type DelightsEntryRow = {
   id: string;
   delights: DelightKey[] | null;
@@ -179,9 +175,8 @@ type DelightsEntryRow = {
 };
 
 /* ================================================================== */
-/* Screen                                                             */
+/* Screen                                                              */
 /* ================================================================== */
-
 export default function DelightsScreen() {
   const {
     isDark,
@@ -225,6 +220,9 @@ export default function DelightsScreen() {
   const [infoOpen, setInfoOpen] =
     useState<boolean>(false);
 
+  const [menuOpen, setMenuOpen] =
+    useState<boolean>(false);
+
   const [allEntryDates, setAllEntryDates] =
     useState<Set<string>>(new Set());
 
@@ -246,7 +244,6 @@ export default function DelightsScreen() {
   /* ---------------------------------------------------------------- */
   /* Toggle delight                                                    */
   /* ---------------------------------------------------------------- */
-
   const toggleDelight = useCallback(
     (key: DelightKey) => {
       setSelected((prev) => {
@@ -265,9 +262,8 @@ export default function DelightsScreen() {
   );
 
   /* ---------------------------------------------------------------- */
-  /* Load selected date                                               */
+  /* Load selected date                                                */
   /* ---------------------------------------------------------------- */
-
   const loadEntry = useCallback(
     async (dateStr: string) => {
       setLoading(true);
@@ -278,9 +274,11 @@ export default function DelightsScreen() {
         setError(
           'You must be signed in to use this module.',
         );
+
         setSelected(new Set());
         setContent('');
         setLoading(false);
+
         return;
       }
 
@@ -316,6 +314,7 @@ export default function DelightsScreen() {
         );
 
         setLoading(false);
+
         return;
       }
 
@@ -341,17 +340,15 @@ export default function DelightsScreen() {
   );
 
   /* ---------------------------------------------------------------- */
-  /* Initial selected-date load                                      */
+  /* Initial selected-date load                                       */
   /* ---------------------------------------------------------------- */
-
   useEffect(() => {
     loadEntry(selectedDate);
   }, [loadEntry, selectedDate]);
 
   /* ---------------------------------------------------------------- */
-  /* Load entry dates + saved entries                                */
+  /* Load entry dates + saved entries                                 */
   /* ---------------------------------------------------------------- */
-
   const loadEntryDates = useCallback(
     async () => {
       if (!user) {
@@ -417,9 +414,8 @@ export default function DelightsScreen() {
   }, [loadEntryDates]);
 
   /* ---------------------------------------------------------------- */
-  /* Date selection                                                   */
+  /* Date selection                                                    */
   /* ---------------------------------------------------------------- */
-
   const onSelectDate = useCallback(
     (date: string) => {
       if (date > today) {
@@ -434,13 +430,13 @@ export default function DelightsScreen() {
   /* ---------------------------------------------------------------- */
   /* Save                                                              */
   /* ---------------------------------------------------------------- */
-
   const onSave = useCallback(
     async () => {
       if (isFuture) {
         setSaveMsg(
           'You cannot save an entry for a future date.',
         );
+
         return;
       }
 
@@ -448,6 +444,7 @@ export default function DelightsScreen() {
         setError(
           'You must be signed in to save your delights.',
         );
+
         return;
       }
 
@@ -455,6 +452,7 @@ export default function DelightsScreen() {
         setSaveMsg(
           'Pick at least one delight before saving.',
         );
+
         return;
       }
 
@@ -521,12 +519,18 @@ export default function DelightsScreen() {
   const selectedCount = selected.size;
 
   /* ---------------------------------------------------------------- */
+  /* Settings                                                          */
+  /* ---------------------------------------------------------------- */
+  const openSettings = useCallback(() => {
+    setMenuOpen(false);
+    router.push('/(tabs)/profile');
+  }, []);
+
+  /* ---------------------------------------------------------------- */
   /* Render                                                            */
   /* ---------------------------------------------------------------- */
-
   return (
     <View style={styles.safe}>
-
       {/* Header */}
       <View
         style={[
@@ -536,13 +540,12 @@ export default function DelightsScreen() {
       >
         <Pressable
           onPress={() =>
-            router.push('/modules')
+            router.push('/(tabs)/modules/wellbeing')
           }
           style={[
             styles.backBtn,
             {
-              backgroundColor:
-                accent,
+              backgroundColor: accent,
             },
           ]}
           hitSlop={12}
@@ -555,26 +558,50 @@ export default function DelightsScreen() {
           />
         </Pressable>
 
-        <Text
-          style={styles.headerTitle}
-        >
+        <Text style={styles.headerTitle}>
           DELIGHTS
         </Text>
 
         <Pressable
           onPress={() =>
-            setInfoOpen(true)
+            setMenuOpen((prev) => !prev)
           }
-          style={styles.infoBtn}
+          style={styles.menuBtn}
           hitSlop={12}
-          accessibilityLabel="Notifications"
+          accessibilityLabel="Open settings menu"
         >
-          <Bell
+          <MoreVertical
             color={COLORS.text}
-            size={20}
+            size={22}
+            strokeWidth={2.3}
           />
         </Pressable>
       </View>
+
+      {/* Settings menu */}
+      {menuOpen ? (
+        <View
+          style={[
+            styles.menu,
+            {
+              backgroundColor: COLORS.card,
+              borderColor: COLORS.cardBorder,
+            },
+          ]}
+        >
+          <Pressable
+            onPress={openSettings}
+            style={({ pressed }) => [
+              styles.menuItem,
+              pressed && styles.menuItemPressed,
+            ]}
+          >
+            <Text style={styles.menuItemText}>
+              Settings
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
@@ -729,6 +756,7 @@ export default function DelightsScreen() {
                     </Text>
                   </View>
 
+                  {/* Info icon */}
                   <Pressable
                     onPress={() =>
                       setInfoOpen(true)
@@ -739,11 +767,12 @@ export default function DelightsScreen() {
                       styles.gridInfoBtn
                     }
                   >
-                    <Bell
+                    <Info
                       color={
                         COLORS.muted
                       }
-                      size={16}
+                      size={17}
+                      strokeWidth={2.2}
                     />
                   </Pressable>
                 </View>
@@ -1167,9 +1196,8 @@ export default function DelightsScreen() {
 }
 
 /* ------------------------------------------------------------------ */
-/* Styles                                                             */
+/* Styles                                                              */
 /* ------------------------------------------------------------------ */
-
 type Palette = typeof DARK_PALETTE;
 
 function makeStyles(C: Palette) {
@@ -1187,6 +1215,8 @@ function makeStyles(C: Palette) {
       paddingVertical: 12,
       borderBottomWidth: 1,
       borderBottomColor: C.divider,
+      position: 'relative',
+      zIndex: 20,
     },
 
     backBtn: {
@@ -1204,16 +1234,49 @@ function makeStyles(C: Palette) {
       color: C.text,
     },
 
-    infoBtn: {
+    menuBtn: {
       width: 38,
       height: 38,
       alignItems: 'center',
       justifyContent: 'center',
     },
 
+    menu: {
+      position: 'absolute',
+      top: 76,
+      right: 14,
+      minWidth: 150,
+      borderWidth: 1,
+      borderRadius: 14,
+      paddingVertical: 6,
+      zIndex: 1000,
+      elevation: 8,
+      shadowOffset: {
+        width: 0,
+        height: 4,
+      },
+      shadowOpacity: 0.18,
+      shadowRadius: 10,
+    },
+
+    menuItem: {
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+    },
+
+    menuItemPressed: {
+      opacity: 0.6,
+    },
+
+    menuItemText: {
+      fontFamily: FONT_MEDIUM,
+      fontSize: 13.5,
+      color: C.text,
+    },
+
     scroll: {
       padding: 16,
-      paddingBottom: 48,
+      paddingBottom: 110,
     },
 
     dateLabel: {

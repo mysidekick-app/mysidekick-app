@@ -117,7 +117,12 @@ export default function FinancesDashboard() {
 
   return (
     <SafeAreaView style={[styles.safe, isDark && styles.safeDark]}>
-      <PageHeader title="Finances" financeMode onSetCurrency={() => setCurrencyOpen(true)} />
+      <PageHeader
+  title="Finances"
+  financeMode
+  onBack={() => router.push('/modules')}
+  onSetCurrency={() => setCurrencyOpen(true)}
+/>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {error && <Text style={styles.error}>{error}</Text>}
 
@@ -240,6 +245,20 @@ const styles = StyleSheet.create({
   dateSep: { fontFamily: 'Poppins-Medium', fontSize: 14, color: '#908B83' },
   healthHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, mutedText: { fontFamily: 'Poppins-Regular', color: '#908B83', fontSize: 13 }, netValue: { fontFamily: 'Poppins-Bold', fontSize: 15 }, chart: { height: 190, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-around', paddingTop: 22, gap: 8 }, chartItem: { flex: 1, height: '100%', alignItems: 'center', justifyContent: 'flex-end' }, chartValue: { fontFamily: 'Poppins-Regular', color: '#89857D', fontSize: 9, marginBottom: 5, textAlign: 'center' }, barTrack: { height: 112, width: '64%', minWidth: 22, maxWidth: 46, borderRadius: 8, backgroundColor: '#F0EEEA', justifyContent: 'flex-end', overflow: 'hidden' }, bar: { width: '100%', borderRadius: 8 }, chartLabel: { fontFamily: 'Poppins-Medium', color: '#3C3933', fontSize: 10, marginTop: 8, textAlign: 'center' },
   spendingCard: { backgroundColor: '#FFF', borderRadius: 18, borderWidth: 1, borderColor: '#ECE9E4', padding: 18 }, categoryRow: { marginBottom: 16 }, categoryTop: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 7 }, categoryName: { fontFamily: 'Poppins-Medium', color: '#38352F', fontSize: 13 }, categoryAmount: { fontFamily: 'Poppins-Medium', color: '#77746E', fontSize: 12 }, categoryTrack: { height: 8, backgroundColor: '#F0EEEA', borderRadius: 5, overflow: 'hidden' }, trackDark: { backgroundColor: '#292929' }, categoryFill: { height: 8, borderRadius: 5 },
-  fab: { position: 'absolute', bottom: 24, alignSelf: 'center', width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
+  fab: {
+    position: 'absolute',
+    bottom: 82,
+    alignSelf: 'center',
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
   modalShade: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' }, modalCard: { backgroundColor: '#FFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 22, paddingBottom: 34 }, modalDark: { backgroundColor: '#161616' }, modalTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18 }, modalTitle: { fontFamily: 'Poppins-Bold', fontSize: 19, color: '#27241F' }, modalSub: { fontFamily: 'Poppins-Regular', fontSize: 12, color: '#908B83', marginTop: 3 }, modalOption: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F0EEEA' }, optionDark: { borderBottomColor: '#292929' }, optionIcon: { width: 36, height: 36, borderRadius: 11, alignItems: 'center', justifyContent: 'center' }, optionText: { flex: 1, fontFamily: 'Poppins-Medium', color: '#27241F', fontSize: 14 },
 });

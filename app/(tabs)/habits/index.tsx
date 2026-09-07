@@ -14,20 +14,18 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
   Check,
+  ChevronLeft,
   ChevronRight,
   Flame,
+  MoreVertical,
   Plus,
   X,
 } from 'lucide-react-native';
 
 import { router } from 'expo-router';
 
-import { PageHeader } from '@/components/PageHeader';
-
 import { DatePickerInput } from '@/components/DatePickerInput';
-
 import { useApp } from '@/components/AppProvider';
-
 import { supabase } from '@/lib/supabase';
 
 type Habit = {
@@ -58,8 +56,11 @@ const todayStr = () => {
   const d = new Date();
 
   return `${d.getFullYear()}-${String(
-    d.getMonth() + 1
-  ).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    d.getMonth() + 1,
+  ).padStart(2, '0')}-${String(d.getDate()).padStart(
+    2,
+    '0',
+  )}`;
 };
 
 export default function HabitsScreen() {
@@ -70,28 +71,28 @@ export default function HabitsScreen() {
   } = useApp();
 
   const [habits, setHabits] = useState<Habit[]>([]);
-
   const [completedToday, setCompletedToday] =
     useState<Set<string>>(new Set());
 
   const [loading, setLoading] = useState(true);
+  const [error, setError] =
+    useState<string | null>(null);
 
-  const [error, setError] = useState<string | null>(null);
+  const [modalOpen, setModalOpen] =
+    useState(false);
 
-  const [modalOpen, setModalOpen] = useState(false);
+  const [settingsMenuOpen, setSettingsMenuOpen] =
+    useState(false);
 
   const [name, setName] = useState('');
-
-  const [category, setCategory] = useState('Mind');
-
+  const [category, setCategory] =
+    useState('Mind');
   const [duration, setDuration] = useState('');
-
-  const [checkpoint, setCheckpoint] = useState('5');
-
-  const [startDate, setStartDate] = useState(todayStr());
-
+  const [checkpoint, setCheckpoint] =
+    useState('5');
+  const [startDate, setStartDate] =
+    useState(todayStr());
   const [endDate, setEndDate] = useState('');
-
   const [saving, setSaving] = useState(false);
 
   /*
@@ -113,8 +114,9 @@ export default function HabitsScreen() {
    *
    * The old Aug 18-19 streak does not carry over.
    */
+
   const calculateCurrentStreak = async (
-    habitId: string
+    habitId: string,
   ): Promise<number> => {
     const { data, error } = await supabase
       .from('habit_completions')
@@ -131,7 +133,7 @@ export default function HabitsScreen() {
     const dates = (data ?? [])
       .map(
         (row: { completed_on: string }) =>
-          row.completed_on
+          row.completed_on,
       )
       .filter(Boolean);
 
@@ -147,6 +149,7 @@ export default function HabitsScreen() {
      * If today has not been completed, the current streak
      * is zero.
      */
+
     if (dates[0] !== today) {
       return 0;
     }
@@ -154,12 +157,12 @@ export default function HabitsScreen() {
     let streak = 1;
 
     let previousDate = new Date(
-      `${today}T00:00:00`
+      `${today}T00:00:00`,
     );
 
     for (let i = 1; i < dates.length; i++) {
       const currentDate = new Date(
-        `${dates[i]}T00:00:00`
+        `${dates[i]}T00:00:00`,
       );
 
       const difference =
@@ -171,12 +174,12 @@ export default function HabitsScreen() {
        * We only continue if the previous completion was
        * exactly one calendar day before the current one.
        */
+
       if (difference !== 1) {
         break;
       }
 
       streak += 1;
-
       previousDate = currentDate;
     }
 
@@ -188,6 +191,7 @@ export default function HabitsScreen() {
    * LOAD HABITS
    * ---------------------------------------------------------
    */
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -207,7 +211,7 @@ export default function HabitsScreen() {
       supabase
         .from('habits')
         .select(
-          'id, name, category, duration_minutes, current_streak, checkpoint, trophies_earned, freezes_held'
+          'id, name, category, duration_minutes, current_streak, checkpoint, trophies_earned, freezes_held',
         )
         .order('created_at', {
           ascending: true,
@@ -220,14 +224,15 @@ export default function HabitsScreen() {
     ]);
 
     console.log('HABITS ERROR:', habitErr);
+
     console.log(
       'HABIT COMPLETIONS ERROR:',
-      compErr
+      compErr,
     );
 
     if (habitErr || compErr) {
       setError(
-        'Your habits could not be loaded.'
+        'Your habits could not be loaded.',
       );
 
       setLoading(false);
@@ -243,9 +248,9 @@ export default function HabitsScreen() {
       new Set(
         (compRows ?? []).map(
           (row: { habit_id: string }) =>
-            row.habit_id
-        )
-      )
+            row.habit_id,
+        ),
+      ),
     );
 
     /*
@@ -255,27 +260,29 @@ export default function HabitsScreen() {
      * automatically break the current streak even if
      * the old current_streak value is still stored.
      */
+
     const updatedHabits =
       await Promise.all(
         loadedHabits.map(async (habit) => {
           try {
             const streak =
               await calculateCurrentStreak(
-                habit.id
+                habit.id,
               );
 
             const trophies = Math.floor(
               streak /
                 Math.max(
                   Number(habit.checkpoint) || 1,
-                  1
-                )
+                  1,
+                ),
             );
 
             /*
              * Only update the database when the stored
              * values are different.
              */
+
             if (
               streak !== habit.current_streak ||
               trophies !== habit.trophies_earned
@@ -298,16 +305,15 @@ export default function HabitsScreen() {
             console.log(
               'STREAK LOAD ERROR:',
               habit.id,
-              err
+              err,
             );
 
             return habit;
           }
-        })
+        }),
       );
 
     setHabits(updatedHabits);
-
     setLoading(false);
   }, []);
 
@@ -320,8 +326,9 @@ export default function HabitsScreen() {
    * COMPLETE / UNDO TODAY
    * ---------------------------------------------------------
    */
+
   const toggleToday = async (
-    habit: Habit
+    habit: Habit,
   ) => {
     const today = todayStr();
 
@@ -335,10 +342,12 @@ export default function HabitsScreen() {
      * UNDO TODAY
      * =======================================================
      */
+
     if (isDone) {
       /*
        * Remove today's completion.
        */
+
       const {
         error: delErr,
       } = await supabase
@@ -350,11 +359,11 @@ export default function HabitsScreen() {
       if (delErr) {
         console.log(
           'UNDO HABIT ERROR:',
-          delErr
+          delErr,
         );
 
         setError(
-          'Could not undo completion.'
+          'Could not undo completion.',
         );
 
         return;
@@ -363,6 +372,7 @@ export default function HabitsScreen() {
       /*
        * Remove today from the local completed set.
        */
+
       setCompletedToday((current) => {
         const next = new Set(current);
 
@@ -378,21 +388,22 @@ export default function HabitsScreen() {
        * becomes zero under the "streak must include today"
        * rule.
        */
+
       let newStreak = 0;
 
       try {
         newStreak =
           await calculateCurrentStreak(
-            habit.id
+            habit.id,
           );
       } catch (err) {
         console.log(
           'STREAK RECALCULATION ERROR:',
-          err
+          err,
         );
 
         setError(
-          'Could not recalculate streak.'
+          'Could not recalculate streak.',
         );
 
         return;
@@ -402,13 +413,14 @@ export default function HabitsScreen() {
         newStreak /
           Math.max(
             Number(habit.checkpoint) || 1,
-            1
-          )
+            1,
+          ),
       );
 
       /*
        * Save the new streak.
        */
+
       const {
         error: updateErr,
       } = await supabase
@@ -422,11 +434,11 @@ export default function HabitsScreen() {
       if (updateErr) {
         console.log(
           'HABIT STREAK UPDATE ERROR:',
-          updateErr
+          updateErr,
         );
 
         setError(
-          'Could not update streak.'
+          'Could not update streak.',
         );
 
         return;
@@ -435,6 +447,7 @@ export default function HabitsScreen() {
       /*
        * Update UI.
        */
+
       setHabits((current) =>
         current.map((h) =>
           h.id === habit.id
@@ -445,8 +458,8 @@ export default function HabitsScreen() {
                 trophies_earned:
                   newTrophies,
               }
-            : h
-        )
+            : h,
+        ),
       );
 
       return;
@@ -464,6 +477,7 @@ export default function HabitsScreen() {
      * The database unique constraint should prevent
      * duplicate completions for the same habit/day.
      */
+
     const {
       error: insErr,
     } = await supabase
@@ -476,12 +490,13 @@ export default function HabitsScreen() {
     if (insErr) {
       console.log(
         'COMPLETE HABIT ERROR:',
-        insErr
+        insErr,
       );
 
       /*
        * PostgreSQL duplicate key error.
        */
+
       if (
         insErr.code === '23505' ||
         insErr.message
@@ -497,11 +512,11 @@ export default function HabitsScreen() {
         });
 
         setError(
-          'This habit is already completed today.'
+          'This habit is already completed today.',
         );
       } else {
         setError(
-          'Could not mark complete.'
+          'Could not mark complete.',
         );
       }
 
@@ -511,6 +526,7 @@ export default function HabitsScreen() {
     /*
      * Mark today's habit complete immediately.
      */
+
     setCompletedToday((current) => {
       const next = new Set(current);
 
@@ -530,21 +546,22 @@ export default function HabitsScreen() {
      * because that would incorrectly preserve streaks
      * across missed days.
      */
+
     let newStreak = 0;
 
     try {
       newStreak =
         await calculateCurrentStreak(
-          habit.id
+          habit.id,
         );
     } catch (err) {
       console.log(
         'STREAK RECALCULATION ERROR:',
-        err
+        err,
       );
 
       setError(
-        'Could not calculate streak.'
+        'Could not calculate streak.',
       );
 
       return;
@@ -553,17 +570,19 @@ export default function HabitsScreen() {
     /*
      * Calculate trophies from the current streak.
      */
+
     const newTrophies = Math.floor(
       newStreak /
         Math.max(
           Number(habit.checkpoint) || 1,
-          1
-        )
+          1,
+        ),
     );
 
     /*
      * Save the calculated values.
      */
+
     const {
       error: updateErr,
     } = await supabase
@@ -577,11 +596,11 @@ export default function HabitsScreen() {
     if (updateErr) {
       console.log(
         'HABIT UPDATE ERROR:',
-        updateErr
+        updateErr,
       );
 
       setError(
-        'Could not update streak.'
+        'Could not update streak.',
       );
 
       return;
@@ -590,6 +609,7 @@ export default function HabitsScreen() {
     /*
      * Update the UI.
      */
+
     setHabits((current) =>
       current.map((h) =>
         h.id === habit.id
@@ -600,8 +620,8 @@ export default function HabitsScreen() {
               trophies_earned:
                 newTrophies,
             }
-          : h
-      )
+          : h,
+      ),
     );
   };
 
@@ -610,6 +630,7 @@ export default function HabitsScreen() {
    * NEW HABIT
    * ---------------------------------------------------------
    */
+
   const openNew = () => {
     setName('');
     setCategory('Mind');
@@ -626,18 +647,21 @@ export default function HabitsScreen() {
    * SAVE HABIT
    * ---------------------------------------------------------
    */
+
   const saveHabit = async () => {
     if (!name.trim()) {
       setError(
-        'Give your habit a name.'
+        'Give your habit a name.',
       );
+
       return;
     }
 
     if (!startDate.trim()) {
       setError(
-        'Pick a start date.'
+        'Pick a start date.',
       );
+
       return;
     }
 
@@ -668,18 +692,18 @@ export default function HabitsScreen() {
         trophies_earned: 0,
       })
       .select(
-        'id, name, category, duration_minutes, current_streak, checkpoint, trophies_earned, freezes_held'
+        'id, name, category, duration_minutes, current_streak, checkpoint, trophies_earned, freezes_held',
       )
       .maybeSingle();
 
     if (saveErr || !data) {
       console.log(
         'SAVE HABIT ERROR:',
-        saveErr
+        saveErr,
       );
 
       setError(
-        'The habit could not be saved.'
+        'The habit could not be saved.',
       );
     } else {
       setHabits((current) => [
@@ -698,6 +722,7 @@ export default function HabitsScreen() {
    * SUMMARY
    * ---------------------------------------------------------
    */
+
   const totalDone =
     completedToday.size;
 
@@ -709,6 +734,7 @@ export default function HabitsScreen() {
    * RENDER
    * ---------------------------------------------------------
    */
+
   return (
     <SafeAreaView
       style={[
@@ -716,21 +742,100 @@ export default function HabitsScreen() {
         isDark && styles.safeDark,
       ]}
     >
-      <PageHeader
-        title="Habits"
-        showBell
-        onBack={() =>
-          router.push('/modules')
-        }
-      />
+      <View
+        style={[
+          styles.header,
+          isDark && styles.headerDark,
+        ]}
+      >
+        <Pressable
+          onPress={() => {
+            setSettingsMenuOpen(false);
+            router.push('/modules');
+          }}
+          style={[
+            styles.backButton,
+            {
+              backgroundColor:
+                accentForeground,
+            },
+          ]}
+          hitSlop={8}
+        >
+          <ChevronLeft
+            color={onAccent}
+            size={21}
+            strokeWidth={2.5}
+          />
+        </Pressable>
+
+        <Text
+          style={[
+            styles.headerTitle,
+            isDark && styles.darkText,
+          ]}
+        >
+          Habits
+        </Text>
+
+        <Pressable
+          onPress={() =>
+            setSettingsMenuOpen(
+              (current) => !current,
+            )
+          }
+          style={styles.menuButton}
+          hitSlop={8}
+        >
+          <MoreVertical
+            color={
+              isDark
+                ? '#F4F2EE'
+                : '#5A5751'
+            }
+            size={22}
+            strokeWidth={2.2}
+          />
+        </Pressable>
+
+        {settingsMenuOpen && (
+          <View
+            style={[
+              styles.settingsMenu,
+              isDark &&
+                styles.settingsMenuDark,
+            ]}
+          >
+            <Pressable
+              onPress={() => {
+                setSettingsMenuOpen(
+                  false,
+                );
+                router.push('/(tabs)/profile');
+              }}
+              style={
+                styles.settingsMenuItem
+              }
+            >
+              <Text
+                style={[
+                  styles.settingsMenuText,
+                  isDark &&
+                    styles.darkText,
+                ]}
+              >
+                Settings
+              </Text>
+            </Pressable>
+          </View>
+        )}
+      </View>
 
       <ScrollView
         contentContainerStyle={
           styles.content
         }
-        showsVerticalScrollIndicator={
-          false
-        }
+        showsVerticalScrollIndicator={false}
       >
         {error && (
           <Text style={styles.error}>
@@ -739,6 +844,7 @@ export default function HabitsScreen() {
         )}
 
         {/* TODAY PROGRESS */}
+
         <View
           style={[
             styles.progressCard,
@@ -810,6 +916,7 @@ export default function HabitsScreen() {
         </View>
 
         {/* LOADING */}
+
         {loading ? (
           <Text
             style={[
@@ -822,6 +929,7 @@ export default function HabitsScreen() {
           </Text>
         ) : habits.length === 0 ? (
           /* EMPTY */
+
           <View style={styles.empty}>
             <Text
               style={[
@@ -836,6 +944,7 @@ export default function HabitsScreen() {
           </View>
         ) : (
           /* HABIT LIST */
+
           <View
             style={[
               styles.list,
@@ -847,7 +956,7 @@ export default function HabitsScreen() {
               (habit, i) => {
                 const done =
                   completedToday.has(
-                    habit.id
+                    habit.id,
                   );
 
                 return (
@@ -864,10 +973,11 @@ export default function HabitsScreen() {
                     ]}
                   >
                     {/* CHECK */}
+
                     <Pressable
                       onPress={() =>
                         toggleToday(
-                          habit
+                          habit,
                         )
                       }
                       style={[
@@ -883,19 +993,18 @@ export default function HabitsScreen() {
                     >
                       {done && (
                         <Check
-                          color={
-                            onAccent
-                          }
+                          color={onAccent}
                           size={15}
                         />
                       )}
                     </Pressable>
 
                     {/* HABIT NAME */}
+
                     <Pressable
                       onPress={() =>
-                        toggleToday(
-                          habit
+                        router.push(
+                          `/habits/${habit.id}`,
                         )
                       }
                       style={
@@ -938,6 +1047,7 @@ export default function HabitsScreen() {
                     </Pressable>
 
                     {/* STREAK */}
+
                     <View
                       style={
                         styles.streakBadge
@@ -973,10 +1083,11 @@ export default function HabitsScreen() {
                     </View>
 
                     {/* DETAILS */}
+
                     <Pressable
                       onPress={() =>
                         router.push(
-                          `/habits/${habit.id}`
+                          `/habits/${habit.id}`,
                         )
                       }
                       style={
@@ -995,13 +1106,14 @@ export default function HabitsScreen() {
                     </Pressable>
                   </View>
                 );
-              }
+              },
             )}
           </View>
         )}
       </ScrollView>
 
       {/* FLOATING PLUS */}
+
       <Pressable
         onPress={openNew}
         style={[
@@ -1021,6 +1133,7 @@ export default function HabitsScreen() {
       </Pressable>
 
       {/* NEW HABIT MODAL */}
+
       <Modal
         visible={modalOpen}
         transparent
@@ -1058,9 +1171,7 @@ export default function HabitsScreen() {
 
               <Pressable
                 onPress={() =>
-                  setModalOpen(
-                    false
-                  )
+                  setModalOpen(false)
                 }
               >
                 <X
@@ -1083,6 +1194,7 @@ export default function HabitsScreen() {
               }}
             >
               {/* TITLE */}
+
               <Text
                 style={[
                   styles.label,
@@ -1095,9 +1207,7 @@ export default function HabitsScreen() {
 
               <TextInput
                 value={name}
-                onChangeText={
-                  setName
-                }
+                onChangeText={setName}
                 placeholder="e.g. Morning meditation"
                 placeholderTextColor="#9B978F"
                 style={[
@@ -1109,6 +1219,7 @@ export default function HabitsScreen() {
               />
 
               {/* CATEGORY */}
+
               <Text
                 style={[
                   styles.label,
@@ -1120,9 +1231,7 @@ export default function HabitsScreen() {
               </Text>
 
               <View
-                style={
-                  styles.catRow
-                }
+                style={styles.catRow}
               >
                 {CATEGORIES.map(
                   (c) => (
@@ -1135,11 +1244,11 @@ export default function HabitsScreen() {
                         styles.catChip,
                         category ===
                           c && {
-                            backgroundColor:
-                              accentForeground,
-                            borderColor:
-                              accentForeground,
-                          },
+                          backgroundColor:
+                            accentForeground,
+                          borderColor:
+                            accentForeground,
+                        },
                       ]}
                     >
                       <Text
@@ -1159,11 +1268,12 @@ export default function HabitsScreen() {
                         {c}
                       </Text>
                     </Pressable>
-                  )
+                  ),
                 )}
               </View>
 
               {/* DURATION */}
+
               <Text
                 style={[
                   styles.label,
@@ -1191,6 +1301,7 @@ export default function HabitsScreen() {
               />
 
               {/* CHECKPOINT */}
+
               <Text
                 style={[
                   styles.label,
@@ -1218,6 +1329,7 @@ export default function HabitsScreen() {
               />
 
               {/* START DATE */}
+
               <Text
                 style={[
                   styles.label,
@@ -1230,19 +1342,16 @@ export default function HabitsScreen() {
 
               <DatePickerInput
                 value={startDate}
-                onChange={
-                  setStartDate
-                }
+                onChange={setStartDate}
                 accent={
                   accentForeground
                 }
-                onAccent={
-                  onAccent
-                }
+                onAccent={onAccent}
                 isDark={isDark}
               />
 
               {/* END DATE */}
+
               <Text
                 style={[
                   styles.label,
@@ -1255,26 +1364,21 @@ export default function HabitsScreen() {
 
               <DatePickerInput
                 value={endDate}
-                onChange={
-                  setEndDate
-                }
+                onChange={setEndDate}
                 accent={
                   accentForeground
                 }
-                onAccent={
-                  onAccent
-                }
+                onAccent={onAccent}
                 isDark={isDark}
                 placeholder="No end date"
               />
             </ScrollView>
 
             {/* SAVE */}
+
             <Pressable
               disabled={saving}
-              onPress={
-                saveHabit
-              }
+              onPress={saveHabit}
               style={[
                 styles.saveButton,
                 {
@@ -1287,8 +1391,7 @@ export default function HabitsScreen() {
                 style={[
                   styles.saveText,
                   {
-                    color:
-                      onAccent,
+                    color: onAccent,
                   },
                 ]}
               >
@@ -1312,6 +1415,82 @@ const styles = StyleSheet.create({
 
   safeDark: {
     backgroundColor: '#090909',
+  },
+
+  header: {
+    position: 'relative',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 30,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ECE9E4',
+    zIndex: 100,
+  },
+
+  headerDark: {
+    borderBottomColor: '#292929',
+  },
+
+  backButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  headerTitle: {
+    fontFamily: FONT_BOLD,
+    fontSize: 17,
+    color: '#27241F',
+    letterSpacing: 0.2,
+  },
+
+  menuButton: {
+    width: 38,
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  settingsMenu: {
+    position: 'absolute',
+    top: 68,
+    right: 16,
+    minWidth: 150,
+    backgroundColor: '#FFF',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E6E2DC',
+    paddingVertical: 6,
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    elevation: 8,
+    zIndex: 1000,
+  },
+
+  settingsMenuDark: {
+    backgroundColor: '#181818',
+    borderColor: '#303030',
+  },
+
+  settingsMenuItem: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+
+  settingsMenuText: {
+    fontFamily: FONT_MED,
+    fontSize: 14,
+    color: '#27241F',
   },
 
   content: {
@@ -1476,13 +1655,21 @@ const styles = StyleSheet.create({
 
   fab: {
     position: 'absolute',
-    bottom: 24,
+    bottom: 82,
     alignSelf: 'center',
     width: 56,
     height: 56,
     borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    elevation: 6,
   },
 
   modalShade: {

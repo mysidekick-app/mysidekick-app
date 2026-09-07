@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 
 import {
   ActivityIndicator,
-  Image,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -12,11 +11,9 @@ import {
 } from 'react-native';
 
 import { router, useLocalSearchParams } from 'expo-router';
-
 import { ChevronLeft } from 'lucide-react-native';
-
 import { useApp } from '@/components/AppProvider';
-
+import SidekickAvatar from '@/components/SidekickAvatar';
 import { supabase } from '@/lib/supabase';
 
 const FONT = 'Poppins-Regular';
@@ -31,7 +28,7 @@ type Profile = {
   title: string | null;
   tag: string | null;
   bio: string | null;
-  avatar_url: string | null;
+  sidekick_id: string | null;
 };
 
 export default function ChatProfileScreen() {
@@ -67,8 +64,10 @@ export default function ChatProfileScreen() {
 
   const [profile, setProfile] =
     useState<Profile | null>(null);
+
   const [loading, setLoading] =
     useState(true);
+
   const [error, setError] =
     useState<string | null>(null);
 
@@ -88,12 +87,12 @@ export default function ChatProfileScreen() {
       setError(null);
 
       try {
-        /*
-         * social_profiles is the reliable public-profile source
-         * already used by the chat.
+        /**
+         * social_profiles is used as the reliable public-profile
+         * source for display name and username.
          *
-         * profiles is then used only to enrich the profile with
-         * title, bio, and avatar when those fields are available.
+         * profiles provides the Sidekick selection and additional
+         * profile information.
          */
         const {
           data: socialRow,
@@ -101,7 +100,7 @@ export default function ChatProfileScreen() {
         } = await supabase
           .from('social_profiles')
           .select(
-            'user_id, display_name, username',
+            'user_id, display_name, username'
           )
           .eq('user_id', id)
           .maybeSingle();
@@ -109,7 +108,7 @@ export default function ChatProfileScreen() {
         if (socialError) {
           console.error(
             'SOCIAL PROFILE LOAD ERROR:',
-            socialError,
+            socialError
           );
         }
 
@@ -119,7 +118,7 @@ export default function ChatProfileScreen() {
         } = await supabase
           .from('profiles')
           .select(
-            'user_id, display_name, username, title, bio, avatar_url',
+            'user_id, display_name, username, title, bio, sidekick_id'
           )
           .eq('user_id', id)
           .maybeSingle();
@@ -127,7 +126,7 @@ export default function ChatProfileScreen() {
         if (profileError) {
           console.warn(
             'PROFILES TABLE LOAD ERROR:',
-            profileError,
+            profileError
           );
         }
 
@@ -140,12 +139,12 @@ export default function ChatProfileScreen() {
             {
               socialError,
               profileError,
-            },
+            }
           );
 
           if (mounted) {
             setError(
-              'Could not load this profile.',
+              'Could not load this profile.'
             );
           }
 
@@ -155,25 +154,49 @@ export default function ChatProfileScreen() {
         if (mounted) {
           setProfile({
             user_id: row.user_id || id,
+
             display_name:
-              row.display_name || 'User',
-            username: row.username || '',
-            title: profileRow?.title || null,
+              row.display_name ||
+              socialRow?.display_name ||
+              'User',
+
+            username:
+              row.username ||
+              socialRow?.username ||
+              '',
+
+            title:
+              profileRow?.title ||
+              null,
+
             tag: null,
-            bio: profileRow?.bio || null,
-            avatar_url:
-              profileRow?.avatar_url || null,
+
+            bio:
+              profileRow?.bio ||
+              null,
+
+            /**
+             * IMPORTANT:
+             * NULL means this person has never selected
+             * a Sidekick.
+             *
+             * We intentionally do NOT default this to
+             * sidekick-01.
+             */
+            sidekick_id:
+              profileRow?.sidekick_id ??
+              null,
           });
         }
       } catch (e) {
         console.error(
           'PROFILE LOAD EXCEPTION:',
-          e,
+          e
         );
 
         if (mounted) {
           setError(
-            'Could not load this profile.',
+            'Could not load this profile.'
           );
         }
       } finally {
@@ -207,7 +230,9 @@ export default function ChatProfileScreen() {
     <SafeAreaView
       style={[
         styles.safe,
-        { backgroundColor: colors.bg },
+        {
+          backgroundColor: colors.bg,
+        },
       ]}
     >
       <View
@@ -254,7 +279,9 @@ export default function ChatProfileScreen() {
           <Text
             style={[
               styles.centerText,
-              { color: colors.muted },
+              {
+                color: colors.muted,
+              },
             ]}
           >
             Loading profile…
@@ -265,7 +292,9 @@ export default function ChatProfileScreen() {
           <Text
             style={[
               styles.errorText,
-              { color: colors.text },
+              {
+                color: colors.text,
+              },
             ]}
           >
             {error}
@@ -291,18 +320,18 @@ export default function ChatProfileScreen() {
           contentContainerStyle={
             styles.content
           }
-          showsVerticalScrollIndicator={
-            false
-          }
+          showsVerticalScrollIndicator={false}
         >
           <View style={styles.profile}>
-            {profile?.avatar_url ? (
-              <Image
-                source={{
-                  uri: profile.avatar_url,
-                }}
-                style={styles.avatarImage}
-              />
+            {profile?.sidekick_id ? (
+              <View style={styles.sidekickAvatarWrap}>
+                <SidekickAvatar
+                  sidekickId={
+                    profile.sidekick_id
+                  }
+                  size={96}
+                />
+              </View>
             ) : (
               <View
                 style={[
@@ -324,7 +353,9 @@ export default function ChatProfileScreen() {
             <Text
               style={[
                 styles.name,
-                { color: nameColor },
+                {
+                  color: nameColor,
+                },
               ]}
             >
               {profile?.display_name ||
@@ -334,7 +365,9 @@ export default function ChatProfileScreen() {
             <Text
               style={[
                 styles.username,
-                { color: colors.muted },
+                {
+                  color: colors.muted,
+                },
               ]}
             >
               @{profile?.username ||
@@ -358,7 +391,9 @@ export default function ChatProfileScreen() {
             <Text
               style={[
                 styles.bio,
-                { color: colors.text },
+                {
+                  color: colors.text,
+                },
               ]}
             >
               {profile?.bio?.trim() ||
@@ -413,19 +448,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 
+  sidekickAvatarWrap: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    marginBottom: 20,
+    overflow: 'hidden',
+  },
+
   avatar: {
     width: 96,
     height: 96,
     borderRadius: 48,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 20,
-  },
-
-  avatarImage: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
     marginBottom: 20,
   },
 

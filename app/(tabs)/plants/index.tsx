@@ -1305,8 +1305,18 @@ export default function PlantsScreen() {
                 multiline
               />
 
-              {/* SAVE */}
+            </ScrollView>
 
+            {/* FIXED SAVE BUTTON */}
+            <View
+              style={[
+                styles.saveFooter,
+                {
+                  backgroundColor: C.card,
+                  borderTopColor: C.border,
+                },
+              ]}
+            >
               <Pressable
                 disabled={saving}
                 onPress={savePlant}
@@ -1340,7 +1350,7 @@ export default function PlantsScreen() {
                       : 'Add plant'}
                 </Text>
               </Pressable>
-            </ScrollView>
+            </View>
           </View>
         </View>
       </Modal>
@@ -2024,7 +2034,7 @@ const styles = StyleSheet.create({
 
   fab: {
     position: 'absolute',
-    bottom: 24,
+    bottom: 82,
     alignSelf: 'center',
     width: 56,
     height: 56,
@@ -2034,10 +2044,7 @@ const styles = StyleSheet.create({
     shadowColor: '#000',
     shadowOpacity: 0.25,
     shadowRadius: 8,
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
+    shadowOffset: { width: 0, height: 4 },
     elevation: 6,
   },
 
@@ -2071,7 +2078,13 @@ const styles = StyleSheet.create({
   },
 
   modalScroll: {
-    maxHeight: '80%',
+    flex: 1,
+  },
+
+  saveFooter: {
+    paddingTop: 12,
+    paddingBottom: 0,
+    borderTopWidth: 1,
   },
 
   detailTitleWrap: {

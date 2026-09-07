@@ -89,9 +89,8 @@ function RootNavigator() {
   ).current;
 
   /*
-   * When authentication has finished loading and
-   * the Lottie animation has finished, fade out
-   * the custom loading screen.
+   * Wait for both authentication and the loading animation before
+   * revealing the application.
    */
   useEffect(() => {
     if (
@@ -118,8 +117,11 @@ function RootNavigator() {
   ]);
 
   /*
-   * Decide where the user should go after the
-   * loading screen has finished.
+   * Route the user based on the restored/current Supabase session.
+   *
+   * Because AuthProvider restores the persisted session before this
+   * navigation decision is made, closing/reopening the app does not send
+   * an already-authenticated user back to Welcome/Login.
    */
   useEffect(() => {
     if (
@@ -130,7 +132,6 @@ function RootNavigator() {
     }
 
     const firstSegment = segments[0];
-
     const secondSegment = segments[1];
 
     const onWelcome =
@@ -150,9 +151,8 @@ function RootNavigator() {
     /*
      * LOGGED-IN USER
      *
-     * If they are already authenticated and
-     * somehow arrive at Welcome/Login/Signup,
-     * send them into the app.
+     * If an authenticated user lands on Welcome/Login/Signup,
+     * send them into the main application.
      */
     if (session) {
       if (
@@ -169,7 +169,8 @@ function RootNavigator() {
     /*
      * LOGGED-OUT USER
      *
-     * Welcome, login and signup are public.
+     * Welcome, Login and Signup remain public.
+     * Any other route sends the user to Welcome.
      */
     if (!session) {
       if (

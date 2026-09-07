@@ -12,7 +12,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
   ChevronLeft,
-  Crown,
   Grid3X3,
   Hash,
   Search,
@@ -30,7 +29,6 @@ import { supabase } from '@/lib/supabase';
 import { useEffect, useState } from 'react';
 
 type GameKey =
-  | 'chess'
   | 'tictactoe'
   | 'sudoku'
   | 'wordsearch'
@@ -57,15 +55,11 @@ interface ActiveGame {
   game: GameKey;
   opponentName: string;
   isMyTurn: boolean;
+  createdAt: string;
+  expiresAt: number;
 }
 
 const MULTIPLAYER_GAMES: GameDef[] = [
-  {
-    key: 'chess',
-    name: 'Chess',
-    icon: Crown,
-    multiplayer: true,
-  },
   {
     key: 'tictactoe',
     name: 'Tic-Tac-Toe',
@@ -113,8 +107,9 @@ const DIFFICULTIES: {
   },
 ];
 
+const GAME_REQUEST_LIFETIME_MS = 10 * 60 * 1000;
+
 const GAME_NAMES: Record<GameKey, string> = {
-  chess: 'Chess',
   tictactoe: 'Tic-Tac-Toe',
   sudoku: 'Sudoku',
   wordsearch: 'Word Search',
@@ -154,7 +149,8 @@ export default function GamesScreen() {
     onAccent,
   };
 
-  const [sheetVisible, setSheetVisible] = useState(false);
+  const [sheetVisible, setSheetVisible] =
+    useState(false);
 
   const [selectedGame, setSelectedGame] =
     useState<GameDef | null>(null);
@@ -189,6 +185,14 @@ export default function GamesScreen() {
   useEffect(() => {
     loadFriends();
     loadActiveGames();
+
+    // Refresh the request list periodically so expired invitations disappear
+    // even when the Games screen remains open.
+    const refreshTimer = setInterval(() => {
+      loadActiveGames();
+    }, 30000);
+
+    return () => clearInterval(refreshTimer);
   }, []);
 
   async function loadFriends() {
@@ -297,11 +301,12 @@ export default function GamesScreen() {
       } = await supabase
         .from('game_sessions')
         .select(
-          'id, game, created_by, opponent_id, turn_user_id, status'
+          'id, game, created_by, opponent_id, turn_user_id, status, created_at'
         )
         .eq('mode', 'multiplayer')
         .eq('opponent_type', 'friend')
         .eq('status', 'active')
+        .neq('game', 'chess')
         .or(
           `created_by.eq.${myUid},opponent_id.eq.${myUid}`
         );
@@ -316,16 +321,40 @@ export default function GamesScreen() {
         return;
       }
 
+      const now = Date.now();
       const rows = sessionRows ?? [];
 
-      if (rows.length === 0) {
+      // A friend invitation is valid for exactly 10 minutes from creation.
+      // Expired sessions are closed in Supabase as well as removed locally.
+      const expiredRows = rows.filter((r) => {
+        if (!r.created_at) return false;
+        return now - new Date(r.created_at).getTime() >= GAME_REQUEST_LIFETIME_MS;
+      });
+
+      if (expiredRows.length > 0) {
+        await Promise.all(
+          expiredRows.map((r) =>
+            supabase
+              .from('game_sessions')
+              .update({ status: 'expired', result: 'expired', turn_user_id: null })
+              .eq('id', r.id)
+              .eq('status', 'active')
+          )
+        );
+      }
+
+      const validRows = rows.filter(
+        (r) => !expiredRows.some((expired) => expired.id === r.id)
+      );
+
+      if (validRows.length === 0) {
         setActiveGames([]);
         return;
       }
 
       const otherIds = [
         ...new Set(
-          rows
+          validRows
             .map((r) =>
               r.created_by === myUid
                 ? r.opponent_id
@@ -366,21 +395,29 @@ export default function GamesScreen() {
       );
 
       setActiveGames(
-        rows.map((r) => {
-          const otherId =
-            r.created_by === myUid
-              ? r.opponent_id
-              : r.created_by;
+        validRows
+          .filter(
+            (r) =>
+              r.game === 'tictactoe'
+          )
+          .map((r) => {
+            const otherId =
+              r.created_by === myUid
+                ? r.opponent_id
+                : r.created_by;
 
-          return {
-            id: r.id,
-            game: r.game as GameKey,
-            opponentName:
-              nameById.get(otherId) ?? 'Friend',
-            isMyTurn:
-              r.turn_user_id === myUid,
-          };
-        })
+            return {
+              id: r.id,
+              game: r.game as GameKey,
+              opponentName:
+                nameById.get(otherId) ??
+                'Friend',
+              isMyTurn:
+                r.turn_user_id === myUid,
+              createdAt: r.created_at,
+              expiresAt: new Date(r.created_at).getTime() + GAME_REQUEST_LIFETIME_MS,
+            };
+          })
       );
     } catch (error) {
       console.error(
@@ -390,6 +427,33 @@ export default function GamesScreen() {
 
       setActiveGames([]);
     }
+  }
+
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (activeGames.length === 0) return;
+
+    const countdownTimer = setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+
+    return () => clearInterval(countdownTimer);
+  }, [activeGames.length]);
+
+  useEffect(() => {
+    const expired = activeGames.some((g) => g.expiresAt <= nowMs);
+    if (expired) {
+      loadActiveGames();
+    }
+  }, [nowMs]);
+
+  function formatRequestTime(ms: number): string {
+    const remaining = Math.max(0, ms);
+    const totalSeconds = Math.ceil(remaining / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   }
 
   function openActiveGame(g: ActiveGame) {
@@ -462,6 +526,7 @@ export default function GamesScreen() {
           'GET USER ERROR:',
           userError
         );
+
         return;
       }
 
@@ -471,6 +536,7 @@ export default function GamesScreen() {
         console.error(
           'START GAME ERROR: No authenticated user found.'
         );
+
         return;
       }
 
@@ -525,6 +591,7 @@ export default function GamesScreen() {
           'CREATE GAME SESSION ERROR:',
           sessionError
         );
+
         return;
       }
 
@@ -532,6 +599,7 @@ export default function GamesScreen() {
         console.error(
           'CREATE GAME SESSION ERROR: No session ID returned.'
         );
+
         return;
       }
 
@@ -546,18 +614,6 @@ export default function GamesScreen() {
       setSelectedGame(null);
 
       switch (gameName) {
-        case 'chess':
-          router.push({
-            pathname:
-              '/modules/games/chess',
-            params: {
-              sessionId,
-              opponent: mode,
-              difficulty,
-            },
-          });
-          break;
-
         case 'tictactoe':
           router.push({
             pathname:
@@ -798,6 +854,15 @@ export default function GamesScreen() {
                         ? 'Your turn'
                         : 'Waiting for opponent'}
                     </Text>
+
+                    <Text
+                      style={[
+                        styles.activeRowSub,
+                        { color: colors.accent, marginTop: 3 },
+                      ]}
+                    >
+                      Request expires in {formatRequestTime(g.expiresAt - nowMs)}
+                    </Text>
                   </View>
 
                   {g.isMyTurn && (
@@ -996,8 +1061,7 @@ export default function GamesScreen() {
 
           {(
             !selectedGame?.multiplayer ||
-            mode === 'computer' ||
-            selectedGame.key !== 'chess'
+            mode === 'computer'
           ) && (
             <>
               <Text
@@ -1230,9 +1294,7 @@ export default function GamesScreen() {
                                     colors.text,
                                 },
                               ]}
-                              numberOfLines={
-                                1
-                              }
+                              numberOfLines={1}
                             >
                               {
                                 f.display_name

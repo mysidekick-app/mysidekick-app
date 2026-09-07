@@ -320,7 +320,12 @@ export default function BookmarksScreen() {
               <Pressable onPress={() => { setModalOpen(false); setEditingId(null); }}><X color={isDark ? '#F4F2EE' : '#5A5751'} size={21} /></Pressable>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 8 }}>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              style={styles.modalScroll}
+              contentContainerStyle={styles.modalScrollContent}
+              keyboardShouldPersistTaps="handled"
+            >
               <Text style={[styles.label, isDark && styles.darkMuted]}>Title</Text>
               <TextInput value={title} onChangeText={setTitle} placeholder="What are you saving?" placeholderTextColor="#9B978F" style={[styles.input, isDark && styles.inputDark]} autoFocus />
 
@@ -358,9 +363,29 @@ export default function BookmarksScreen() {
               />
             </ScrollView>
 
-            <Pressable disabled={saving} onPress={saveBookmark} style={[styles.saveButton, { backgroundColor: accentForeground }]}>
-              <Text style={[styles.saveText, { color: onAccent }]}>{saving ? 'Saving...' : editingId ? 'Update bookmark' : 'Save bookmark'}</Text>
-            </Pressable>
+            <View
+              style={[
+                styles.saveFooter,
+                {
+                  backgroundColor: isDark ? '#161616' : '#FFF',
+                  borderTopColor: isDark ? '#2A2A2A' : '#ECE9E4',
+                },
+              ]}
+            >
+              <Pressable
+                disabled={saving}
+                onPress={saveBookmark}
+                style={[
+                  styles.saveButton,
+                  { backgroundColor: accentForeground },
+                  saving && { opacity: 0.6 },
+                ]}
+              >
+                <Text style={[styles.saveText, { color: onAccent }]}>
+                  {saving ? 'Saving...' : editingId ? 'Update bookmark' : 'Save bookmark'}
+                </Text>
+              </Pressable>
+            </View>
           </View>
         </View>
       </Modal>
@@ -429,7 +454,13 @@ const styles = StyleSheet.create({
   darkMuted: { color: '#AAA59D' },
   error: { fontFamily: FONT_MED, color: '#C53A2F', fontSize: 13, marginBottom: 10 },
 
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingTop: 28, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#F0EEEA' },
+  header: {     flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 28,
+    paddingVertical: 12,
+    borderBottomWidth: 1, },
   headerDark: { borderBottomColor: '#262626' },
   backBtn: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { fontFamily: 'Poppins-ExtraBold', fontSize: 16, letterSpacing: 1.4, color: '#27241F' },
@@ -440,7 +471,7 @@ const styles = StyleSheet.create({
   menuItemText: { fontFamily: FONT_MED, fontSize: 14 },
 
 
-  content: { padding: 16, paddingBottom: 90 },
+  content: { paddingHorizontal: 16, paddingTop: 28, paddingBottom: 90 },
 
   search: { height: 48, borderRadius: 14, borderWidth: 1, borderColor: '#E1DED8', backgroundColor: '#FFF', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, gap: 10, marginBottom: 4 },
   searchDark: { backgroundColor: '#171717', borderColor: '#363636' },
@@ -475,13 +506,28 @@ const styles = StyleSheet.create({
   empty: { paddingVertical: 40, alignItems: 'center' },
   emptyText: { fontFamily: FONT, fontSize: 14, color: '#908B83', textAlign: 'center' },
 
-  fab: { position: 'absolute', bottom: 24, alignSelf: 'center', width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
-
+  fab: {
+    position: 'absolute',
+    bottom: 82,
+    alignSelf: 'center',
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
   modalShade: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
   modalCard: { backgroundColor: '#FFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 22, paddingBottom: 34, maxHeight: '92%' },
   modalDark: { backgroundColor: '#161616' },
   modalTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   modalTitle: { fontFamily: FONT_BOLD, fontSize: 18, color: '#27241F', flex: 1, marginRight: 12 },
+  modalScroll: { flex: 1 },
+  modalScrollContent: { paddingBottom: 8 },
 
   label: { fontFamily: FONT_MED, fontSize: 13, color: '#77746E', marginTop: 14, marginBottom: 6 },
   input: { borderWidth: 1, borderColor: '#E1DED8', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11, fontFamily: FONT, fontSize: 15, color: '#282724' },
@@ -491,7 +537,8 @@ const styles = StyleSheet.create({
   chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: '#E2DFD9', backgroundColor: '#FFF' },
   chipText: { fontFamily: FONT, fontSize: 13, color: '#77746E' },
 
-  saveButton: { borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 22 },
+  saveFooter: { paddingTop: 12, paddingBottom: 0, borderTopWidth: 1 },
+  saveButton: { borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 0 },
   saveText: { fontFamily: FONT_SEMI, fontSize: 15 },
 
   detailSection: { marginTop: 8, gap: 12, paddingVertical: 8 },

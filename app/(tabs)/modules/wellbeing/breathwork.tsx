@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+
 import {
   Pressable,
   ScrollView,
@@ -6,9 +7,13 @@ import {
   Text,
   View,
 } from 'react-native';
+
 import { router } from 'expo-router';
-import { Bell, ChevronLeft } from 'lucide-react-native';
+
+import { ChevronLeft, MoreVertical } from 'lucide-react-native';
+
 import { useApp } from '@/components/AppProvider';
+
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -45,6 +50,7 @@ const FONT_XB = 'Poppins-ExtraBold';
 /* ------------------------------------------------------------------ */
 /* Box breathing constants                                             */
 /* ------------------------------------------------------------------ */
+
 const PHASE_SECONDS = 4; // each phase lasts 4 seconds
 const PHASE_MS = PHASE_SECONDS * 1000;
 const TICK_MS = 250; // 250ms tick for phase/timer logic
@@ -56,18 +62,20 @@ const DOT_SIZE = 16;
 const DOT_OFFSET = DOT_SIZE / 2; // center offset for the dot
 
 type Phase = 0 | 1 | 2 | 3;
+
 const PHASE_LABELS: string[] = ['INHALE', 'HOLD', 'EXHALE', 'HOLD'];
 
 /* ------------------------------------------------------------------ */
-/* Map perimeter progress (0..1) to x,y along the rectangle edges.      */
-/*                                                                     */
-/* Phase 0 (Inhale):       left edge, bottom -> top                     */
-/* Phase 1 (Hold):         top edge, left -> right                      */
-/* Phase 2 (Exhale):       right edge, top -> bottom                    */
-/* Phase 3 (Hold empty):   bottom edge, right -> left                   */
-/*                                                                     */
-/* Perimeter is divided into 4 equal segments (one per phase).         */
+/* Map perimeter progress (0..1) to x,y along the rectangle edges.     */
+/*                                                                    */
+/* Phase 0 (Inhale):     left edge, bottom -> top                     */
+/* Phase 1 (Hold):       top edge, left -> right                      */
+/* Phase 2 (Exhale):     right edge, top -> bottom                    */
+/* Phase 3 (Hold empty):  bottom edge, right -> left                  */
+/*                                                                    */
+/* Perimeter is divided into 4 equal segments (one per phase).        */
 /* ------------------------------------------------------------------ */
+
 function perimeterToXY(progress: number) {
   'worklet';
 
@@ -101,10 +109,12 @@ function perimeterToXY(progress: number) {
 }
 
 /* ================================================================== */
-/* Screen                                                              */
+/* Screen                                                             */
 /* ================================================================== */
+
 export default function BreathworkScreen() {
   const { isDark, accentForeground, onAccent } = useApp();
+
   const accent = accentForeground;
   const COLORS = isDark ? DARK_PALETTE : LIGHT_PALETTE;
   const styles = makeStyles(COLORS);
@@ -113,6 +123,13 @@ export default function BreathworkScreen() {
   const [phase, setPhase] = useState<Phase>(0);
   const [countdown, setCountdown] = useState(PHASE_SECONDS);
   const [cycles, setCycles] = useState(0);
+
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const openSettings = useCallback(() => {
+    setMenuOpen(false);
+    router.push('/(tabs)/profile');
+  }, []);
 
   // Shared value 0..1 representing progress along the full perimeter.
   const dotProgress = useSharedValue(0);
@@ -125,48 +142,61 @@ export default function BreathworkScreen() {
   /* ---------------------------------------------------------------- */
   /* Animate the dot to the start of a given phase.                   */
   /* ---------------------------------------------------------------- */
-  const animateToPhaseStart = useCallback((p: Phase) => {
-    const startProgress = p / 4; // 0, 0.25, 0.5, 0.75
-    dotProgress.value = withTiming(startProgress, {
-      duration: 0,
-      easing: Easing.linear,
-    });
-  }, [dotProgress]);
+
+  const animateToPhaseStart = useCallback(
+    (p: Phase) => {
+      const startProgress = p / 4; // 0, 0.25, 0.5, 0.75
+
+      dotProgress.value = withTiming(startProgress, {
+        duration: 0,
+        easing: Easing.linear,
+      });
+    },
+    [dotProgress],
+  );
 
   /* ---------------------------------------------------------------- */
   /* Begin animating the dot across the current phase.                */
   /* ---------------------------------------------------------------- */
-  const runPhaseAnimation = useCallback((p: Phase) => {
-    const startProgress = p / 4;
-    const endProgress = (p + 1) / 4;
-    dotProgress.value = withTiming(
-      endProgress,
-      {
-        duration: PHASE_MS,
-        easing: Easing.linear,
-      },
-      (finished) => {
-        if (finished) {
-          // Snap back to segment start to avoid drift on the next cycle.
-          runOnJS(animateToPhaseStart)(p);
-        }
-      },
-    );
-    // Ensure we start from the correct position.
-    void startProgress;
-  }, [dotProgress, animateToPhaseStart]);
+
+  const runPhaseAnimation = useCallback(
+    (p: Phase) => {
+      const startProgress = p / 4;
+      const endProgress = (p + 1) / 4;
+
+      dotProgress.value = withTiming(
+        endProgress,
+        {
+          duration: PHASE_MS,
+          easing: Easing.linear,
+        },
+        finished => {
+          if (finished) {
+            // Snap back to segment start to avoid drift on the next cycle.
+            runOnJS(animateToPhaseStart)(p);
+          }
+        },
+      );
+
+      // Ensure we start from the correct position.
+      void startProgress;
+    },
+    [dotProgress, animateToPhaseStart],
+  );
 
   /* ---------------------------------------------------------------- */
-  /* Advance to the next phase.                                       */
+  /* Advance to the next phase.                                      */
   /* ---------------------------------------------------------------- */
+
   const advancePhase = useCallback(() => {
-    setPhase((prev) => {
+    setPhase(prev => {
       const next = ((prev + 1) % 4) as Phase;
+
       phaseRef.current = next;
 
       if (next === 0) {
         // Completed a full cycle.
-        setCycles((c) => c + 1);
+        setCycles(c => c + 1);
       }
 
       // Reset countdown for the new phase.
@@ -183,13 +213,14 @@ export default function BreathworkScreen() {
   }, [runPhaseAnimation]);
 
   /* ---------------------------------------------------------------- */
-  /* Start the session — dot continues from current position.        */
+  /* Start the session — dot continues from current position.         */
   /* ---------------------------------------------------------------- */
+
   const start = useCallback(() => {
     if (runningRef.current) return;
+
     runningRef.current = true;
     setRunning(true);
-
     elapsedInPhaseRef.current = 0;
     setCountdown(PHASE_SECONDS);
 
@@ -208,10 +239,12 @@ export default function BreathworkScreen() {
     dotProgress.value = withTiming(
       phaseEnd,
       {
-        duration: PHASE_MS - (currentProgress - phaseStart) * 4 * PHASE_MS,
+        duration:
+          PHASE_MS -
+          (currentProgress - phaseStart) * 4 * PHASE_MS,
         easing: Easing.linear,
       },
-      (finished) => {
+      finished => {
         if (finished) {
           runOnJS(animateToPhaseStart)(phaseRef.current);
         }
@@ -222,6 +255,7 @@ export default function BreathworkScreen() {
   /* ---------------------------------------------------------------- */
   /* Pause the session — dot stays at current position.               */
   /* ---------------------------------------------------------------- */
+
   const pause = useCallback(() => {
     runningRef.current = false;
     setRunning(false);
@@ -231,6 +265,7 @@ export default function BreathworkScreen() {
   /* ---------------------------------------------------------------- */
   /* Toggle start / pause.                                            */
   /* ---------------------------------------------------------------- */
+
   const toggle = useCallback(() => {
     if (runningRef.current) {
       pause();
@@ -242,21 +277,28 @@ export default function BreathworkScreen() {
   /* ---------------------------------------------------------------- */
   /* Reset the session.                                               */
   /* ---------------------------------------------------------------- */
+
   const reset = useCallback(() => {
     runningRef.current = false;
     setRunning(false);
+
     cancelAnimation(dotProgress);
+
     setPhase(0);
     phaseRef.current = 0;
+
     setCountdown(PHASE_SECONDS);
     setCycles(0);
+
     elapsedInPhaseRef.current = 0;
+
     dotProgress.value = 0;
   }, [dotProgress]);
 
   /* ---------------------------------------------------------------- */
   /* 250ms tick: drive phase + countdown logic.                       */
   /* ---------------------------------------------------------------- */
+
   useEffect(() => {
     if (!running) return;
 
@@ -266,11 +308,14 @@ export default function BreathworkScreen() {
       elapsedInPhaseRef.current += TICK_MS;
 
       // Update countdown (ceiling division to show 4,3,2,1).
-      const remainingMs = PHASE_MS - elapsedInPhaseRef.current;
+      const remainingMs =
+        PHASE_MS - elapsedInPhaseRef.current;
+
       const remainingSeconds = Math.max(
         1,
         Math.ceil(remainingMs / 1000),
       );
+
       setCountdown(remainingSeconds);
 
       // Phase complete?
@@ -284,9 +329,11 @@ export default function BreathworkScreen() {
 
   /* ---------------------------------------------------------------- */
   /* Animated dot style.                                              */
-  /* ------------------------------------------------------------------ */
+  /* ---------------------------------------------------------------- */
+
   const dotStyle = useAnimatedStyle(() => {
     const { x, y } = perimeterToXY(dotProgress.value);
+
     return {
       transform: [
         { translateX: x - DOT_OFFSET },
@@ -296,27 +343,75 @@ export default function BreathworkScreen() {
   });
 
   /* ---------------------------------------------------------------- */
-  /* Render                                                            */
+  /* Render                                                           */
   /* ---------------------------------------------------------------- */
+
   return (
     <View style={styles.safe}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: 28 }]}>
         <Pressable
-          onPress={() => router.push('/modules')}
-          style={[styles.backBtn, { backgroundColor: accent }]}
+          onPress={() =>
+            router.push('/(tabs)/modules/wellbeing')
+          }
+          style={[
+            styles.backBtn,
+            { backgroundColor: accent },
+          ]}
           hitSlop={12}
           accessibilityLabel="Go back"
         >
-          <ChevronLeft color="#FFFFFF" size={22} strokeWidth={2.4} />
+          <ChevronLeft
+            color="#FFFFFF"
+            size={22}
+            strokeWidth={2.4}
+          />
         </Pressable>
+
         <Text style={styles.headerTitle}>BREATHWORK</Text>
-        <Pressable style={styles.bellBtn} hitSlop={12} accessibilityLabel="Notifications">
-          <Bell color={COLORS.text} size={20} />
+
+        <Pressable
+          onPress={() => setMenuOpen(prev => !prev)}
+          style={styles.menuBtn}
+          hitSlop={12}
+          accessibilityLabel="Open settings menu"
+        >
+          <MoreVertical
+            color={COLORS.text}
+            size={22}
+            strokeWidth={2.3}
+          />
         </Pressable>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      {menuOpen ? (
+        <View
+          style={[
+            styles.menu,
+            {
+              backgroundColor: COLORS.card,
+              borderColor: COLORS.cardBorder,
+            },
+          ]}
+        >
+          <Pressable
+            onPress={openSettings}
+            style={({ pressed }) => [
+              styles.menuItem,
+              pressed && styles.menuItemPressed,
+            ]}
+          >
+            <Text style={styles.menuItemText}>
+              Settings
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Instruction */}
         <Text style={styles.instruction}>
           Follow the dot. Inhale, hold, exhale, hold.
@@ -345,15 +440,24 @@ export default function BreathworkScreen() {
 
         {/* Phase + countdown */}
         <View style={styles.phaseRow}>
-          <Text style={[styles.phaseLabel, { color: accent }]}>
+          <Text
+            style={[
+              styles.phaseLabel,
+              { color: accent },
+            ]}
+          >
             {PHASE_LABELS[phase]}
           </Text>
-          <Text style={styles.countdown}>{countdown}</Text>
+
+          <Text style={styles.countdown}>
+            {countdown}
+          </Text>
         </View>
 
         {/* Cycles */}
         <Text style={styles.cycles}>
-          {cycles} {cycles === 1 ? 'cycle' : 'cycles'} completed
+          {cycles}{' '}
+          {cycles === 1 ? 'cycle' : 'cycles'} completed
         </Text>
 
         {/* Controls */}
@@ -365,9 +469,16 @@ export default function BreathworkScreen() {
               { backgroundColor: accent },
               pressed && styles.primaryBtnPressed,
             ]}
-            accessibilityLabel={running ? 'Pause' : 'Start'}
+            accessibilityLabel={
+              running ? 'Pause' : 'Start'
+            }
           >
-            <Text style={[styles.primaryBtnText, { color: onAccent }]}>
+            <Text
+              style={[
+                styles.primaryBtnText,
+                { color: onAccent },
+              ]}
+            >
               {running ? 'PAUSE' : 'START'}
             </Text>
           </Pressable>
@@ -380,7 +491,12 @@ export default function BreathworkScreen() {
             ]}
             accessibilityLabel="Reset"
           >
-            <Text style={[styles.secondaryBtnText, { color: accent }]}>
+            <Text
+              style={[
+                styles.secondaryBtnText,
+                { color: accent },
+              ]}
+            >
               RESET
             </Text>
           </Pressable>
@@ -391,12 +507,17 @@ export default function BreathworkScreen() {
 }
 
 /* ------------------------------------------------------------------ */
-/* Styles                                                              */
+/* Styles                                                             */
 /* ------------------------------------------------------------------ */
+
 type Palette = typeof DARK_PALETTE;
+
 function makeStyles(C: Palette) {
   return StyleSheet.create({
-    safe: { flex: 1, backgroundColor: C.bg },
+    safe: {
+      flex: 1,
+      backgroundColor: C.bg,
+    },
 
     /* Header */
     header: {
@@ -408,6 +529,7 @@ function makeStyles(C: Palette) {
       borderBottomWidth: 1,
       borderBottomColor: C.divider,
     },
+
     backBtn: {
       width: 38,
       height: 38,
@@ -415,17 +537,52 @@ function makeStyles(C: Palette) {
       alignItems: 'center',
       justifyContent: 'center',
     },
+
     headerTitle: {
       fontFamily: FONT_XB,
       fontSize: 16,
       letterSpacing: 1.4,
       color: C.text,
     },
-    bellBtn: {
+
+    menuBtn: {
       width: 38,
       height: 38,
       alignItems: 'center',
       justifyContent: 'center',
+    },
+
+    menu: {
+      position: 'absolute',
+      top: 76,
+      right: 14,
+      minWidth: 150,
+      borderWidth: 1,
+      borderRadius: 14,
+      paddingVertical: 6,
+      zIndex: 1000,
+      elevation: 8,
+      shadowOffset: {
+        width: 0,
+        height: 4,
+      },
+      shadowOpacity: 0.18,
+      shadowRadius: 10,
+    },
+
+    menuItem: {
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+    },
+
+    menuItemPressed: {
+      opacity: 0.6,
+    },
+
+    menuItemText: {
+      fontFamily: FONT_MEDIUM,
+      fontSize: 13.5,
+      color: C.text,
     },
 
     /* Scroll content */
@@ -454,6 +611,7 @@ function makeStyles(C: Palette) {
       justifyContent: 'center',
       marginTop: 8,
     },
+
     rect: {
       width: RECT_SIZE,
       height: RECT_SIZE,
@@ -462,6 +620,7 @@ function makeStyles(C: Palette) {
       // The dot is positioned relative to this rect's inner top-left.
       // We use absolute positioning of the dot within this container.
     },
+
     dot: {
       position: 'absolute',
       top: 0,
@@ -471,7 +630,10 @@ function makeStyles(C: Palette) {
       borderRadius: DOT_SIZE / 2,
       shadowOpacity: 0.7,
       shadowRadius: 10,
-      shadowOffset: { width: 0, height: 0 },
+      shadowOffset: {
+        width: 0,
+        height: 0,
+      },
       elevation: 6,
     },
 
@@ -480,12 +642,14 @@ function makeStyles(C: Palette) {
       alignItems: 'center',
       marginTop: 8,
     },
+
     phaseLabel: {
       fontFamily: FONT_BOLD,
       fontSize: 24,
       letterSpacing: 2,
       marginBottom: 6,
     },
+
     countdown: {
       fontFamily: FONT_XB,
       fontSize: 44,
@@ -507,6 +671,7 @@ function makeStyles(C: Palette) {
       alignItems: 'center',
       gap: 14,
     },
+
     primaryBtn: {
       width: '100%',
       alignItems: 'center',
@@ -514,14 +679,17 @@ function makeStyles(C: Palette) {
       paddingVertical: 16,
       borderRadius: 14,
     },
+
     primaryBtnPressed: {
       opacity: 0.82,
     },
+
     primaryBtnText: {
       fontFamily: FONT_BOLD,
       fontSize: 13,
       letterSpacing: 1.4,
     },
+
     secondaryBtn: {
       width: '100%',
       alignItems: 'center',
@@ -532,9 +700,11 @@ function makeStyles(C: Palette) {
       borderColor: C.cardBorder,
       backgroundColor: C.card,
     },
+
     secondaryBtnPressed: {
       opacity: 0.7,
     },
+
     secondaryBtnText: {
       fontFamily: FONT_BOLD,
       fontSize: 13,

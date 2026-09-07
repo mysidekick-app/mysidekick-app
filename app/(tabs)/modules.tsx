@@ -14,7 +14,6 @@ import {
 
 import {
   ActivityIndicator,
-  Image,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -27,6 +26,7 @@ import {
 import { router } from 'expo-router';
 
 import { useApp } from '@/components/AppProvider';
+import SidekickAvatar from '@/components/SidekickAvatar';
 import { supabase } from '@/lib/supabase';
 
 /* =========================================================
@@ -369,6 +369,7 @@ export default function ModulesScreen() {
   const {
     accentForeground,
     isDark,
+    sidekick_id,
   } = appContext;
 
   const displayName =
@@ -1330,12 +1331,9 @@ export default function ModulesScreen() {
               },
             ]}
           >
-            <Image
-              source={require('../../assets/sidekick-favicon.png')}
-              style={
-                styles.sidekickInstructorImage
-              }
-              resizeMode="contain"
+            <SidekickAvatar
+              sidekickId={sidekick_id}
+              size={82}
             />
           </View>
 
@@ -1615,11 +1613,6 @@ const styles =
       alignItems: 'center',
       justifyContent: 'center',
       overflow: 'hidden',
-    },
-
-    sidekickInstructorImage: {
-      width: 82,
-      height: 82,
     },
 
     sidekickDots: {

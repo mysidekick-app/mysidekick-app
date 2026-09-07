@@ -1,19 +1,16 @@
 import {
   PropsWithChildren,
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
   useState,
 } from 'react';
-
-import type {
-  Session,
-  User,
-} from '@supabase/supabase-js';
+import { AppState } from 'react-native';
+import type { Session, User } from '@supabase/supabase-js';
 
 import { supabase } from '@/lib/supabase';
-import { router } from 'expo-router';
 
 type SignUpMetadata = {
   full_name: string;
@@ -24,112 +21,110 @@ type AuthContextValue = {
   user: User | null;
   session: Session | null;
   loading: boolean;
-
-  signIn: (
-    email: string,
-    password: string
-  ) => Promise<{
-    error: string | null;
-  }>;
-
+  signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signUp: (
     email: string,
     password: string,
-    metadata: SignUpMetadata
-  ) => Promise<{
-    error: string | null;
-  }>;
-
-  signOut: () => Promise<{
-    error: string | null;
-  }>;
+    metadata: SignUpMetadata,
+  ) => Promise<{ error: string | null }>;
+  signOut: () => Promise<{ error: string | null }>;
 };
 
-const AuthContext =
-  createContext<AuthContextValue | null>(null);
+const AuthContext = createContext<AuthContextValue | null>(null);
 
-export function AuthProvider({
-  children,
-}: PropsWithChildren) {
-  const [session, setSession] =
-    useState<Session | null>(null);
-
-  const [loading, setLoading] =
-    useState(true);
+export function AuthProvider({ children }: PropsWithChildren) {
+  const [session, setSession] = useState<Session | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let mounted = true;
 
-    async function loadSession() {
-      const {
-        data,
-        error,
-      } = await supabase.auth.getSession();
-
-      if (!mounted) {
-        return;
+    /*
+     * Supabase automatically refreshes the access token while the app is
+     * active. When the app goes into the background we stop the refresh timer
+     * and restart it when the app becomes active again.
+     */
+    const handleAppStateChange = (state: string) => {
+      if (state === 'active') {
+        supabase.auth.startAutoRefresh();
+      } else {
+        supabase.auth.stopAutoRefresh();
       }
+    };
 
-      if (!error) {
-        setSession(data.session);
-      }
+    const appStateSubscription = AppState.addEventListener(
+      'change',
+      handleAppStateChange,
+    );
 
-      setLoading(false);
+    if (AppState.currentState === 'active') {
+      supabase.auth.startAutoRefresh();
     }
 
-    loadSession();
-
+    /*
+     * Subscribe before loading the persisted session so an auth event cannot
+     * be missed during startup.
+     */
     const {
-      data: {
-        subscription,
-      },
-    } = supabase.auth.onAuthStateChange(
-      (event, newSession) => {
-        if (!mounted) {
-          return;
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      if (!mounted) return;
+
+      setSession(nextSession);
+      setLoading(false);
+    });
+
+    const loadStoredSession = async () => {
+      try {
+        const {
+          data: { session: storedSession },
+          error,
+        } = await supabase.auth.getSession();
+
+        if (!mounted) return;
+
+        if (error) {
+          console.error('AUTH SESSION LOAD ERROR:', error);
+          setSession(null);
+        } else {
+          setSession(storedSession);
         }
-
-        setSession(newSession);
-        setLoading(false);
-
-        /*
-         * Modules is the authenticated home page.
-         * Every successful sign-in starts there.
-         */
-        if (event === 'SIGNED_IN') {
-          router.replace('/modules' as never);
+      } catch (error) {
+        if (mounted) {
+          console.error('AUTH SESSION LOAD EXCEPTION:', error);
+          setSession(null);
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
         }
       }
-    );
+    };
+
+    loadStoredSession();
 
     return () => {
       mounted = false;
       subscription.unsubscribe();
+      appStateSubscription.remove();
+      supabase.auth.stopAutoRefresh();
     };
   }, []);
 
-  const signIn = async (
-    email: string,
-    password: string
-  ) => {
-    const { error } =
-      await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      });
+  const signIn = useCallback(async (email: string, password: string) => {
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
 
     return {
       error: error?.message ?? null,
     };
-  };
+  }, []);
 
-  const signUp = async (
-    email: string,
-    password: string,
-    metadata: SignUpMetadata
-  ) => {
-    const { error } =
-      await supabase.auth.signUp({
+  const signUp = useCallback(
+    async (email: string, password: string, metadata: SignUpMetadata) => {
+      const { error } = await supabase.auth.signUp({
         email: email.trim(),
         password,
         options: {
@@ -140,19 +135,26 @@ export function AuthProvider({
         },
       });
 
+      return {
+        error: error?.message ?? null,
+      };
+    },
+    [],
+  );
+
+  const signOut = useCallback(async () => {
+    /*
+     * Supabase's default sign-out scope is local. This clears the session on
+     * this device without signing the user out of other devices.
+     */
+    const { error } = await supabase.auth.signOut({
+      scope: 'local',
+    });
+
     return {
       error: error?.message ?? null,
     };
-  };
-
-  const signOut = async () => {
-    const { error } =
-      await supabase.auth.signOut();
-
-    return {
-      error: error?.message ?? null,
-    };
-  };
+  }, []);
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -163,7 +165,7 @@ export function AuthProvider({
       signUp,
       signOut,
     }),
-    [session, loading]
+    [session, loading, signIn, signUp, signOut],
   );
 
   return (
@@ -177,9 +179,7 @@ export function useAuth(): AuthContextValue {
   const context = useContext(AuthContext);
 
   if (context === null) {
-    throw new Error(
-      'useAuth must be used inside AuthProvider'
-    );
+    throw new Error('useAuth must be used inside AuthProvider');
   }
 
   return context;

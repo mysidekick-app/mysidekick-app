@@ -4,7 +4,7 @@
     "slug": "bolt-expo-nativewind",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/sidekick.png",
+    "icon": "./assets/sidekick-icon-square.png",
     "scheme": "mysidekick",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,

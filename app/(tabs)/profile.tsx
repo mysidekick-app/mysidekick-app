@@ -13,11 +13,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
-  Camera,
   Check,
   ChevronRight,
   CircleUserRound,
-  LockKeyhole,
   LogOut,
   Moon,
   Pencil,
@@ -35,9 +33,11 @@ import {
 } from '@/components/AppProvider';
 
 import { useAuth } from '@/components/AuthProvider';
+import PrivacyPolicy from '@/components/PrivacyPolicy';
 
 import { CurrencyPickerModal } from '@/components/CurrencyPickerModal';
 import { getCurrency } from '@/components/currencies';
+import SidekickAvatar from '@/components/SidekickAvatar';
 
 const MAX_BIO_WORDS = 30;
 const MAX_TITLE_CHARS = 20;
@@ -546,7 +546,6 @@ const accentChoices: {
 type SettingKey =
   | 'account'
   | 'display'
-  | 'password'
   | 'privacy'
   | 'reset'
   | null;
@@ -567,6 +566,7 @@ export default function ProfileScreen() {
     timezone,
     theme_mode,
     accent_family,
+    sidekick_id,
   } = useApp();
 
   const { signOut } = useAuth();
@@ -588,6 +588,9 @@ export default function ProfileScreen() {
 
   const [timezoneSearch, setTimezoneSearch] =
     useState('');
+
+  const [sidekickPickerOpen, setSidekickPickerOpen] =
+    useState(false);
 
   const currency = getCurrency(currency_code);
 
@@ -721,11 +724,6 @@ export default function ProfileScreen() {
       icon: Volume2,
     },
     {
-      key: 'password',
-      label: 'Password',
-      icon: LockKeyhole,
-    },
-    {
       key: 'privacy',
       label: 'Privacy Policy',
       icon: ShieldCheck,
@@ -791,42 +789,37 @@ export default function ProfileScreen() {
                 {
                   backgroundColor:
                     accentWash,
-                  borderColor:
-                    accent.light,
                 },
               ]}
             >
-              <Text
-                style={[
-                  styles.avatarText,
-                  {
-                    color:
-                      accentForeground,
-                  },
-                ]}
-              >
-                {(
-                  display_name ||
-                  'U'
-                )
-                  .slice(0, 1)
-                  .toUpperCase()}
-              </Text>
+              <SidekickAvatar
+                sidekickId={sidekick_id}
+                size={68}
+              />
 
-              <Pressable
-                style={[
-                  styles.camera,
-                  {
-                    backgroundColor:
-                      accentForeground,
-                  },
-                ]}
-              >
-                <Camera
-                  color="#FFF"
-                  size={14}
-                />
-              </Pressable>
+              {editing && (
+                <Pressable
+                  onPress={() =>
+                    setSidekickPickerOpen(
+                      true
+                    )
+                  }
+                  style={[
+                    styles.camera,
+                    {
+                      backgroundColor:
+                        accentForeground,
+                    },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Edit profile picture"
+                >
+                  <Pencil
+                    color="#FFF"
+                    size={13}
+                  />
+                </Pressable>
+              )}
             </View>
 
             {editing ? (
@@ -1794,107 +1787,6 @@ export default function ProfileScreen() {
         </View>
       </Modal>
 
-      {/* PASSWORD SHEET */}
-      <Modal
-        visible={
-          openSetting ===
-          'password'
-        }
-        transparent
-        animationType="slide"
-        onRequestClose={() =>
-          setOpenSetting(null)
-        }
-      >
-        <View
-          style={
-            styles.modalShade
-          }
-        >
-          <View
-            style={[
-              styles.sheet,
-              {
-                backgroundColor:
-                  C.card,
-              },
-            ]}
-          >
-            <View
-              style={
-                styles.sheetHeader
-              }
-            >
-              <Text
-                style={[
-                  styles.sheetTitle,
-                  {
-                    color:
-                      C.text,
-                  },
-                ]}
-              >
-                Password
-              </Text>
-
-              <Pressable
-                onPress={() =>
-                  setOpenSetting(
-                    null
-                  )
-                }
-                hitSlop={12}
-              >
-                <X
-                  color={C.muted}
-                  size={21}
-                />
-              </Pressable>
-            </View>
-
-            <Text
-              style={[
-                styles.placeholder,
-                {
-                  color:
-                    C.muted,
-                },
-              ]}
-            >
-              Password management will
-              be available soon.
-            </Text>
-
-            <Pressable
-              onPress={() =>
-                setOpenSetting(
-                  null
-                )
-              }
-              style={[
-                styles.saveButton,
-                {
-                  backgroundColor:
-                    accentForeground,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.saveText,
-                  {
-                    color:
-                      onAccent,
-                  },
-                ]}
-              >
-                Done
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-
       {/* PRIVACY SHEET */}
       <Modal
         visible={
@@ -1915,6 +1807,7 @@ export default function ProfileScreen() {
           <View
             style={[
               styles.sheet,
+              styles.privacySheet,
               {
                 backgroundColor:
                   C.card,
@@ -1953,18 +1846,19 @@ export default function ProfileScreen() {
               </Pressable>
             </View>
 
-            <Text
-              style={[
-                styles.placeholder,
-                {
-                  color:
-                    C.muted,
-                },
-              ]}
+            <View
+              style={
+                styles.privacyContent
+              }
             >
-              Privacy policy details will
-              be available soon.
-            </Text>
+              <PrivacyPolicy
+                textColor={C.text}
+                mutedColor={C.muted}
+                borderColor={C.border}
+                accentColor={accentForeground}
+                accentWash={accentWash}
+              />
+            </View>
 
             <Pressable
               onPress={() =>
@@ -2092,6 +1986,171 @@ export default function ProfileScreen() {
                 ]}
               >
                 Reset
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      {/* SIDEKICK PICKER */}
+      <Modal
+        visible={sidekickPickerOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() =>
+          setSidekickPickerOpen(false)
+        }
+      >
+        <View style={styles.modalShade}>
+          <View
+            style={[
+              styles.sheet,
+              styles.sidekickSheet,
+              {
+                backgroundColor:
+                  C.card,
+              },
+            ]}
+          >
+            <View
+              style={styles.sheetHeader}
+            >
+              <Text
+                style={[
+                  styles.sheetTitle,
+                  {
+                    color:
+                      C.text,
+                  },
+                ]}
+              >
+                Choose your Sidekick
+              </Text>
+
+              <Pressable
+                onPress={() =>
+                  setSidekickPickerOpen(false)
+                }
+                hitSlop={12}
+              >
+                <X
+                  color={C.muted}
+                  size={21}
+                />
+              </Pressable>
+            </View>
+
+            <Text
+              style={[
+                styles.sidekickDescription,
+                {
+                  color:
+                    C.muted,
+                },
+              ]}
+            >
+              Pick the Sidekick you want to use
+              across your profile and the app.
+            </Text>
+
+            <ScrollView
+              style={styles.sidekickScroll}
+              contentContainerStyle={
+                styles.sidekickGrid
+              }
+              showsVerticalScrollIndicator={false}
+            >
+              {Array.from(
+                { length: 50 },
+                (_, index) => {
+                  const id = `sidekick-${String(
+                    index + 1
+                  ).padStart(2, '0')}`;
+
+                  const selected =
+                    sidekick_id === id;
+
+                  return (
+                    <Pressable
+                      key={id}
+                      onPress={async () => {
+                        await updateSettings({
+                          sidekick_id: id,
+                        });
+                        setSidekickPickerOpen(
+                          false
+                        );
+                      }}
+                      style={[
+                        styles.sidekickOption,
+                        {
+                          backgroundColor:
+                            selected
+                              ? accentWash
+                              : C.input,
+                          borderColor:
+                            selected
+                              ? accentForeground
+                              : C.border,
+                        },
+                      ]}
+                    >
+                      <View
+                        style={
+                          styles.sidekickImageWrap
+                        }
+                      >
+                        <SidekickAvatar
+                          sidekickId={id}
+                          size={62}
+                        />
+                      </View>
+
+                      {selected ? (
+                        <View
+                          style={[
+                            styles.sidekickCheck,
+                            {
+                              backgroundColor:
+                                accentForeground,
+                            },
+                          ]}
+                        >
+                          <Check
+                            color="#FFF"
+                            size={12}
+                            strokeWidth={3}
+                          />
+                        </View>
+                      ) : null}
+                    </Pressable>
+                  );
+                }
+              )}
+            </ScrollView>
+
+            <Pressable
+              onPress={() =>
+                setSidekickPickerOpen(false)
+              }
+              style={[
+                styles.saveButton,
+                {
+                  backgroundColor:
+                    accentForeground,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.saveText,
+                  {
+                    color:
+                      onAccent,
+                  },
+                ]}
+              >
+                Done
               </Text>
             </Pressable>
           </View>
@@ -2469,15 +2528,10 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    borderWidth: 2,
+    borderWidth: 0,
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
-  },
-
-  avatarText: {
-    fontFamily: FONT_BOLD,
-    fontSize: 28,
   },
 
   camera: {
@@ -2683,6 +2737,15 @@ const styles = StyleSheet.create({
     maxHeight: '90%',
   },
 
+  privacySheet: {
+    height: '90%',
+  },
+
+  privacyContent: {
+    flex: 1,
+    minHeight: 0,
+  },
+
   sheetHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -2792,6 +2855,55 @@ const styles = StyleSheet.create({
   saveText: {
     fontFamily: FONT_SEMI,
     fontSize: 15,
+  },
+
+  sidekickSheet: {
+    maxHeight: '92%',
+  },
+
+  sidekickDescription: {
+    fontFamily: FONT,
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 14,
+  },
+
+  sidekickScroll: {
+    maxHeight: 470,
+  },
+
+  sidekickGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    paddingBottom: 4,
+  },
+
+  sidekickOption: {
+    width: '18.5%',
+    aspectRatio: 1,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+    position: 'relative',
+  },
+
+  sidekickImageWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  sidekickCheck: {
+    position: 'absolute',
+    right: 5,
+    top: 5,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   timezoneDescription: {

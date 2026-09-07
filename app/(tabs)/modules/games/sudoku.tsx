@@ -112,6 +112,7 @@ export default function SudokuScreen() {
   const params = useLocalSearchParams<{
     difficulty?: string;
     level?: string;
+    sessionId?: string;
   }>();
 
   const [difficulty] = useState<Difficulty>(() =>
@@ -166,6 +167,41 @@ export default function SudokuScreen() {
 
   const [scoreSaved, setScoreSaved] = useState(false);
 
+  const exitConfirmedRef = useRef(false);
+
+  const sessionId =
+    params.sessionId && params.sessionId !== 'undefined'
+      ? params.sessionId
+      : null;
+
+  const abandonSession = useCallback(async () => {
+    if (!sessionId) return;
+
+    const { error } = await supabase
+      .from('game_sessions')
+      .update({ status: 'abandoned', result: 'abandoned' })
+      .eq('id', sessionId)
+      .eq('status', 'active');
+
+    if (error) {
+      console.error('SUDOKU ABANDON SESSION ERROR:', error);
+    }
+  }, [sessionId]);
+
+  const completeSession = useCallback(async () => {
+    if (!sessionId) return;
+
+    const { error } = await supabase
+      .from('game_sessions')
+      .update({ status: 'completed', result: 'completed' })
+      .eq('id', sessionId)
+      .eq('status', 'active');
+
+    if (error) {
+      console.error('SUDOKU COMPLETE SESSION ERROR:', error);
+    }
+  }, [sessionId]);
+
   // ─── Timer ──────────────────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -187,6 +223,9 @@ export default function SudokuScreen() {
           }
 
           setTimerRunning(false);
+          if (!exitConfirmedRef.current) {
+            completeSession();
+          }
           setShowTimeUp(true);
 
           return 0;
@@ -202,7 +241,7 @@ export default function SudokuScreen() {
         timerRef.current = null;
       }
     };
-  }, [timerRunning]);
+  }, [timerRunning, completeSession]);
 
   // ─── Board interaction ─────────────────────────────────────────────────────
 
@@ -297,6 +336,10 @@ export default function SudokuScreen() {
 
       setFinalScore(POINTS_BY_DIFFICULTY[difficulty]);
 
+      if (!exitConfirmedRef.current) {
+        completeSession();
+      }
+
       setShowWin(true);
     }
   }, [
@@ -304,6 +347,7 @@ export default function SudokuScreen() {
     puzzleData.solution,
     timerRunning,
     difficulty,
+    completeSession,
   ]);
 
   // ─── Save score ────────────────────────────────────────────────────────────
@@ -323,6 +367,7 @@ export default function SudokuScreen() {
       if (!playerId) return;
 
       await supabase.from('game_scores').insert({
+        session_id: sessionId,
         player_id: playerId,
         game: 'sudoku',
         mode: 'solo',
@@ -330,11 +375,11 @@ export default function SudokuScreen() {
         difficulty,
       });
     },
-    [scoreSaved, difficulty]
+    [scoreSaved, difficulty, sessionId]
   );
 
   useEffect(() => {
-    if (showWin) {
+    if (showWin && !exitConfirmedRef.current) {
       saveScore(finalScore);
     }
   }, [showWin, finalScore, saveScore]);
@@ -365,6 +410,7 @@ export default function SudokuScreen() {
     setScoreSaved(false);
 
     setFinalScore(0);
+    exitConfirmedRef.current = false;
   }, [genLevel]);
 
   // ─── Exit confirmation ─────────────────────────────────────────────────────
@@ -377,10 +423,19 @@ export default function SudokuScreen() {
     setShowExitConfirm(false);
   }, []);
 
-  const handleExitGame = useCallback(() => {
+  const handleExitGame = useCallback(async () => {
+    exitConfirmedRef.current = true;
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    setTimerRunning(false);
     setShowExitConfirm(false);
-    router.push('/modules');
-  }, []);
+    setShowWin(false);
+    setShowTimeUp(false);
+    await abandonSession();
+    router.replace('/modules/games');
+  }, [abandonSession]);
 
   // ─── Cell styling ──────────────────────────────────────────────────────────
 
@@ -672,7 +727,6 @@ export default function SudokuScreen() {
               },
             ]}
           >
-            <Text style={styles.modalEmoji}>🚪</Text>
 
             <Text
               style={[
@@ -884,7 +938,7 @@ export default function SudokuScreen() {
                     { color: colors.text },
                   ]}
                 >
-                  Exit
+                  Exit Game
                 </Text>
               </Pressable>
             </View>
@@ -973,7 +1027,7 @@ export default function SudokuScreen() {
                     { color: colors.text },
                   ]}
                 >
-                  Exit
+                  Exit Game
                 </Text>
               </Pressable>
             </View>

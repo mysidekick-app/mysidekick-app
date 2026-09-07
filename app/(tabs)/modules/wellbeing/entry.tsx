@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 
 import { router, useLocalSearchParams } from 'expo-router';
-import { Bell, ChevronLeft, Sparkles } from 'lucide-react-native';
+import { ChevronLeft, MoreVertical, RefreshCw } from 'lucide-react-native';
 
 import { useApp } from '@/components/AppProvider';
 import { useAuth } from '@/components/AuthProvider';
@@ -88,7 +88,7 @@ const MODULE_CONFIG: Record<ModuleKey, ModuleConfig> = {
     label: 'MORNING PAGES',
     title: 'BLANK PAGES',
     placeholder:
-      "Let your mind wander onto the page...",
+      'Let your mind wander onto the page...',
     hasPrompt: false,
   },
 
@@ -101,7 +101,9 @@ const MODULE_CONFIG: Record<ModuleKey, ModuleConfig> = {
   },
 };
 
-function isModuleKey(value: unknown): value is ModuleKey {
+function isModuleKey(
+  value: unknown,
+): value is ModuleKey {
   return (
     value === 'journaling' ||
     value === 'morning_pages' ||
@@ -180,7 +182,9 @@ function promptFor(
 /* Date helper                                                        */
 /* ------------------------------------------------------------------ */
 
-function prettyDateLabel(dateStr: string): string {
+function prettyDateLabel(
+  dateStr: string,
+): string {
   const d = parseDate(dateStr);
 
   return d.toLocaleDateString('en-US', {
@@ -213,7 +217,11 @@ export default function WellbeingEntryScreen() {
 
   const config = MODULE_CONFIG[moduleKey];
 
-  const { isDark, accentForeground, onAccent } = useApp();
+  const {
+    isDark,
+    accentForeground,
+    onAccent,
+  } = useApp();
 
   const { user } = useAuth();
 
@@ -254,18 +262,64 @@ export default function WellbeingEntryScreen() {
   const [saveMsg, setSaveMsg] =
     useState<string | null>(null);
 
+  /* ---------------------------------------------------------------- */
+  /* Global settings menu                                             */
+  /* ---------------------------------------------------------------- */
+
+  const [menuOpen, setMenuOpen] =
+    useState<boolean>(false);
+
+  /* ---------------------------------------------------------------- */
+  /* Prompt refresh state                                             */
+  /* ---------------------------------------------------------------- */
+
+  const [promptIndex, setPromptIndex] =
+    useState<number>(0);
+
   const isFuture = useMemo(
     () => selectedDate > today,
     [selectedDate, today],
   );
 
-  const dailyPrompt = useMemo(
-    () => promptFor(moduleKey, selectedDate),
-    [moduleKey, selectedDate],
-  );
+  const dailyPrompt = useMemo(() => {
+    const list = PROMPT_LISTS[moduleKey];
+
+    if (list.length === 0) {
+      return null;
+    }
+
+    const dayIndex =
+      parseDate(selectedDate).getTime() /
+      86_400_000;
+
+    const baseIndex =
+      Math.floor(Math.abs(dayIndex)) %
+      list.length;
+
+    return list[
+      (baseIndex + promptIndex) %
+        list.length
+    ];
+  }, [
+    moduleKey,
+    selectedDate,
+    promptIndex,
+  ]);
+
+  const refreshPrompt = useCallback(() => {
+    const list = PROMPT_LISTS[moduleKey];
+
+    if (list.length <= 1) {
+      return;
+    }
+
+    setPromptIndex(prev =>
+      (prev + 1) % list.length,
+    );
+  }, [moduleKey]);
 
   /* -------------------------------------------------------------- */
-  /* Load one entry                                                 */
+  /* Load one entry                                                  */
   /* -------------------------------------------------------------- */
 
   const loadEntry = useCallback(
@@ -295,26 +349,29 @@ export default function WellbeingEntryScreen() {
         .eq('module_key', moduleKey)
         .eq('entry_date', dateStr)
         .maybeSingle();
-      
+
       if (fetchErr) {
-        console.error('FAILED WELLBEING ENTRY LOAD:', {
-          message: fetchErr.message,
-          code: fetchErr.code,
-          details: fetchErr.details,
-          hint: fetchErr.hint,
-          moduleKey,
-          dateStr,
-          userId: user.id,
-        });
-      
+        console.error(
+          'FAILED WELLBEING ENTRY LOAD:',
+          {
+            message: fetchErr.message,
+            code: fetchErr.code,
+            details: fetchErr.details,
+            hint: fetchErr.hint,
+            moduleKey,
+            dateStr,
+            userId: user.id,
+          },
+        );
+
         setError(
           `Could not load entry: ${fetchErr.message}`,
         );
-      
+
         setLoading(false);
         return;
       }
-      
+
       const row = data as EntryRow | null;
 
       setContent(row?.content ?? '');
@@ -325,7 +382,7 @@ export default function WellbeingEntryScreen() {
   );
 
   /* -------------------------------------------------------------- */
-  /* Load dates for calendar                                        */
+  /* Load dates for calendar                                         */
   /* -------------------------------------------------------------- */
 
   const loadEntryDates = useCallback(
@@ -367,7 +424,7 @@ export default function WellbeingEntryScreen() {
   );
 
   /* -------------------------------------------------------------- */
-  /* Initial entry load                                             */
+  /* Initial entry load                                               */
   /* -------------------------------------------------------------- */
 
   useEffect(() => {
@@ -375,7 +432,7 @@ export default function WellbeingEntryScreen() {
   }, [loadEntry, selectedDate]);
 
   /* -------------------------------------------------------------- */
-  /* Calendar dots                                                   */
+  /* Calendar dots                                                    */
   /* -------------------------------------------------------------- */
 
   useEffect(() => {
@@ -383,7 +440,7 @@ export default function WellbeingEntryScreen() {
   }, [loadEntryDates]);
 
   /* -------------------------------------------------------------- */
-  /* Date selection                                                  */
+  /* Date selection                                                   */
   /* -------------------------------------------------------------- */
 
   const onSelectDate = useCallback(
@@ -392,13 +449,14 @@ export default function WellbeingEntryScreen() {
         return;
       }
 
+      setPromptIndex(0);
       setSelectedDate(date);
     },
     [today],
   );
 
   /* -------------------------------------------------------------- */
-  /* Save entry                                                      */
+  /* Save entry                                                       */
   /* -------------------------------------------------------------- */
 
   const onSave = useCallback(
@@ -441,8 +499,10 @@ export default function WellbeingEntryScreen() {
         .select('id, content')
         .single();
 
-        if (upsertErr) {
-          console.error('FAILED WELLBEING ENTRY SAVE:', {
+      if (upsertErr) {
+        console.error(
+          'FAILED WELLBEING ENTRY SAVE:',
+          {
             message: upsertErr.message,
             code: upsertErr.code,
             details: upsertErr.details,
@@ -450,15 +510,16 @@ export default function WellbeingEntryScreen() {
             moduleKey,
             selectedDate,
             userId: user.id,
-          });
-        
-          setError(
-            `Could not save entry: ${upsertErr.message}`,
-          );
-        
-          setSaving(false);
-          return;
-        }
+          },
+        );
+
+        setError(
+          `Could not save entry: ${upsertErr.message}`,
+        );
+
+        setSaving(false);
+        return;
+      }
 
       if (data) {
         const savedRow =
@@ -491,6 +552,15 @@ export default function WellbeingEntryScreen() {
     ],
   );
 
+  /* -------------------------------------------------------------- */
+  /* Settings navigation                                             */
+  /* -------------------------------------------------------------- */
+
+  const openSettings = useCallback(() => {
+    setMenuOpen(false);
+    router.push('/(tabs)/profile');
+  }, []);
+
   /* ---------------------------------------------------------------- */
   /* Render                                                           */
   /* ---------------------------------------------------------------- */
@@ -506,7 +576,6 @@ export default function WellbeingEntryScreen() {
           { paddingTop: 28 },
         ]}
       >
-
         <Pressable
           onPress={() => router.back()}
           style={[
@@ -528,17 +597,47 @@ export default function WellbeingEntryScreen() {
         </Text>
 
         <Pressable
-          style={styles.bellBtn}
+          onPress={() =>
+            setMenuOpen(prev => !prev)
+          }
+          style={styles.menuBtn}
           hitSlop={12}
-          accessibilityLabel="Notifications"
+          accessibilityLabel="Open settings menu"
         >
-          <Bell
+          <MoreVertical
             color={COLORS.text}
-            size={20}
+            size={22}
+            strokeWidth={2.3}
           />
         </Pressable>
-
       </View>
+
+      {/* Global settings menu */}
+
+      {menuOpen ? (
+        <View
+          style={[
+            styles.menu,
+            {
+              backgroundColor: COLORS.card,
+              borderColor: COLORS.cardBorder,
+            },
+          ]}
+        >
+          <Pressable
+            onPress={openSettings}
+            style={({ pressed }) => [
+              styles.menuItem,
+              pressed &&
+                styles.menuItemPressed,
+            ]}
+          >
+            <Text style={styles.menuItemText}>
+              Settings
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
@@ -549,7 +648,6 @@ export default function WellbeingEntryScreen() {
         }
         keyboardVerticalOffset={0}
       >
-
         <ScrollView
           contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps="handled"
@@ -658,7 +756,10 @@ export default function WellbeingEntryScreen() {
                   style={styles.promptCard}
                 >
 
-                  <View
+                  {/* Refresh prompt button */}
+
+                  <Pressable
+                    onPress={refreshPrompt}
                     style={[
                       styles.promptIcon,
                       {
@@ -666,13 +767,16 @@ export default function WellbeingEntryScreen() {
                           accent,
                       },
                     ]}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Refresh prompt"
                   >
-                    <Sparkles
+                    <RefreshCw
                       color={onAccent}
                       size={14}
                       strokeWidth={2.4}
                     />
-                  </View>
+                  </Pressable>
 
                   <View
                     style={{ flex: 1 }}
@@ -693,14 +797,12 @@ export default function WellbeingEntryScreen() {
                       {dailyPrompt}
                     </Text>
                   </View>
-
                 </View>
               ) : null}
 
               {/* Existing entry */}
 
               {entryId && !isEditing ? (
-
                 <Pressable
                   onPress={() =>
                     setIsEditing(true)
@@ -726,7 +828,6 @@ export default function WellbeingEntryScreen() {
                     Tap to edit
                   </Text>
                 </Pressable>
-
               ) : (
 
                 /* New/editing entry */
@@ -823,14 +924,10 @@ export default function WellbeingEntryScreen() {
                   )}
                 </Pressable>
               )}
-
             </>
           )}
-
         </ScrollView>
-
       </KeyboardAvoidingView>
-
     </View>
   );
 }
@@ -843,7 +940,6 @@ type Palette = typeof DARK_PALETTE;
 
 function makeStyles(C: Palette) {
   return StyleSheet.create({
-
     safe: {
       flex: 1,
       backgroundColor: C.bg,
@@ -874,11 +970,44 @@ function makeStyles(C: Palette) {
       color: C.text,
     },
 
-    bellBtn: {
+    menuBtn: {
       width: 38,
       height: 38,
       alignItems: 'center',
       justifyContent: 'center',
+    },
+
+    menu: {
+      position: 'absolute',
+      top: 76,
+      right: 14,
+      minWidth: 150,
+      borderWidth: 1,
+      borderRadius: 14,
+      paddingVertical: 6,
+      zIndex: 1000,
+      elevation: 8,
+      shadowOffset: {
+        width: 0,
+        height: 4,
+      },
+      shadowOpacity: 0.18,
+      shadowRadius: 10,
+    },
+
+    menuItem: {
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+    },
+
+    menuItemPressed: {
+      opacity: 0.6,
+    },
+
+    menuItemText: {
+      fontFamily: FONT_MEDIUM,
+      fontSize: 13.5,
+      color: C.text,
     },
 
     scroll: {
@@ -1062,6 +1191,5 @@ function makeStyles(C: Palette) {
       fontFamily: FONT_BOLD,
       fontSize: 12.5,
     },
-
   });
 }
