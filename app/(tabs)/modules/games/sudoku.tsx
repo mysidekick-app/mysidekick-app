@@ -545,7 +545,10 @@ export default function SudokuScreen() {
         <Text
           style={[
             styles.headerTitle,
-            { color: colors.accent },
+            {
+              color:
+                isDark ? '#FFFFFF' : accentForeground,
+            },
           ]}
         >
           SUDOKU

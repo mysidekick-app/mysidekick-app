@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Linking, Modal, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Bookmark, ChevronLeft, ExternalLink, MoreVertical, Pencil, Plus, Search, Trash2, X } from 'lucide-react-native';
 import { router } from 'expo-router';
 import { useApp } from '@/components/AppProvider';
@@ -194,7 +195,15 @@ export default function BookmarksScreen() {
         <Pressable onPress={() => router.push('/modules')} style={[styles.backBtn, { backgroundColor: accentForeground }]} hitSlop={12}>
           <ChevronLeft color="#FFFFFF" size={22} strokeWidth={2.4} />
         </Pressable>
-        <Text style={[styles.headerTitle, { color: accentForeground }]}>BOOKMARKS</Text>
+        <Text
+          style={[
+            styles.headerTitle,
+            {
+              color:
+                isDark ? '#FFFFFF' : accentForeground,
+            },
+          ]}
+        >BOOKMARKS</Text>
         <Pressable onPress={() => setMenuOpen(true)} style={styles.bellBtn} hitSlop={12}>
           <MoreVertical color={isDark ? '#F4F2EE' : '#27241F'} size={20} />
         </Pressable>
@@ -314,7 +323,8 @@ export default function BookmarksScreen() {
       {/* Add/Edit modal */}
       <Modal visible={modalOpen} transparent animationType="slide" onRequestClose={() => setModalOpen(false)}>
         <View style={styles.modalShade}>
-          <View style={[styles.modalCard, isDark && styles.modalDark]}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.keyboardModal}>
+            <View style={[styles.modalCard, isDark && styles.modalDark]}>
             <View style={styles.modalTitleRow}>
               <Text style={[styles.modalTitle, isDark && styles.darkText]}>{editingId ? 'Edit bookmark' : 'Save resource'}</Text>
               <Pressable onPress={() => { setModalOpen(false); setEditingId(null); }}><X color={isDark ? '#F4F2EE' : '#5A5751'} size={21} /></Pressable>
@@ -386,7 +396,8 @@ export default function BookmarksScreen() {
                 </Text>
               </Pressable>
             </View>
-          </View>
+            </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
 
@@ -454,13 +465,18 @@ const styles = StyleSheet.create({
   darkMuted: { color: '#AAA59D' },
   error: { fontFamily: FONT_MED, color: '#C53A2F', fontSize: 13, marginBottom: 10 },
 
-  header: {     flexDirection: 'row',
+  header: {     
+    position: 'relative',
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingTop: 28,
     paddingVertical: 12,
-    borderBottomWidth: 1, },
+    borderBottomWidth: 1,
+    borderBottomColor: '#ECE9E4',
+    zIndex: 100, },
+
   headerDark: { borderBottomColor: '#262626' },
   backBtn: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { fontFamily: 'Poppins-ExtraBold', fontSize: 16, letterSpacing: 1.4, color: '#27241F' },
@@ -508,7 +524,7 @@ const styles = StyleSheet.create({
 
   fab: {
     position: 'absolute',
-    bottom: 82,
+    bottom: 30,
     alignSelf: 'center',
     width: 56,
     height: 56,
@@ -522,11 +538,12 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   modalShade: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
-  modalCard: { backgroundColor: '#FFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 22, paddingBottom: 34, maxHeight: '92%' },
+  modalCard: { backgroundColor: '#FFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 22, paddingBottom: 18, height: '88%', maxHeight: '92%' },
   modalDark: { backgroundColor: '#161616' },
   modalTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   modalTitle: { fontFamily: FONT_BOLD, fontSize: 18, color: '#27241F', flex: 1, marginRight: 12 },
-  modalScroll: { flex: 1 },
+  keyboardModal: { width: '100%', alignItems: 'center', justifyContent: 'flex-end' },
+   modalScroll: { flex: 1 },
   modalScrollContent: { paddingBottom: 8 },
 
   label: { fontFamily: FONT_MED, fontSize: 13, color: '#77746E', marginTop: 14, marginBottom: 6 },

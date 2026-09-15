@@ -3,12 +3,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Modal,
   Pressable,
-  SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChevronLeft } from 'lucide-react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { supabase } from '@/lib/supabase';
@@ -583,7 +584,10 @@ export default function SequenceScreen() {
         <Text
           style={[
             styles.headerTitle,
-            { color: colors.accent },
+            {
+              color:
+                isDark ? '#FFFFFF' : accentForeground,
+            },
           ]}
         >
           SEQUENCE
@@ -991,13 +995,16 @@ const styles = StyleSheet.create({
   },
 
   header: {
+    position: 'relative',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: 28,
-    paddingVertical: 12,
+    paddingTop: 25,
+    paddingBottom: 12,
     borderBottomWidth: 1,
+    borderBottomColor: '#ECE9E4',
+    zIndex: 100,
   },
 
   headerBack: {

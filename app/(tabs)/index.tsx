@@ -8,9 +8,11 @@ import {
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
-  SafeAreaView,
+
   ScrollView,
   StyleSheet,
   Text,
@@ -28,8 +30,10 @@ import {
   X,
 } from 'lucide-react-native';
 
+import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   useLocalSearchParams,
+  useFocusEffect,
   router,
 } from 'expo-router';
 
@@ -46,6 +50,7 @@ import { supabase } from '@/lib/supabase';
 import {
   ensureDirectConversation,
   ensureGroupConversation,
+  getChatClearedAt,
   getConversationReadMap,
   markConversationRead,
   sendChatMessage,
@@ -62,6 +67,8 @@ type ChatItem = {
   time: string;
   unread?: number;
   lastMessageSenderId?: string;
+  lastMessageRead?: boolean;
+  lastMessageAt?: string;
   category: 'system' | 'groups' | 'direct';
   icon: string;
   profileId?: string;
@@ -133,7 +140,6 @@ const SYSTEM_CHATS: ChatItem[] = [
 const filters = [
   'All',
   'Unread',
-  'Groups',
 ] as const;
 
 type FilterKey = (typeof filters)[number];
@@ -239,6 +245,9 @@ export default function ChatScreen() {
   const [userFriends, setUserFriends] =
     useState<ChatItem[]>([]);
 
+  const [searchableFriends, setSearchableFriends] =
+    useState<ChatItem[]>([]);
+
   const [userGroups, setUserGroups] =
     useState<ChatItem[]>([]);
 
@@ -267,6 +276,11 @@ export default function ChatScreen() {
   const [flexError, setFlexError] =
     useState<string | null>(null);
 
+  // Existing chat messages determine who already received this
+  // exact streak message today. No new table is required.
+  const [sentStreakRecipients, setSentStreakRecipients] =
+    useState<string[]>([]);
+
   /* =======================================================
      ADD FRIEND
   ======================================================= */
@@ -288,6 +302,16 @@ export default function ChatScreen() {
 
   const [sendingRequestId, setSendingRequestId] =
     useState<string | null>(null);
+
+  // Users who already have an outgoing pending request.
+  // Keep the search result visible so the button can change to "Sent".
+  const [sentRequestIds, setSentRequestIds] =
+    useState<string[]>([]);
+
+  // Users who are already friends with the current user.
+  // Their search result stays visible and the button shows "Friends".
+  const [existingFriendIds, setExistingFriendIds] =
+    useState<string[]>([]);
 
   /* =======================================================
      CREATE GROUP
@@ -420,15 +444,79 @@ export default function ChatScreen() {
     );
 
     const conversationByFriend = new Map<string, string>();
-    for (const friendId of friendIds) {
-      const { id: conversationId } = await ensureDirectConversation(user.id, friendId);
-      if (conversationId) conversationByFriend.set(friendId, conversationId);
+    const { data: myMembershipRows, error: membershipLoadError } = await supabase
+      .from('chat_conversation_members')
+      .select('conversation_id')
+      .eq('user_id', user.id);
+
+    if (membershipLoadError) {
+      console.error('LOAD CHAT MEMBERSHIPS ERROR:', membershipLoadError);
+    } else {
+      const conversationIds = [...new Set((myMembershipRows ?? []).map((r: any) => r.conversation_id).filter(Boolean))];
+      if (conversationIds.length) {
+        const { data: directRows } = await supabase
+          .from('chat_conversations')
+          .select('id')
+          .eq('type', 'direct')
+          .in('id', conversationIds);
+        const directIds = (directRows ?? []).map((r: any) => r.id);
+        if (directIds.length) {
+          const { data: pairedRows } = await supabase
+            .from('chat_conversation_members')
+            .select('conversation_id, user_id')
+            .in('conversation_id', directIds)
+            .in('user_id', friendIds);
+          (pairedRows ?? []).forEach((row: any) => {
+            if (!conversationByFriend.has(row.user_id)) conversationByFriend.set(row.user_id, row.conversation_id);
+          });
+        }
+      }
     }
 
+    const allFriendProfiles: ChatItem[] = (profiles ?? []).map((profile: SocialProfile) => ({
+      id: profile.user_id,
+      name: profile.display_name,
+      detail: profile.title || profile.tag || profile.profile_title || `@${profile.username}`,
+      time: '',
+      category: 'direct',
+      icon: (profile.display_name || '?').slice(0, 1).toUpperCase(),
+      profileId: profile.user_id,
+      sidekickId: sidekickByUserId.get(profile.user_id) ?? null,
+    }));
+    setSearchableFriends(allFriendProfiles);
+
     const directConversationIds = [...conversationByFriend.values()];
+
+    // Always reload the persisted read positions from Supabase.
+    // This prevents unread badges from returning after an app refresh/reload.
     const readRows = directConversationIds.length
       ? await getConversationReadMap(user.id, directConversationIds)
       : new Map<string, string>();
+
+    // Keep the local UI state synchronized with the database so the
+    // unread calculation has the same source of truth after refresh.
+    if (directConversationIds.length && readRows.size) {
+      setReadChatAt((previous) => {
+        const next = { ...previous };
+        readRows.forEach((readAt, conversationId) => {
+          next[conversationId] = readAt;
+        });
+        return next;
+      });
+    }
+
+    const { data: peerReadRows } = directConversationIds.length
+      ? await supabase
+          .from('chat_conversation_reads')
+          .select('conversation_id, user_id, last_read_at')
+          .in('conversation_id', directConversationIds)
+          .in('user_id', friendIds)
+      : { data: [] as any[] };
+    const peerReadByConversation = new Map<string, string>();
+    (peerReadRows ?? []).forEach((row: any) => {
+      const current = peerReadByConversation.get(row.conversation_id);
+      if (!current || row.last_read_at > current) peerReadByConversation.set(row.conversation_id, row.last_read_at);
+    });
 
     const { data: messageRows } = directConversationIds.length
       ? await supabase
@@ -439,8 +527,20 @@ export default function ChatScreen() {
           .order('created_at', { ascending: false })
       : { data: [] as any[] };
 
+    const clearRows = await Promise.all(
+      directConversationIds.map(async (conversationId) => [
+        conversationId,
+        await getChatClearedAt(user.id, conversationId),
+      ] as const),
+    );
+    const clearAtByConversation = new Map<string, string>(clearRows.filter((row): row is readonly [string, string] => Boolean(row[1])));
+
     const messagesByConversation = new Map<string, any[]>();
     (messageRows ?? []).forEach((row: any) => {
+      const clearAt = clearAtByConversation.get(row.conversation_id);
+      if (clearAt && new Date(row.created_at).getTime() <= new Date(clearAt).getTime()) {
+        return;
+      }
       const list = messagesByConversation.get(row.conversation_id) ?? [];
       list.push(row);
       messagesByConversation.set(row.conversation_id, list);
@@ -452,7 +552,7 @@ export default function ChatScreen() {
     };
 
     const friendsList: ChatItem[] =
-      (profiles ?? []).map(
+      (profiles ?? []).filter((profile: SocialProfile) => conversationByFriend.has(profile.user_id)).map(
         (profile: SocialProfile) => ({
           id: profile.user_id,
           name: profile.display_name,
@@ -467,6 +567,16 @@ export default function ChatScreen() {
           lastMessageSenderId: (() => {
             const last = getDirectRows(profile.user_id)[0];
             return last?.sender_id;
+          })(),
+          lastMessageAt: (() => {
+            const last = getDirectRows(profile.user_id)[0];
+            return last?.created_at ?? '';
+          })(),
+          lastMessageRead: (() => {
+            const last = getDirectRows(profile.user_id)[0];
+            const conversationId = conversationByFriend.get(profile.user_id);
+            const peerRead = conversationId ? peerReadByConversation.get(conversationId) : undefined;
+            return !!last && last.sender_id === user.id && !!peerRead && peerRead >= last.created_at;
           })(),
           unread: (() => {
             const rows = getDirectRows(profile.user_id);
@@ -485,6 +595,12 @@ export default function ChatScreen() {
             sidekickByUserId.get(profile.user_id) ?? null,
         }),
       );
+
+    friendsList.sort((a, b) => {
+      const aTime = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0;
+      const bTime = b.lastMessageAt ? new Date(b.lastMessageAt).getTime() : 0;
+      return bTime - aTime;
+    });
 
     setUserFriends(friendsList);
   }, [readChatAt]);
@@ -604,6 +720,17 @@ export default function ChatScreen() {
 
     const groupConversationIds = [...conversationByGroup.values()];
     const groupReadMap = await getConversationReadMap(user.id, groupConversationIds);
+
+    // Synchronize persisted group read positions into local UI state too.
+    if (groupConversationIds.length && groupReadMap.size) {
+      setReadChatAt((previous) => {
+        const next = { ...previous };
+        groupReadMap.forEach((readAt, conversationId) => {
+          next[conversationId] = readAt;
+        });
+        return next;
+      });
+    }
     const { data: groupMessageRows } = groupConversationIds.length
       ? await supabase
           .from('chat_messages')
@@ -1483,42 +1610,168 @@ export default function ChatScreen() {
 
   useEffect(() => {
     const requested = params.filter;
-    if (requested === 'All' || requested === 'Unread' || requested === 'Groups') {
+    if (requested === 'All' || requested === 'Unread') {
       setFilter(requested);
     }
   }, [params.filter]);
 
   /* =========================================================
-     INITIAL LOAD
+     REFRESH CHAT DATA WHEN THIS TAB IS SHOWN
   ========================================================= */
 
-  useEffect(() => {
-    loadFriends();
-    loadIncomingRequests();
-    loadGroups();
-    loadSidekickPreview();
-    loadIncomingGroupInvites();
-    loadChatTags();
-  }, [
-    loadFriends,
-    loadIncomingRequests,
-    loadGroups,
-    loadSidekickPreview,
-    loadIncomingGroupInvites,
-    loadChatTags,
-  ]);
+  useFocusEffect(
+    useCallback(() => {
+      loadFriends();
+      loadIncomingRequests();
+      setUserGroups([]);
+      loadSidekickPreview();
+      setIncomingGroupInvites([]);
+      loadChatTags();
+    }, [
+      loadFriends,
+      loadIncomingRequests,
+      loadSidekickPreview,
+      loadChatTags,
+    ]),
+  );
 
   /* =========================================================
-     CLEAR FLEX SELECTION WHEN NOT IN FLEX MODE
+     LOAD STREAK RECIPIENTS ALREADY SENT TODAY
+
+     A recipient is marked sent only when this exact streak
+     message was already sent to that person today.
+
+     This allows sharing again on a new day or when the streak
+     message changes because the streak count/habit changes.
   ========================================================= */
+
+  const loadSentStreakRecipients = useCallback(async () => {
+    if (!flexMode || !streakMessage) {
+      setSentStreakRecipients([]);
+      return;
+    }
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      setSentStreakRecipients([]);
+      return;
+    }
+
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const {
+      data: messageRows,
+      error: messageError,
+    } = await supabase
+      .from('chat_messages')
+      .select('conversation_id')
+      .eq('sender_id', user.id)
+      .eq('body', streakMessage)
+      .gte('created_at', startOfToday.toISOString())
+      .is('deleted_at', null);
+
+    if (messageError) {
+      console.error(
+        'LOAD SENT STREAK MESSAGES ERROR:',
+        messageError,
+      );
+      setSentStreakRecipients([]);
+      return;
+    }
+
+    const conversationIds = [
+      ...new Set(
+        (messageRows ?? [])
+          .map((row: any) => row.conversation_id)
+          .filter(Boolean),
+      ),
+    ];
+
+    if (!conversationIds.length) {
+      setSentStreakRecipients([]);
+      return;
+    }
+
+    const {
+      data: directConversations,
+      error: conversationError,
+    } = await supabase
+      .from('chat_conversations')
+      .select('id')
+      .eq('type', 'direct')
+      .in('id', conversationIds);
+
+    if (conversationError) {
+      console.error(
+        'LOAD SENT STREAK CONVERSATIONS ERROR:',
+        conversationError,
+      );
+      setSentStreakRecipients([]);
+      return;
+    }
+
+    const directIds = (directConversations ?? []).map(
+      (row: any) => row.id,
+    );
+
+    if (!directIds.length) {
+      setSentStreakRecipients([]);
+      return;
+    }
+
+    const {
+      data: memberRows,
+      error: memberError,
+    } = await supabase
+      .from('chat_conversation_members')
+      .select('conversation_id, user_id')
+      .in('conversation_id', directIds);
+
+    if (memberError) {
+      console.error(
+        'LOAD SENT STREAK RECIPIENT MEMBERS ERROR:',
+        memberError,
+      );
+      setSentStreakRecipients([]);
+      return;
+    }
+
+    const recipientIds = [
+      ...new Set(
+        (memberRows ?? [])
+          .filter(
+            (row: any) =>
+              row.user_id &&
+              row.user_id !== user.id,
+          )
+          .map((row: any) => row.user_id),
+      ),
+    ];
+
+    setSentStreakRecipients(recipientIds);
+  }, [flexMode, streakMessage]);
 
   useEffect(() => {
     if (!flexMode) {
       setSelectedRecipients([]);
+      setSentStreakRecipients([]);
       setFlexSearch('');
       setFlexError(null);
+      return;
     }
-  }, [flexMode]);
+
+    setSelectedRecipients([]);
+    setFlexError(null);
+    void loadSentStreakRecipients();
+  }, [
+    flexMode,
+    streakMessage,
+    loadSentStreakRecipients,
+  ]);
 
   /* =========================================================
      COMBINED CHAT LIST
@@ -1541,11 +1794,9 @@ export default function ChatScreen() {
             : chat,
       ),
       ...userFriends,
-      ...userGroups,
     ],
     [
       userFriends,
-      userGroups,
       sidekickPreview,
     ],
   );
@@ -1564,29 +1815,26 @@ export default function ChatScreen() {
       const byName =
         allChats.filter(
           (chat) =>
-            chat.name
-              .toLowerCase()
-              .includes(
-                lowered,
-              ) ||
-            chat.detail
-              .toLowerCase()
-              .includes(
-                lowered,
-              ),
+            chat.name.toLowerCase().includes(lowered) ||
+            chat.detail.toLowerCase().includes(lowered),
         );
+
+      const existingProfileIds = new Set(allChats.map((chat) => chat.profileId).filter(Boolean));
+      const peopleMatches = lowered
+        ? searchableFriends.filter((person) =>
+            !existingProfileIds.has(person.profileId) &&
+            (person.name.toLowerCase().includes(lowered) || person.detail.toLowerCase().includes(lowered)),
+          )
+        : [];
+
+      const combinedByName = [...byName, ...peopleMatches];
 
       const byBaseFilter =
         filter === 'Unread'
-          ? byName.filter(
+          ? combinedByName.filter(
               (chat) => !!chat.unread,
             )
-          : filter === 'Groups'
-            ? byName.filter(
-                (chat) =>
-                  chat.category === 'groups',
-              )
-            : byName;
+          : combinedByName;
 
       if (selectedTagIds.length === 0) {
         return byBaseFilter;
@@ -1599,6 +1847,7 @@ export default function ChatScreen() {
       );
     }, [
       allChats,
+      searchableFriends,
       query,
       filter,
       selectedTagIds,
@@ -1649,15 +1898,16 @@ export default function ChatScreen() {
     (profileId: string) => {
       setFlexError(null);
 
+      if (sentStreakRecipients.includes(profileId)) {
+        return;
+      }
+
       setSelectedRecipients(
         (previous) =>
-          previous.includes(
-            profileId,
-          )
+          previous.includes(profileId)
             ? previous.filter(
                 (id) =>
-                  id !==
-                  profileId,
+                  id !== profileId,
               )
             : [
                 ...previous,
@@ -1712,7 +1962,7 @@ export default function ChatScreen() {
 
       if (!streakMessage) {
         setFlexError(
-          'The streak message could not be prepared.',
+          'you have a zero day streak.',
         );
         return;
       }
@@ -1733,31 +1983,72 @@ export default function ChatScreen() {
           return;
         }
 
-        /*
-         * Send the streak message directly to every
-         * selected friend. This keeps the user on the
-         * chat list instead of opening the last selected
-         * conversation.
-         *
-         * Direct conversations use:
-         *
-         *   direct:{recipientUserId}
-         *
-         * This matches chat/[id].tsx.
-         */
         let sendError: any = null;
+        const successfullySentRecipientIds: string[] = [];
+
         for (const recipientId of selectedRecipients) {
-          const { id: conversationId, error: conversationError } =
-            await ensureDirectConversation(user.id, recipientId);
-          if (conversationError || !conversationId) {
-            sendError = conversationError || new Error('Could not open direct conversation.');
+          if (sentStreakRecipients.includes(recipientId)) {
+            continue;
+          }
+
+          // Conversation creation/restoration happens only now,
+          // when the user actually presses Send.
+          const {
+            id: conversationId,
+            error: conversationError,
+          } = await ensureDirectConversation(
+            user.id,
+            recipientId,
+          );
+
+          if (
+            conversationError ||
+            !conversationId
+          ) {
+            sendError =
+              conversationError ||
+              new Error(
+                'Could not open direct conversation.',
+              );
             break;
           }
-          const result = await sendChatMessage(conversationId, user.id, streakMessage);
+
+          const result =
+            await sendChatMessage(
+              conversationId,
+              user.id,
+              streakMessage,
+            );
+
           if (result.error) {
             sendError = result.error;
             break;
           }
+
+          successfullySentRecipientIds.push(
+            recipientId,
+          );
+        }
+
+        if (successfullySentRecipientIds.length) {
+          setSentStreakRecipients(
+            (previous) => [
+              ...new Set([
+                ...previous,
+                ...successfullySentRecipientIds,
+              ]),
+            ],
+          );
+
+          // Remove successful sends from the pending selection.
+          // They remain visually checked as sent.
+          setSelectedRecipients(
+            (previous) =>
+              previous.filter(
+                (id) =>
+                  !successfullySentRecipientIds.includes(id),
+              ),
+          );
         }
 
         if (sendError) {
@@ -1774,17 +2065,10 @@ export default function ChatScreen() {
           return;
         }
 
-        /*
-         * Clear the selection after a successful send.
-         */
-        setSelectedRecipients([]);
-        setFlexSearch('');
         setFlexError(null);
 
-        /*
-         * Return to the normal chat list.
-         */
-        router.replace('/chat' as never);
+        // Stay on the Share your streak page. Sent recipients
+        // remain marked and cannot be selected again today.
       } catch (error) {
         console.error(
           'FLEX MESSAGE SEND EXCEPTION:',
@@ -1816,6 +2100,8 @@ export default function ChatScreen() {
 
     if (!cleaned) {
       setFriendResults([]);
+      setSentRequestIds([]);
+      setExistingFriendIds([]);
       setFriendError(null);
       setFriendSearching(false);
       return;
@@ -1880,10 +2166,76 @@ export default function ChatScreen() {
         return;
       }
 
-      setFriendResults(
-        (data ??
-          []) as SocialProfile[],
-      );
+      const profiles = (data ?? []) as SocialProfile[];
+
+      setFriendResults(profiles);
+
+      // Load existing friendships for the users currently shown.
+      // Existing friends take priority over both "Sent" and "Add".
+      const resultIds = profiles
+        .map((profile) => profile.user_id)
+        .filter(Boolean);
+
+      if (resultIds.length) {
+        const {
+          data: friendshipRows,
+          error: friendshipError,
+        } = await supabase
+          .from('friendships')
+          .select('user_id, friend_user_id')
+          .or(`user_id.eq.${user.id},friend_user_id.eq.${user.id}`);
+
+        if (friendshipError) {
+          console.error(
+            'LOAD SEARCH FRIENDSHIPS ERROR:',
+            friendshipError,
+          );
+          setExistingFriendIds([]);
+        } else {
+          const friendIds = (friendshipRows ?? [])
+            .map((row: { user_id: string; friend_user_id: string }) =>
+              row.user_id === user.id
+                ? row.friend_user_id
+                : row.user_id,
+            )
+            .filter((friendId: string) =>
+              resultIds.includes(friendId),
+            );
+
+          setExistingFriendIds([...new Set(friendIds)]);
+        }
+      } else {
+        setExistingFriendIds([]);
+      }
+
+      // Load outgoing pending requests for the users currently shown.
+      // Reuse the resultIds list above so it is not declared twice.
+      if (resultIds.length) {
+        const {
+          data: pendingRows,
+          error: pendingError,
+        } = await supabase
+          .from('friend_requests')
+          .select('receiver_id')
+          .eq('sender_id', user.id)
+          .eq('status', 'pending')
+          .in('receiver_id', resultIds);
+
+        if (pendingError) {
+          console.error(
+            'LOAD OUTGOING FRIEND REQUESTS ERROR:',
+            pendingError,
+          );
+        } else {
+          setSentRequestIds(
+            (pendingRows ?? [])
+              .map((row: { receiver_id: string }) => row.receiver_id)
+              .filter(Boolean),
+          );
+        }
+      } else {
+        setSentRequestIds([]);
+      }
     } catch (error) {
       console.error(
         'FRIEND SEARCH EXCEPTION:',
@@ -1915,6 +2267,13 @@ export default function ChatScreen() {
         setFriendError(
           'You must be logged in.',
         );
+        return;
+      }
+
+      if (
+        existingFriendIds.includes(friendUserId) ||
+        sentRequestIds.includes(friendUserId)
+      ) {
         return;
       }
 
@@ -2060,13 +2419,12 @@ export default function ChatScreen() {
         return;
       }
 
-      setFriendResults(
+      // Keep the person in the results and change the button to "Sent".
+      setSentRequestIds(
         (previous) =>
-          previous.filter(
-            (profile) =>
-              profile.user_id !==
-              friendUserId,
-          ),
+          previous.includes(friendUserId)
+            ? previous
+            : [...previous, friendUserId],
       );
 
       setSendingRequestId(null);
@@ -2216,42 +2574,121 @@ export default function ChatScreen() {
 
     const sourceFilter = filter ?? 'All';
 
-    if (chat.category === 'groups') {
-      const groupId = chat.id.replace(/^group-/, '');
-      if (myUserId) {
-        const groupConversation = await ensureGroupConversation(groupId, myUserId);
-        if (groupConversation.id) {
-          const readNow = new Date().toISOString();
-          setReadChatAt((previous) => ({ ...previous, [groupConversation.id!]: readNow }));
-          void markConversationRead(groupConversation.id, myUserId);
-        }
-      }
-    } else if (chat.category === 'direct' && chat.profileId && myUserId) {
-      const { id: conversationKey } = await ensureDirectConversation(myUserId, chat.profileId);
-      if (conversationKey) {
-        const readNow = new Date().toISOString();
-        setReadChatAt((previous) => ({ ...previous, [conversationKey]: readNow }));
-        void markConversationRead(conversationKey, myUserId);
-      }
-    }
-
+    /*
+     * Direct chats must be marked as read before navigating away.
+     * The previous code only did this for groups, which is why the
+     * unread counter stayed visible after opening a direct chat.
+     */
     if (
       chat.category ===
         'direct' &&
       chat.profileId
     ) {
+      if (myUserId) {
+        try {
+          const directConversation =
+            await ensureDirectConversation(
+              myUserId,
+              chat.profileId,
+            );
+
+          if (directConversation.id) {
+            const readNow =
+              new Date().toISOString();
+
+            /*
+             * Update local state immediately so the unread badge
+             * disappears without waiting for Supabase or a refresh.
+             */
+            setReadChatAt((previous) => ({
+              ...previous,
+              [directConversation.id!]: readNow,
+            }));
+
+            /*
+             * Persist the read position in Supabase.
+             */
+            void markConversationRead(
+              directConversation.id,
+              myUserId,
+            );
+          }
+        } catch (error) {
+          console.error(
+            'MARK DIRECT CHAT READ ERROR:',
+            error,
+          );
+        }
+      }
+
       router.push(
-        { pathname: `/chat/${chat.profileId}`, params: { from: sourceFilter } } as never,
+        {
+          pathname: `/chat/${chat.profileId}`,
+          params: {
+            from: sourceFilter,
+          },
+        } as never,
       );
 
       return;
     }
 
+    /*
+     * Groups already have their conversation resolved here.
+     * Keep that existing behavior, while also updating the local
+     * read state immediately.
+     */
+    if (chat.category === 'groups') {
+      const groupId = chat.id.replace(
+        /^group-/,
+        '',
+      );
+
+      if (myUserId) {
+        try {
+          const groupConversation =
+            await ensureGroupConversation(
+              groupId,
+              myUserId,
+            );
+
+          if (groupConversation.id) {
+            const readNow =
+              new Date().toISOString();
+
+            setReadChatAt((previous) => ({
+              ...previous,
+              [groupConversation.id!]: readNow,
+            }));
+
+            void markConversationRead(
+              groupConversation.id,
+              myUserId,
+            );
+          }
+        } catch (error) {
+          console.error(
+            'MARK GROUP CHAT READ ERROR:',
+            error,
+          );
+        }
+      }
+    }
+
     if (chat.route) {
       if (chat.category === 'groups') {
-        router.push({ pathname: chat.route, params: { from: sourceFilter } } as never);
+        router.push(
+          {
+            pathname: chat.route,
+            params: {
+              from: sourceFilter,
+            },
+          } as never,
+        );
       } else {
-        router.push(chat.route as never);
+        router.push(
+          chat.route as never,
+        );
       }
     }
   };
@@ -2689,20 +3126,16 @@ export default function ChatScreen() {
           CONTENT
       ===================================================== */}
 
-      <ScrollView
-        contentContainerStyle={[
-          styles.chatScrollContent,
-          flexMode &&
-            styles.flexContent,
-          !flexMode &&
-            filter ===
-              'Groups' &&
-            styles.chatScrollContentWithFab,
-        ]}
-        showsVerticalScrollIndicator={
-          false
-        }
-      >
+<ScrollView
+  contentContainerStyle={[
+    styles.chatScrollContent,
+    flexMode &&
+      styles.flexContent,
+  ]}
+  showsVerticalScrollIndicator={
+    false
+  }
+>
         {/* ===================================================
             FLEX RECIPIENT LIST
         =================================================== */}
@@ -2738,18 +3171,26 @@ export default function ChatScreen() {
               0 ? (
                 flexRecipients.map(
                   (friend) => {
+                    const isSent =
+                      !!friend.profileId &&
+                      sentStreakRecipients.includes(
+                        friend.profileId,
+                      );
+
                     const selected =
-                      friend.profileId
-                        ? selectedRecipients.includes(
-                            friend.profileId,
-                          )
-                        : false;
+                      !!friend.profileId &&
+                      (
+                        selectedRecipients.includes(
+                          friend.profileId,
+                        ) || isSent
+                      );
 
                     return (
                       <Pressable
                         key={
                           friend.id
                         }
+                        disabled={isSent}
                         onPress={() =>
                           friend.profileId &&
                           toggleFlexRecipient(
@@ -2763,6 +3204,7 @@ export default function ChatScreen() {
                               C.divider,
                           },
                           pressed &&
+                            !isSent &&
                             styles.pressed,
                           selected && {
                             backgroundColor:
@@ -2837,27 +3279,49 @@ export default function ChatScreen() {
                         </View>
 
                         <View
-                          style={[
-                            styles.selectionCircle,
-                            {
-                              borderColor:
-                                selected
-                                  ? accentForeground
-                                  : C.inputBorder,
-                              backgroundColor:
-                                selected
-                                  ? accentForeground
-                                  : 'transparent',
-                            },
-                          ]}
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 10,
+                          }}
                         >
-                          {selected ? (
-                            <Check
-                              color="#FFFFFF"
-                              size={16}
-                              strokeWidth={3}
-                            />
+                          {isSent ? (
+                            <Text
+                              style={[
+                                styles.flexSentLabel,
+                                {
+                                  color:
+                                    accentForeground,
+                                },
+                              ]}
+                            >
+                              Sent
+                            </Text>
                           ) : null}
+
+                          <View
+                            style={[
+                              styles.selectionCircle,
+                              {
+                                borderColor:
+                                  selected
+                                    ? accentForeground
+                                    : C.inputBorder,
+                                backgroundColor:
+                                  selected
+                                    ? accentForeground
+                                    : 'transparent',
+                              },
+                            ]}
+                          >
+                            {selected ? (
+                              <Check
+                                color="#FFFFFF"
+                                size={16}
+                                strokeWidth={3}
+                              />
+                            ) : null}
+                          </View>
                         </View>
                       </Pressable>
                     );
@@ -3111,219 +3575,6 @@ export default function ChatScreen() {
             )}
 
             {/* ===============================================
-                GROUP INVITES
-            =============================================== */}
-
-            {incomingGroupInvites.length >
-              0 && (
-              <View
-                style={[
-                  styles.requestsCard,
-                  {
-                    backgroundColor:
-                      C.card,
-                    borderColor:
-                      C.border,
-                  },
-                ]}
-              >
-                <View
-                  style={
-                    styles.requestsHeader
-                  }
-                >
-                  <View>
-                    <Text
-                      style={[
-                        styles.requestsTitle,
-                        {
-                          color:
-                            C.text,
-                        },
-                      ]}
-                    >
-                      GROUP INVITES
-                    </Text>
-
-                    <Text
-                      style={[
-                        styles.requestsSubtitle,
-                        {
-                          color:
-                            C.muted,
-                        },
-                      ]}
-                    >
-                      Groups you've
-                      been invited to
-                    </Text>
-                  </View>
-
-                  <View
-                    style={[
-                      styles.requestCount,
-                      {
-                        backgroundColor:
-                          accentForeground,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={
-                        styles.requestCountText
-                      }
-                    >
-                      {
-                        incomingGroupInvites.length
-                      }
-                    </Text>
-                  </View>
-                </View>
-
-                {incomingGroupInvites.map(
-                  (invite) => (
-                    <View
-                      key={
-                        invite.id
-                      }
-                      style={[
-                        styles.requestRow,
-                        {
-                          borderTopColor:
-                            C.divider,
-                        },
-                      ]}
-                    >
-                      <View
-                        style={[
-                          styles.friendAvatar,
-                          {
-                            backgroundColor:
-                              accentForeground,
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={
-                            styles.friendAvatarText
-                          }
-                        >
-                          {invite.group_name
-                            .slice(
-                              0,
-                              1,
-                            )
-                            .toUpperCase()}
-                        </Text>
-                      </View>
-
-                      <View
-                        style={
-                          styles.requestCopy
-                        }
-                      >
-                        <Text
-                          style={[
-                            styles.requestName,
-                            {
-                              color:
-                                C.text,
-                            },
-                          ]}
-                        >
-                          {
-                            invite.group_name
-                          }
-                        </Text>
-
-                        <Text
-                          style={[
-                            styles.requestUsername,
-                            {
-                              color:
-                                C.muted,
-                            },
-                          ]}
-                        >
-                          Invited by{' '}
-                          {
-                            invite.inviter_name
-                          }
-                        </Text>
-                      </View>
-
-                      <View
-                        style={
-                          styles.requestButtons
-                        }
-                      >
-                        <Pressable
-                          disabled={
-                            groupInviteActionId ===
-                            invite.id
-                          }
-                          onPress={() =>
-                            acceptGroupInvite(
-                              invite,
-                            )
-                          }
-                          style={[
-                            styles.acceptBtn,
-                            {
-                              backgroundColor:
-                                accentForeground,
-                            },
-                          ]}
-                        >
-                          {groupInviteActionId ===
-                          invite.id ? (
-                            <ActivityIndicator
-                              size="small"
-                              color="#FFFFFF"
-                            />
-                          ) : (
-                            <Check
-                              color="#FFFFFF"
-                              size={15}
-                            />
-                          )}
-                        </Pressable>
-
-                        <Pressable
-                          disabled={
-                            groupInviteActionId ===
-                            invite.id
-                          }
-                          onPress={() =>
-                            declineGroupInvite(
-                              invite,
-                            )
-                          }
-                          style={[
-                            styles.declineBtn,
-                            {
-                              backgroundColor:
-                                C.card,
-                              borderColor:
-                                C.inputBorder,
-                            },
-                          ]}
-                        >
-                          <X
-                            color={
-                              C.muted
-                            }
-                            size={15}
-                          />
-                        </Pressable>
-                      </View>
-                    </View>
-                  ),
-                )}
-              </View>
-            )}
-
-            {/* ===============================================
                 CONVERSATION LIST
             =============================================== */}
 
@@ -3486,7 +3737,8 @@ export default function ChatScreen() {
                           </Text>
                         </View>
                       ) : chat.time &&
-                        chat.lastMessageSenderId === myUserId ? (
+                        chat.lastMessageSenderId === myUserId &&
+                        chat.lastMessageRead ? (
                         <CheckCheck
                           color={isBlackDark ? '#FFFFFF' : accentForeground}
                           size={15}
@@ -3516,23 +3768,7 @@ export default function ChatScreen() {
                 </View>
               )}
 
-            {groupsLoading &&
-              filter === 'Groups' &&
-              filteredChats.length ===
-                0 && (
-                <View
-                  style={
-                    styles.requestLoading
-                  }
-                >
-                  <ActivityIndicator
-                    size="small"
-                    color={
-                      accentForeground
-                    }
-                  />
-                </View>
-              )}
+
 
             {filteredChats.length ===
               0 &&
@@ -3607,7 +3843,9 @@ export default function ChatScreen() {
             >
               Your streak will be
               shared with everyone
-              you select.
+              you select. People already
+              sent this streak today stay
+              marked as sent.
             </Text>
           </View>
 
@@ -3947,35 +4185,6 @@ export default function ChatScreen() {
       </Modal>
 
       {/* =====================================================
-          ADD GROUP FAB
-      ===================================================== */}
-
-      {!flexMode &&
-        filter === 'Groups' && (
-          <Pressable
-            onPress={
-              openCreateGroup
-            }
-            accessibilityRole="button"
-            accessibilityLabel="Add group"
-            hitSlop={8}
-            style={[
-              styles.addGroupFab,
-              {
-                backgroundColor:
-                  accentForeground,
-              },
-            ]}
-          >
-            <Plus
-              color="#FFFFFF"
-              size={26}
-              strokeWidth={2.5}
-            />
-          </Pressable>
-        )}
-
-      {/* =====================================================
           ADD FRIEND MODAL
       ===================================================== */}
 
@@ -3984,37 +4193,42 @@ export default function ChatScreen() {
           friendSearchOpen
         }
         transparent
-        animationType="slide"
+        animationType="fade"
         onRequestClose={() =>
           setFriendSearchOpen(
             false,
           )
         }
       >
-        <Pressable
-          style={
-            styles.friendModalShade
-          }
-          onPress={() =>
-            setFriendSearchOpen(
-              false,
-            )
-          }
-        />
-
-        <View
-          style={[
-            styles.friendSheet,
-            {
-              backgroundColor:
-                C.card,
-            },
-          ]}
-        >
-          <View
-            style={
-              styles.friendSheetHeader
+        <View style={styles.friendModalRoot}>
+          <Pressable
+            style={styles.friendModalBackdrop}
+            onPress={() =>
+              setFriendSearchOpen(false)
             }
+          />
+
+          <KeyboardAvoidingView
+            behavior={
+              Platform.OS === 'ios'
+                ? 'padding'
+                : 'height'
+            }
+            style={styles.friendKeyboardContainer}
+          >
+          <View
+            style={[
+              styles.friendSheet,
+              {
+                backgroundColor:
+                  C.card,
+              },
+            ]}
+          >
+            <View
+              style={
+                styles.friendSheetHeader
+              }
           >
             <Text
               style={[
@@ -4212,7 +4426,13 @@ export default function ChatScreen() {
                   <Pressable
                     disabled={
                       sendingRequestId ===
-                      profile.user_id
+                        profile.user_id ||
+                      existingFriendIds.includes(
+                        profile.user_id,
+                      ) ||
+                      sentRequestIds.includes(
+                        profile.user_id,
+                      )
                     }
                     onPress={() =>
                       sendFriendRequest(
@@ -4233,6 +4453,40 @@ export default function ChatScreen() {
                         size="small"
                         color="#FFFFFF"
                       />
+                    ) : existingFriendIds.includes(
+                        profile.user_id,
+                      ) ? (
+                      <>
+                        <CheckCheck
+                          color="#FFFFFF"
+                          size={14}
+                        />
+
+                        <Text
+                          style={
+                            styles.sendFriendText
+                          }
+                        >
+                          Friends
+                        </Text>
+                      </>
+                    ) : sentRequestIds.includes(
+                        profile.user_id,
+                      ) ? (
+                      <>
+                        <Check
+                          color="#FFFFFF"
+                          size={14}
+                        />
+
+                        <Text
+                          style={
+                            styles.sendFriendText
+                          }
+                        >
+                          Sent
+                        </Text>
+                      </>
                     ) : (
                       <>
                         <Send
@@ -4254,6 +4508,8 @@ export default function ChatScreen() {
               ),
             )}
           </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
         </View>
       </Modal>
 
@@ -4473,9 +4729,8 @@ const styles =
 
     frozenHeader: {
       paddingHorizontal: 16,
-      paddingTop: 60,
+      paddingTop: 50,
       paddingVertical: 12,
-      borderBottomWidth: 1,
     },
 
     searchRow: {
@@ -4575,7 +4830,7 @@ const styles =
 
     chatScrollContent: {
       paddingHorizontal: 16,
-      paddingBottom: 30,
+      paddingBottom: 100,
     },
 
     flexContent: {
@@ -4583,7 +4838,7 @@ const styles =
     },
 
     chatScrollContentWithFab: {
-      paddingBottom: 110,
+      paddingBottom: 150,
     },
 
     chatList: {
@@ -4687,7 +4942,7 @@ const styles =
 
     flexHeader: {
       paddingHorizontal: 16,
-      paddingTop: 28,
+      paddingTop: 50,
       paddingBottom: 10,
     },
 
@@ -4751,6 +5006,11 @@ const styles =
       justifyContent: 'center',
     },
 
+    flexSentLabel: {
+      fontFamily: FONT_MED,
+      fontSize: 11,
+    },
+
     flexEmpty: {
       paddingVertical: 35,
       paddingHorizontal: 20,
@@ -4767,10 +5027,10 @@ const styles =
       position: 'absolute',
       left: 0,
       right: 0,
-      bottom: 0,
+      bottom: 70,
       paddingHorizontal: 18,
       paddingTop: 13,
-      paddingBottom: 25,
+      paddingBottom: 15,
       borderTopWidth: 1,
       flexDirection: 'row',
       alignItems: 'center',
@@ -4932,7 +5192,7 @@ const styles =
 
     addGroupFab: {
       position: 'absolute',
-      bottom: 82,
+      bottom: 20,
       alignSelf: 'center',
       width: 56,
       height: 56,
@@ -4950,18 +5210,43 @@ const styles =
        FRIEND MODAL
     ===================================================== */
 
-    friendModalShade: {
+    friendModalRoot: {
       flex: 1,
-      backgroundColor:
-        'rgba(0,0,0,0.4)',
+      position: 'relative',
+      backgroundColor: 'transparent',
+    },
+
+    friendModalBackdrop: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: 'rgba(0,0,0,0.4)',
+    },
+
+    // Shared backdrop style used by the friend, tag, and group modals.
+    friendModalShade: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: 'rgba(0,0,0,0.4)',
+    },
+
+    friendKeyboardContainer: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      height: '88%',
+      justifyContent: 'flex-start',
+      padding: 0,
     },
 
     friendSheet: {
-      borderTopLeftRadius: 26,
-      borderTopRightRadius: 26,
+      width: '100%',
+      height: '100%',
+      borderTopLeftRadius: 0,
+      borderTopRightRadius: 0,
+      borderBottomLeftRadius: 26,
+      borderBottomRightRadius: 26,
       padding: 24,
-      paddingBottom: 34,
-      maxHeight: '85%',
+      paddingBottom: 24,
+      overflow: 'hidden',
     },
 
     friendSheetHeader: {
@@ -4996,6 +5281,7 @@ const styles =
     },
 
     friendResults: {
+      flex: 1,
       marginTop: 12,
     },
 

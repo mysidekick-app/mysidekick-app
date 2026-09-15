@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 
 export type ChatAttachment = {
@@ -171,16 +172,75 @@ export async function ensureDirectConversation(
   }
 
   /*
-   * Do not attempt the old client-side creation path here. If the RPC is
-   * unavailable and no conversation exists, returning its error gives the
-   * UI a useful failure instead of creating a conversation that may only
-   * partially exist because of RLS.
+   * Final fallback: create a fresh direct conversation client-side.
+   * This is important after a user deletes a chat from their own list: the
+   * old conversation membership is gone for them, so opening the person
+   * again must be able to create a new conversation.
    */
+  const { data: createdConversation, error: createConversationError } =
+    await supabase
+      .from('chat_conversations')
+      .insert({
+        type: 'direct',
+        group_id: null,
+        channel_id: null,
+        created_by: currentUserId,
+      })
+      .select('id')
+      .single();
+
+  if (createConversationError || !createdConversation?.id) {
+    return {
+      id: null,
+      error:
+        createConversationError ??
+        rpcError ??
+        new Error('Unable to create the direct conversation.'),
+    };
+  }
+
+  const newConversationId = createdConversation.id;
+
+  const { error: myMemberError } = await supabase
+    .from('chat_conversation_members')
+    .insert({
+      conversation_id: newConversationId,
+      user_id: currentUserId,
+    });
+
+  if (myMemberError) {
+    return {
+      id: null,
+      error: myMemberError,
+    };
+  }
+
+  const { error: otherMemberError } = await supabase
+    .from('chat_conversation_members')
+    .insert({
+      conversation_id: newConversationId,
+      user_id: otherUserId,
+    });
+
+  if (otherMemberError) {
+    await supabase
+      .from('chat_conversation_members')
+      .delete()
+      .eq('conversation_id', newConversationId);
+    await supabase
+      .from('chat_conversations')
+      .delete()
+      .eq('id', newConversationId);
+
+    return {
+      id: null,
+      error: otherMemberError,
+    };
+  }
+
   return {
-    id: null,
-    error:
-      rpcError ??
-      new Error('Unable to create the direct conversation.'),
+    id: newConversationId,
+    error: null,
   };
 }
 
@@ -776,42 +836,196 @@ export async function sendChatMessage(
 }
 
 /**
+ * Remove only the current user's membership from a direct conversation.
+ * The conversation and the other participant remain intact so the chat
+ * can be restored only when the user intentionally sends a new message.
+ */
+export async function deleteConversationForUser(
+  conversationId: string,
+  userId: string,
+  otherUserId?: string,
+): Promise<{ error: any }> {
+  if (!conversationId || !userId) {
+    return {
+      error: new Error('Missing conversation or user ID.'),
+    };
+  }
+
+  // Normally remove only the current user's membership from this chat.
+  // When the other participant is provided, also remove any duplicate direct
+  // conversation memberships for the same pair so an older duplicate cannot
+  // keep the person visible in the chat list.
+  let conversationIds = [conversationId];
+
+  if (otherUserId && otherUserId !== userId) {
+    const { data: myMemberships, error: membershipError } = await supabase
+      .from('chat_conversation_members')
+      .select('conversation_id')
+      .eq('user_id', userId);
+
+    if (membershipError) {
+      return { error: membershipError };
+    }
+
+    const candidateIds = [...new Set(
+      (myMemberships ?? [])
+        .map((row: any) => row.conversation_id)
+        .filter(Boolean),
+    )];
+
+    if (candidateIds.length) {
+      const { data: directRows, error: directError } = await supabase
+        .from('chat_conversations')
+        .select('id')
+        .eq('type', 'direct')
+        .in('id', candidateIds);
+
+      if (directError) {
+        return { error: directError };
+      }
+
+      const directIds = (directRows ?? []).map((row: any) => row.id);
+
+      if (directIds.length) {
+        const { data: pairedRows, error: pairedError } = await supabase
+          .from('chat_conversation_members')
+          .select('conversation_id')
+          .in('conversation_id', directIds)
+          .eq('user_id', otherUserId);
+
+        if (pairedError) {
+          return { error: pairedError };
+        }
+
+        conversationIds = [...new Set([
+          conversationId,
+          ...(pairedRows ?? []).map((row: any) => row.conversation_id).filter(Boolean),
+        ])];
+      }
+    }
+  }
+
+  const { error } = await supabase
+    .from('chat_conversation_members')
+    .delete()
+    .in('conversation_id', conversationIds)
+    .eq('user_id', userId);
+
+  return { error: error ?? null };
+}
+
+/**
  * Mark a conversation as read.
  *
- * This is intentionally defensive because the read-state table
- * may not have been created yet.
+ * The read position is stored in Supabase and also locally as a fallback.
+ * This prevents a refresh from turning the entire chat history unread if
+ * the database read-state row is temporarily unavailable.
+ *
+ * IMPORTANT:
+ * `readAt` should represent the point the user actually read up to.
+ * When omitted, we use "now".
  */
 export async function markConversationRead(
   conversationId: string,
   userId: string,
-): Promise<void> {
+  readAt?: string,
+): Promise<{ error: any }> {
   if (!conversationId || !userId) {
-    return;
+    return { error: null };
+  }
+
+  const now = new Date().toISOString();
+  const lastReadAt = readAt || now;
+  const localKey = `mysidekick:chat-read:${userId}:${conversationId}`;
+
+  // Always save locally first. This survives app refreshes even if the
+  // Supabase read-state request fails.
+  try {
+    await AsyncStorage.setItem(localKey, lastReadAt);
+  } catch {
+    // Local persistence is a fallback; do not block the chat.
   }
 
   try {
-    await supabase
+    const { error } = await supabase
       .from('chat_conversation_reads')
       .upsert(
         {
           conversation_id: conversationId,
           user_id: userId,
-          last_read_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+          last_read_at: lastReadAt,
+          updated_at: now,
         },
         {
           onConflict: 'conversation_id,user_id',
         },
       );
-  } catch {
-    // Read-state support is optional until its table exists.
+
+    return { error: error ?? null };
+  } catch (error) {
+    return { error };
   }
+}
+
+const CHAT_CLEAR_PREFIX = 'mysidekick:chat-clear:';
+
+function getChatClearKey(userId: string, conversationId: string): string {
+  return `${CHAT_CLEAR_PREFIX}${userId}:${conversationId}`;
+}
+
+export async function getChatClearedAt(
+  userId: string,
+  conversationId: string,
+): Promise<string | null> {
+  if (!userId || !conversationId) return null;
+
+  try {
+    return await AsyncStorage.getItem(
+      getChatClearKey(userId, conversationId),
+    );
+  } catch {
+    return null;
+  }
+}
+
+export async function clearChatForUser(
+  userId: string,
+  conversationId: string,
+  clearedAt: string,
+): Promise<{ error: any }> {
+  if (!userId || !conversationId || !clearedAt) {
+    return { error: new Error('Missing chat clear information.') };
+  }
+
+  try {
+    await AsyncStorage.setItem(
+      getChatClearKey(userId, conversationId),
+      clearedAt,
+    );
+    return { error: null };
+  } catch (error) {
+    return { error };
+  }
+}
+
+const CHAT_READ_PREFIX = 'mysidekick:chat-read:';
+
+function getChatReadKey(userId: string, conversationId: string): string {
+  return `${CHAT_READ_PREFIX}${userId}:${conversationId}`;
 }
 
 /**
  * Get the last-read timestamp for each conversation.
  *
- * Returns an empty map if the read-state table does not exist yet.
+ * Read-state priority:
+ * 1. Supabase persisted read position.
+ * 2. Local AsyncStorage read position.
+ * 3. If neither exists, initialize the conversation at its latest
+ *    existing message so historical messages are NOT incorrectly counted
+ *    as unread after a refresh.
+ *
+ * This is deliberately done here rather than treating a missing row as
+ * "everything is unread".
  */
 export async function getConversationReadMap(
   userId: string,
@@ -821,26 +1035,134 @@ export async function getConversationReadMap(
     return new Map<string, string>();
   }
 
+  const result = new Map<string, string>();
+
+  // First try the database.
   try {
     const { data, error } = await supabase
       .from('chat_conversation_reads')
-      .select(
-        'conversation_id, last_read_at',
-      )
+      .select('conversation_id, last_read_at')
       .eq('user_id', userId)
       .in('conversation_id', conversationIds);
 
-    if (error) {
-      return new Map<string, string>();
+    if (!error) {
+      (data ?? []).forEach((row: any) => {
+        if (row.conversation_id && row.last_read_at) {
+          result.set(row.conversation_id, row.last_read_at);
+        }
+      });
     }
-
-    return new Map(
-      (data ?? []).map((row) => [
-        row.conversation_id,
-        row.last_read_at,
-      ]),
-    );
   } catch {
-    return new Map<string, string>();
+    // Fall through to local state.
   }
+
+  // Fill missing conversations from local persistence.
+  const missingIds = conversationIds.filter(
+    (conversationId) => !result.has(conversationId),
+  );
+
+  if (missingIds.length > 0) {
+    const localEntries = await Promise.all(
+      missingIds.map(async (conversationId) => {
+        try {
+          const value = await AsyncStorage.getItem(
+            getChatReadKey(userId, conversationId),
+          );
+          return [conversationId, value] as const;
+        } catch {
+          return [conversationId, null] as const;
+        }
+      }),
+    );
+
+    localEntries.forEach(([conversationId, readAt]) => {
+      if (readAt) {
+        result.set(conversationId, readAt);
+      }
+    });
+  }
+
+  /*
+   * IMPORTANT:
+   * If there is still no read position, this is an existing conversation
+   * whose read-state record was never created. Do NOT let the UI interpret
+   * that as "all historical messages are unread".
+   *
+   * Instead, use the latest existing message as the initial baseline.
+   * Future messages will then be newer than this timestamp and will count.
+   */
+  const stillMissing = conversationIds.filter(
+    (conversationId) => !result.has(conversationId),
+  );
+
+  if (stillMissing.length > 0) {
+    try {
+      const { data: latestMessages, error } = await supabase
+        .from('chat_messages')
+        .select('conversation_id, created_at')
+        .in('conversation_id', stillMissing)
+        .is('deleted_at', null)
+        .order('created_at', { ascending: false });
+
+      if (!error && latestMessages) {
+        const latestByConversation = new Map<string, string>();
+
+        for (const row of latestMessages as any[]) {
+          if (
+            row.conversation_id &&
+            row.created_at &&
+            !latestByConversation.has(row.conversation_id)
+          ) {
+            latestByConversation.set(
+              row.conversation_id,
+              row.created_at,
+            );
+          }
+        }
+
+        for (const conversationId of stillMissing) {
+          const latestAt = latestByConversation.get(conversationId);
+
+          if (latestAt) {
+            result.set(conversationId, latestAt);
+
+            // Persist the baseline so subsequent refreshes do not need
+            // to infer it again.
+            try {
+              await AsyncStorage.setItem(
+                getChatReadKey(userId, conversationId),
+                latestAt,
+              );
+            } catch {
+              // Local persistence is best-effort.
+            }
+
+            try {
+              await supabase
+                .from('chat_conversation_reads')
+                .upsert(
+                  {
+                    conversation_id: conversationId,
+                    user_id: userId,
+                    last_read_at: latestAt,
+                    updated_at: new Date().toISOString(),
+                  },
+                  {
+                    onConflict: 'conversation_id,user_id',
+                  },
+                );
+            } catch {
+              // Supabase persistence is best-effort here.
+            }
+          }
+        }
+      }
+    } catch {
+      // If the message query itself fails, leave the conversation absent.
+      // The caller should treat this as zero unread rather than counting
+      // the entire historical conversation.
+    }
+  }
+
+  return result;
 }

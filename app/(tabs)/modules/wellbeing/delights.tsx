@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ChevronLeft, Info, MoreVertical, X } from 'lucide-react-native';
 
@@ -530,7 +531,10 @@ export default function DelightsScreen() {
   /* Render                                                            */
   /* ---------------------------------------------------------------- */
   return (
-    <View style={styles.safe}>
+    <SafeAreaView
+      style={styles.safe}
+      edges={['top', 'bottom']}
+    >
       {/* Header */}
       <View
         style={[
@@ -625,12 +629,10 @@ export default function DelightsScreen() {
           <Text
             style={[
               styles.dateLabel,
-              { color: accent },
+              { color: isDark ? '#FFFFFF' : accent },
             ]}
           >
-            {prettyDateLabel(
-              selectedDate,
-            )}
+            {prettyDateLabel(selectedDate)}
           </Text>
 
           {/* Calendar */}
@@ -1191,7 +1193,7 @@ export default function DelightsScreen() {
           </View>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -1211,12 +1213,11 @@ function makeStyles(C: Palette) {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      paddingHorizontal: 14,
+      paddingHorizontal: 16,
+      paddingTop: 28,
       paddingVertical: 12,
       borderBottomWidth: 1,
       borderBottomColor: C.divider,
-      position: 'relative',
-      zIndex: 20,
     },
 
     backBtn: {

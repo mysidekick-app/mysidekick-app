@@ -8,14 +8,30 @@
     "scheme": "mysidekick",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "backgroundColor": "#000000",
 
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.mysidekick.app"
+      "bundleIdentifier": "com.mysidekickapp",
+      "backgroundColor": "#000000",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
 
     "android": {
-      "package": "com.mysidekick.boltexponativewind"
+  "package": "com.mysidekick.boltexponativewind",
+  "softwareKeyboardLayoutMode": "resize",
+  "backgroundColor": "#000000",
+  "googleServicesFile": "./google-services.json"
+    },
+
+    
+
+    "androidNavigationBar": {
+      "backgroundColor": "#000000",
+      "barStyle": "light-content",
+      "enforceContrast": false
     },
 
     "web": {
@@ -27,7 +43,16 @@
     "plugins": [
       "expo-router",
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-system-ui",
+      "expo-notifications",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/sidekick-logo.png",
+          "imageWidth": 200
+        }
+      ]
     ],
 
     "experiments": {

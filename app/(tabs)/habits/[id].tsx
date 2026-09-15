@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
+  Modal,
   Pressable,
   ScrollView,
+  TextInput,
   StyleSheet,
   Text,
   View,
@@ -12,9 +14,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
   ChevronLeft,
+  Edit3,
   Flame,
   Trash2,
   MessageCircle,
+  X,
 } from 'lucide-react-native';
 
 import {
@@ -22,6 +26,7 @@ import {
   router,
 } from 'expo-router';
 
+import { DatePickerInput } from '@/components/DatePickerInput';
 import { useApp } from '@/components/AppProvider';
 
 import { supabase } from '@/lib/supabase';
@@ -64,6 +69,14 @@ const MONTHS = [
   'Dec',
 ];
 
+const CATEGORIES = [
+  'Mind',
+  'Body',
+  'Health',
+  'Rest',
+  'Focus',
+];
+
 const todayStr = () => {
   const d = new Date();
 
@@ -98,6 +111,7 @@ export default function HabitDetailScreen() {
     onAccent,
   } = useApp();
 
+
   const [habit, setHabit] =
     useState<Habit | null>(null);
 
@@ -112,6 +126,23 @@ export default function HabitDetailScreen() {
 
   const [toast, setToast] =
     useState<string | null>(null);
+
+  const [editModalOpen, setEditModalOpen] =
+    useState(false);
+  const [editName, setEditName] =
+    useState('');
+  const [editCategory, setEditCategory] =
+    useState('Mind');
+  const [editDuration, setEditDuration] =
+    useState('');
+  const [editCheckpoint, setEditCheckpoint] =
+    useState('5');
+  const [editStartDate, setEditStartDate] =
+    useState('');
+  const [editEndDate, setEditEndDate] =
+    useState('');
+  const [savingEdit, setSavingEdit] =
+    useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -297,6 +328,81 @@ export default function HabitDetailScreen() {
         habitName: habit.name,
       },
     } as never);
+  };
+
+  const openEdit = () => {
+    if (!habit) return;
+
+    setEditName(habit.name);
+    setEditCategory(habit.category);
+    setEditDuration(
+      habit.duration_minutes
+        ? String(habit.duration_minutes)
+        : '',
+    );
+    setEditCheckpoint(
+      habit.checkpoint
+        ? String(habit.checkpoint)
+        : '5',
+    );
+    setEditStartDate(habit.start_date ?? '');
+    setEditEndDate(habit.end_date ?? '');
+    setError(null);
+    setEditModalOpen(true);
+  };
+
+  const saveEdit = async () => {
+    if (!habit) return;
+
+    if (!editName.trim()) {
+      setError('Give your habit a name.');
+      return;
+    }
+
+    if (!editStartDate.trim()) {
+      setError('Pick a start date.');
+      return;
+    }
+
+    setSavingEdit(true);
+    setError(null);
+
+    const durationValue = editDuration.trim()
+      ? parseInt(editDuration, 10)
+      : null;
+
+    const checkpointValue = editCheckpoint.trim()
+      ? parseInt(editCheckpoint, 10)
+      : 5;
+
+    const { data, error: updateErr } =
+      await supabase
+        .from('habits')
+        .update({
+          name: editName.trim(),
+          category: editCategory,
+          duration_minutes: durationValue,
+          checkpoint: checkpointValue,
+          start_date: editStartDate,
+          end_date: editEndDate || null,
+        })
+        .eq('id', habit.id)
+        .select(
+          'id, name, category, duration_minutes, current_streak, created_at, checkpoint, trophies_earned, freezes_held, start_date, end_date',
+        )
+        .maybeSingle();
+
+    if (updateErr || !data) {
+      console.log('EDIT HABIT ERROR:', updateErr);
+      setError('The habit could not be updated.');
+      setSavingEdit(false);
+      return;
+    }
+
+    setHabit(data as Habit);
+    setEditModalOpen(false);
+    setSavingEdit(false);
+    showToast('Habit updated.');
   };
 
   const deleteHabit = async () => {
@@ -521,8 +627,9 @@ export default function HabitDetailScreen() {
               style={[
                 styles.streakBig,
                 {
-                  color:
-                    accentForeground,
+                  color: isDark
+                    ? '#FFFFFF'
+                    : accentForeground,
                 },
               ]}
             >
@@ -580,8 +687,9 @@ export default function HabitDetailScreen() {
               style={[
                 styles.statValue,
                 {
-                  color:
-                    accentForeground,
+                  color: isDark
+                    ? '#FFFFFF'
+                    : accentForeground,
                 },
               ]}
             >
@@ -610,8 +718,9 @@ export default function HabitDetailScreen() {
               style={[
                 styles.statValue,
                 {
-                  color:
-                    accentForeground,
+                  color: isDark
+                    ? '#FFFFFF'
+                    : accentForeground,
                 },
               ]}
             >
@@ -640,8 +749,9 @@ export default function HabitDetailScreen() {
               style={[
                 styles.statValue,
                 {
-                  color:
-                    accentForeground,
+                  color: isDark
+                    ? '#FFFFFF'
+                    : accentForeground,
                 },
               ]}
             >
@@ -734,12 +844,14 @@ export default function HabitDetailScreen() {
 
                     tile.isFuture && {
                       backgroundColor:
-                        'transparent',
+                        isDark
+                          ? '#1A1A1A'
+                          : '#F1F0ED',
                       borderWidth: 1,
                       borderColor:
                         isDark
-                          ? '#2A2A2A'
-                          : '#ECE9E4',
+                          ? '#303030'
+                          : '#E2E0DB',
                     },
 
                     tile.isToday &&
@@ -750,53 +862,300 @@ export default function HabitDetailScreen() {
                       },
                   ]}
                 >
-                  <Text
-                    style={[
-                      styles.tileDay,
-                      isDark &&
-                        !tile.done &&
-                        styles.darkText,
-
-                      tile.done && {
-                        color:
-                          onAccent,
-                        fontFamily:
-                          FONT_BOLD,
-                      },
-
-                      tile.isFuture && {
-                        opacity: 0.3,
-                      },
-                    ]}
-                  >
-                    {tile.tileNumber}
-                  </Text>
+                  {!tile.done && (
+                    <Text
+                      style={[
+                        styles.tileDay,
+                        isDark &&
+                          styles.darkText,
+                        tile.isFuture && {
+                          opacity: 0.3,
+                        },
+                      ]}
+                    >
+                      {tile.tileNumber}
+                    </Text>
+                  )}
                 </View>
               )
             )}
           </View>
         </View>
 
-        <Pressable
-          onPress={deleteHabit}
-          style={[
-            styles.deleteBtn,
-            isDark &&
-              styles.deleteBtnDark,
-          ]}
-        >
-          <Trash2
-            color="#C53A2F"
-            size={16}
-          />
-
-          <Text
-            style={styles.deleteText}
+        <View style={styles.actionRow}>
+          <Pressable
+            onPress={openEdit}
+            style={[
+              styles.editBtn,
+              isDark &&
+                styles.editBtnDark,
+            ]}
           >
-            Delete habit
-          </Text>
-        </Pressable>
+            <Edit3
+              color={
+                isDark
+                  ? '#FFFFFF'
+                  : '#5A5751'
+              }
+              size={16}
+            />
+
+            <Text
+              style={[
+                styles.editText,
+                isDark &&
+                  styles.editTextDark,
+              ]}
+            >
+              Edit habit
+            </Text>
+          </Pressable>
+
+          <Pressable
+            onPress={deleteHabit}
+            style={[
+              styles.deleteBtn,
+              isDark &&
+                styles.deleteBtnDark,
+            ]}
+          >
+            <Trash2
+              color="#C53A2F"
+              size={16}
+            />
+
+            <Text
+              style={styles.deleteText}
+            >
+              Delete habit
+            </Text>
+          </Pressable>
+        </View>
       </ScrollView>
+
+      <Modal
+        visible={editModalOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() =>
+          setEditModalOpen(false)
+        }
+      >
+        <View style={styles.modalShade}>
+          <View
+            style={[
+              styles.modalCard,
+              isDark &&
+                styles.modalDark,
+            ]}
+          >
+            <View style={styles.modalTitleRow}>
+              <Text
+                style={[
+                  styles.modalTitle,
+                  isDark &&
+                    styles.darkText,
+                ]}
+              >
+                Edit habit
+              </Text>
+
+              <Pressable
+                onPress={() =>
+                  setEditModalOpen(false)
+                }
+              >
+                <X
+                  color={
+                    isDark
+                      ? '#FFFFFF'
+                      : '#5A5751'
+                  }
+                  size={21}
+                />
+              </Pressable>
+            </View>
+
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              style={{ maxHeight: 420 }}
+            >
+              <Text
+                style={[
+                  styles.label,
+                  isDark &&
+                    styles.darkMuted,
+                ]}
+              >
+                Title
+              </Text>
+
+              <TextInput
+                value={editName}
+                onChangeText={setEditName}
+                placeholder="e.g. Morning meditation"
+                placeholderTextColor="#9B978F"
+                style={[
+                  styles.input,
+                  isDark &&
+                    styles.inputDark,
+                ]}
+              />
+
+              <Text
+                style={[
+                  styles.label,
+                  isDark &&
+                    styles.darkMuted,
+                ]}
+              >
+                Category
+              </Text>
+
+              <View style={styles.catRow}>
+                {CATEGORIES.map((c) => (
+                  <Pressable
+                    key={c}
+                    onPress={() =>
+                      setEditCategory(c)
+                    }
+                    style={[
+                      styles.catChip,
+                      editCategory === c && {
+                        backgroundColor:
+                          accentForeground,
+                        borderColor:
+                          accentForeground,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.catText,
+                        isDark &&
+                          styles.darkMuted,
+                        editCategory === c && {
+                          color: onAccent,
+                          fontFamily:
+                            FONT_SEMI,
+                        },
+                      ]}
+                    >
+                      {c}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              <Text
+                style={[
+                  styles.label,
+                  isDark &&
+                    styles.darkMuted,
+                ]}
+              >
+                Duration (minutes, optional)
+              </Text>
+
+              <TextInput
+                value={editDuration}
+                onChangeText={setEditDuration}
+                placeholder="15"
+                placeholderTextColor="#9B978F"
+                style={[
+                  styles.input,
+                  isDark &&
+                    styles.inputDark,
+                ]}
+                keyboardType="numeric"
+              />
+
+              <Text
+                style={[
+                  styles.label,
+                  isDark &&
+                    styles.darkMuted,
+                ]}
+              >
+                Checkpoint (days per trophy)
+              </Text>
+
+              <TextInput
+                value={editCheckpoint}
+                onChangeText={setEditCheckpoint}
+                placeholder="5"
+                placeholderTextColor="#9B978F"
+                style={[
+                  styles.input,
+                  isDark &&
+                    styles.inputDark,
+                ]}
+                keyboardType="numeric"
+              />
+
+              <Text
+                style={[
+                  styles.label,
+                  isDark &&
+                    styles.darkMuted,
+                ]}
+              >
+                Start date
+              </Text>
+
+              <DatePickerInput
+                value={editStartDate}
+                onChange={setEditStartDate}
+                accent={accentForeground}
+                onAccent={onAccent}
+                isDark={isDark}
+              />
+
+              <Text
+                style={[
+                  styles.label,
+                  isDark &&
+                    styles.darkMuted,
+                ]}
+              >
+                End date (optional)
+              </Text>
+
+              <DatePickerInput
+                value={editEndDate}
+                onChange={setEditEndDate}
+                accent={accentForeground}
+                onAccent={onAccent}
+                isDark={isDark}
+                placeholder="No end date"
+              />
+            </ScrollView>
+
+            <Pressable
+              disabled={savingEdit}
+              onPress={saveEdit}
+              style={[
+                styles.saveButton,
+                {
+                  backgroundColor:
+                    accentForeground,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.saveText,
+                  { color: onAccent },
+                ]}
+              >
+                {savingEdit
+                  ? 'Saving...'
+                  : 'Save changes'}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
 
       {toast && (
         <View
@@ -1020,15 +1379,50 @@ const styles = StyleSheet.create({
   tilesGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 5,
+    width: '100%',
   },
 
   tile: {
-    width: '9.5%',
+    width: '10%',
     aspectRatio: 1,
     borderRadius: 6,
     alignItems: 'center',
     justifyContent: 'center',
+    transform: [{ scale: 0.9 }],
+  },
+
+  actionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 10,
+  },
+
+  editBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E1DED8',
+    backgroundColor: '#F7F6F3',
+  },
+
+  editBtnDark: {
+    borderColor: '#303030',
+    backgroundColor: '#161616',
+  },
+
+  editText: {
+    fontFamily: FONT_MED,
+    fontSize: 14,
+    color: '#5A5751',
+  },
+
+  editTextDark: {
+    color: '#FFFFFF',
   },
 
   tileDay: {
@@ -1038,6 +1432,7 @@ const styles = StyleSheet.create({
   },
 
   deleteBtn: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1058,6 +1453,96 @@ const styles = StyleSheet.create({
     fontFamily: FONT_MED,
     fontSize: 14,
     color: '#C53A2F',
+  },
+
+  modalShade: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.45)',
+  },
+
+  modalCard: {
+    backgroundColor: '#FFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 22,
+    paddingBottom: 34,
+    maxHeight: '92%',
+  },
+
+  modalDark: {
+    backgroundColor: '#161616',
+  },
+
+  modalTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+
+  modalTitle: {
+    fontFamily: FONT_BOLD,
+    fontSize: 18,
+    color: '#27241F',
+  },
+
+  label: {
+    fontFamily: FONT_MED,
+    fontSize: 13,
+    color: '#77746E',
+    marginTop: 12,
+    marginBottom: 6,
+  },
+
+  input: {
+    borderWidth: 1,
+    borderColor: '#E1DED8',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    fontFamily: FONT,
+    fontSize: 15,
+    color: '#282724',
+  },
+
+  inputDark: {
+    backgroundColor: '#1E1E1E',
+    borderColor: '#363636',
+    color: '#FFFFFF',
+  },
+
+  catRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+
+  catChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E2DFD9',
+    backgroundColor: '#FFF',
+  },
+
+  catText: {
+    fontFamily: FONT,
+    fontSize: 13,
+    color: '#77746E',
+  },
+
+  saveButton: {
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 20,
+  },
+
+  saveText: {
+    fontFamily: FONT_SEMI,
+    fontSize: 15,
   },
 
   toastWrap: {

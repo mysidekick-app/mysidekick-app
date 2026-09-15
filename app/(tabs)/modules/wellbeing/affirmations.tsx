@@ -7,14 +7,19 @@ import {
   Text,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { ChevronLeft, MoreVertical } from 'lucide-react-native';
+
 import { useApp } from '@/components/AppProvider';
+import { useAuth } from '@/components/AuthProvider';
 import { supabase } from '@/lib/supabase';
 
 /* ------------------------------------------------------------------ */
-/* Theme palettes                                                      */
+/* Theme palettes                                                     */
 /* ------------------------------------------------------------------ */
+
 const DARK_PALETTE = {
   bg: '#090909',
   card: '#151515',
@@ -45,61 +50,157 @@ const MODULE_KEY = 'affirmations';
 const REGEN_INTERVAL_MS = 5 * 60 * 60 * 1000; // 5 hours
 
 /* ------------------------------------------------------------------ */
-/* Affirmation bank — 30 entries, each 3+ lines                         */
+/* Persistent storage                                                  */
 /* ------------------------------------------------------------------ */
+
+const STORAGE_KEY = '@mysidekick_affirmation_state';
+
+/* ------------------------------------------------------------------ */
+/* Affirmation bank                                                    */
+/* ------------------------------------------------------------------ */
+
 const AFFIRMATIONS: string[] = [
-  `I am worthy of the love and respect I give to others.\nMy presence is a gift to the people around me.\nI choose to honor my value every single day.`,
-  `I am capable of handling whatever this day brings.\nChallenges help me grow stronger and wiser.\nI trust my ability to figure things out.`,
-  `I release the need to control what I cannot change.\nI breathe in calm and breathe out worry.\nPeace is available to me in this moment.`,
-  `My body is doing its best, and I treat it with kindness.\nI nourish myself with care and patience.\nI am grateful for all my body does for me.`,
-  `I am exactly where I need to be right now.\nMy journey is unfolding in its own perfect timing.\nI trust the process of my life.`,
-  `I give myself permission to rest without guilt.\nRest is productive and necessary for my wellbeing.\nI deserve moments of stillness.`,
-  `I am surrounded by people who celebrate my growth.\nI attract relationships that uplift and inspire me.\nI am safe to be myself with others.`,
-  `My voice matters, and my ideas have value.\nI speak my truth with confidence and clarity.\nI am heard and understood by those who matter.`,
-  `I am resilient in the face of uncertainty.\nI have survived every difficult day so far.\nI will get through this too.`,
-  `I choose progress over perfection.\nSmall steps forward are still forward motion.\nI celebrate my effort, not just my outcomes.`,
-  `I am deserving of joy simply because I exist.\nHappiness is not something I must earn.\nI allow myself to feel good today.`,
-  `I let go of comparisons to other people's lives.\nMy path is unique and not a competition.\nI measure success by my own values.`,
-  `I am safe in my body and in this moment.\nI can handle the emotions that arise within me.\nI am grounded and secure.`,
-  `Every breath I take calms my mind and soothes my heart.\nI return to my breath whenever I feel overwhelmed.\nMy breath is an anchor I can always trust.`,
-  `I am proud of how far I have come.\nMy past does not define my future.\nI honor the growth I have already achieved.`,
-  `I am open to receiving good things in my life.\nAbundance flows to me in expected and unexpected ways.\nI welcome blessings with open arms.`,
-  `I forgive myself for the things I did not know.\nI am learning and evolving every day.\nI offer myself the same grace I offer others.`,
-  `My feelings are valid and worthy of attention.\nI allow myself to feel without judgment.\nI move through my emotions with compassion.`,
-  `I am enough, just as I am, in this moment.\nI do not need to prove my worth to anyone.\nI am complete and whole on my own.`,
-  `I choose to focus on what I can influence.\nI release energy spent on what is beyond my control.\nMy attention is a precious resource I guard wisely.`,
-  `I am a work in progress, and that is a beautiful thing.\nGrowth is messy and I embrace the mess.\nI am becoming who I am meant to be.`,
-  `I trust my intuition to guide me toward what is right.\nMy inner wisdom knows the way.\nI listen to the quiet voice within me.`,
-  `I am connected to something larger than myself.\nI am never truly alone in this world.\nI belong here, and I matter.`,
-  `I am allowed to take up space in this world.\nMy needs and desires are important.\nI do not shrink to make others comfortable.`,
-  `I choose courage over comfort when it matters most.\nBrave action is available to me even when I am afraid.\nI am braver than I believe.`,
-  `I am gentle with myself when I struggle.\nHard days do not erase my progress.\nI offer myself tenderness in difficult moments.`,
-  `I am building a life that feels good to live.\nMy choices today shape my tomorrow.\nI am the architect of my own happiness.`,
-  `I radiate warmth and kindness to everyone I meet.\nMy energy is a light in this world.\nI make a positive difference simply by being me.`,
-  `I am grounded in gratitude for this present moment.\nThere is beauty all around me when I look for it.\nI choose to notice the good today.`,
-  `I am worthy of care, rest, and softness.\nI do not have to earn my right to exist.\nI treat myself as someone who matters.`,
+  `I am worthy of the love and respect I give to others.
+My presence is a gift to the people around me.
+I choose to honor my value every single day.`,
+
+  `I am capable of handling whatever this day brings.
+Challenges help me grow stronger and wiser.
+I trust my ability to figure things out.`,
+
+  `I release the need to control what I cannot change.
+I breathe in calm and breathe out worry.
+Peace is available to me in this moment.`,
+
+  `My body is doing its best, and I treat it with kindness.
+I nourish myself with care and patience.
+I am grateful for all my body does for me.`,
+
+  `I am exactly where I need to be right now.
+My journey is unfolding in its own perfect timing.
+I trust the process of my life.`,
+
+  `I give myself permission to rest without guilt.
+Rest is productive and necessary for my wellbeing.
+I deserve moments of stillness.`,
+
+  `I am surrounded by people who celebrate my growth.
+I attract relationships that uplift and inspire me.
+I am safe to be myself with others.`,
+
+  `My voice matters, and my ideas have value.
+I speak my truth with confidence and clarity.
+I am heard and understood by those who matter.`,
+
+  `I am resilient in the face of uncertainty.
+I have survived every difficult day so far.
+I will get through this too.`,
+
+  `I choose progress over perfection.
+Small steps forward are still forward motion.
+I celebrate my effort, not just my outcomes.`,
+
+  `I am deserving of joy simply because I exist.
+Happiness is not something I must earn.
+I allow myself to feel good today.`,
+
+  `I let go of comparisons to other people's lives.
+My path is unique and not a competition.
+I measure success by my own values.`,
+
+  `I am safe in my body and in this moment.
+I can handle the emotions that arise within me.
+I am grounded and secure.`,
+
+  `Every breath I take calms my mind and soothes my heart.
+I return to my breath whenever I feel overwhelmed.
+My breath is an anchor I can always trust.`,
+
+  `I am proud of how far I have come.
+My past does not define my future.
+I honor the growth I have already achieved.`,
+
+  `I am open to receiving good things in my life.
+Abundance flows to me in expected and unexpected ways.
+I welcome blessings with open arms.`,
+
+  `I forgive myself for the things I did not know.
+I am learning and evolving every day.
+I offer myself the same grace I offer others.`,
+
+  `My feelings are valid and worthy of attention.
+I allow myself to feel without judgment.
+I move through my emotions with compassion.`,
+
+  `I am enough, just as I am, in this moment.
+I do not need to prove my worth to anyone.
+I am complete and whole on my own.`,
+
+  `I choose to focus on what I can influence.
+I release energy spent on what is beyond my control.
+My attention is a precious resource I guard wisely.`,
+
+  `I am a work in progress, and that is a beautiful thing.
+Growth is messy and I embrace the mess.
+I am becoming who I am meant to be.`,
+
+  `I trust my intuition to guide me toward what is right.
+My inner wisdom knows the way.
+I listen to the quiet voice within me.`,
+
+  `I am connected to something larger than myself.
+I am never truly alone in this world.
+I belong here, and I matter.`,
+
+  `I am allowed to take up space in this world.
+My needs and desires are important.
+I do not shrink to make others comfortable.`,
+
+  `I choose courage over comfort when it matters most.
+Brave action is available to me even when I am afraid.
+I am braver than I believe.`,
+
+  `I am gentle with myself when I struggle.
+Hard days do not erase my progress.
+I offer myself tenderness in difficult moments.`,
+
+  `I am building a life that feels good to live.
+My choices today shape my tomorrow.
+I am the architect of my own happiness.`,
+
+  `I radiate warmth and kindness to everyone I meet.
+My energy is a light in this world.
+I make a positive difference simply by being me.`,
+
+  `I am grounded in gratitude for this present moment.
+There is beauty all around me when I look for it.
+I choose to notice the good today.`,
+
+  `I am worthy of care, rest, and softness.
+I do not have to earn my right to exist.
+I treat myself as someone who matters.`,
 ];
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */
-function todayDate(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
+
+type StoredAffirmation = {
+  index: number;
+  generatedAt: number;
+};
 
 function pickRandomIndex(exclude: number | null): number {
-  if (AFFIRMATIONS.length === 1) return 0;
+  if (AFFIRMATIONS.length === 1) {
+    return 0;
+  }
 
   let idx = Math.floor(Math.random() * AFFIRMATIONS.length);
 
   if (exclude !== null && AFFIRMATIONS.length > 1) {
     let guard = 0;
 
-    while (idx === exclude && guard < 12) {
+    while (idx === exclude && guard < 20) {
       idx = Math.floor(Math.random() * AFFIRMATIONS.length);
       guard += 1;
     }
@@ -109,9 +210,14 @@ function pickRandomIndex(exclude: number | null): number {
 }
 
 function formatCountdown(remainingMs: number): string {
-  if (remainingMs <= 0) return 'New affirmation ready';
+  if (remainingMs <= 0) {
+    return 'New affirmation ready';
+  }
 
-  const totalMinutes = Math.floor(remainingMs / (60 * 1000));
+  const totalMinutes = Math.floor(
+    remainingMs / (60 * 1000),
+  );
+
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
 
@@ -121,94 +227,401 @@ function formatCountdown(remainingMs: number): string {
 /* ================================================================== */
 /* Screen                                                              */
 /* ================================================================== */
+
 export default function AffirmationsScreen() {
-  const { isDark, accentForeground, onAccent } = useApp();
+  const {
+    isDark,
+    accentForeground,
+    onAccent,
+  } = useApp();
+
+  const { user } = useAuth();
+
   const accent = accentForeground;
-  const COLORS = isDark ? DARK_PALETTE : LIGHT_PALETTE;
+
+  const COLORS = isDark
+    ? DARK_PALETTE
+    : LIGHT_PALETTE;
+
   const styles = makeStyles(COLORS);
 
-  const [affirmation, setAffirmation] = useState<string>(AFFIRMATIONS[0]);
-  const [affirmationIdx, setAffirmationIdx] = useState<number>(0);
-  const [lastGenerated, setLastGenerated] = useState<number>(Date.now());
-  const [now, setNow] = useState<number>(Date.now());
-  const [saving, setSaving] = useState<boolean>(false);
-  const [saveMsg, setSaveMsg] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [menuOpen, setMenuOpen] = useState<boolean>(false);
+  const [affirmation, setAffirmation] =
+    useState<string>(AFFIRMATIONS[0]);
 
-  /* ---- persist affirmation to wellbeing_entries ---- */
-  const saveAffirmation = useCallback(async (text: string) => {
-    setSaving(true);
-    setSaveMsg(null);
-    setError(null);
+  const [affirmationIdx, setAffirmationIdx] =
+    useState<number>(0);
 
-    const { error: upsertErr } = await supabase
-      .from('wellbeing_entries')
-      .upsert(
-        {
-          module_key: MODULE_KEY,
-          entry_date: todayDate(),
-          content: text,
-        },
-        { onConflict: 'module_key,entry_date' },
-      );
+  const [lastGenerated, setLastGenerated] =
+    useState<number>(Date.now());
 
-    if (upsertErr) {
-      setError('Could not save your affirmation. It will still show on screen.');
-    } else {
-      setSaveMsg('Saved.');
-    }
+  const [now, setNow] =
+    useState<number>(Date.now());
 
-    setSaving(false);
-  }, []);
+  const [loading, setLoading] =
+    useState<boolean>(true);
 
-  /* ---- generate a new affirmation ---- */
-  const generateNew = useCallback(
-    (opts?: { fromAuto?: boolean }) => {
-      const nextIdx = pickRandomIndex(affirmationIdx);
-      const nextText = AFFIRMATIONS[nextIdx];
+  const [saving, setSaving] =
+    useState<boolean>(false);
 
-      setAffirmationIdx(nextIdx);
-      setAffirmation(nextText);
-      setLastGenerated(Date.now());
+  const [saveMsg, setSaveMsg] =
+    useState<string | null>(null);
+
+  const [error, setError] =
+    useState<string | null>(null);
+
+  const [menuOpen, setMenuOpen] =
+    useState<boolean>(false);
+
+  /* -------------------------------------------------------------- */
+  /* Save locally first                                              */
+  /* -------------------------------------------------------------- */
+
+  const persistLocal = useCallback(
+    async (
+      index: number,
+      generatedAt: number,
+    ) => {
+      try {
+        const state: StoredAffirmation = {
+          index,
+          generatedAt,
+        };
+
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify(state),
+        );
+      } catch (storageError) {
+        console.error(
+          'FAILED TO SAVE AFFIRMATION LOCALLY:',
+          storageError,
+        );
+      }
+    },
+    [],
+  );
+
+  /* -------------------------------------------------------------- */
+  /* Save to Supabase                                                 */
+  /* -------------------------------------------------------------- */
+
+  const saveAffirmation = useCallback(
+    async (text: string) => {
+      if (!user) {
+        return;
+      }
+
+      setSaving(true);
       setSaveMsg(null);
       setError(null);
 
-      void saveAffirmation(nextText);
+      const { error: upsertErr } = await supabase
+        .from('wellbeing_entries')
+        .upsert(
+          {
+            user_id: user.id,
+            module_key: MODULE_KEY,
+            entry_date:
+              new Date()
+                .toISOString()
+                .split('T')[0],
+            content: text,
+          },
+          {
+            onConflict:
+              'user_id,module_key,entry_date',
+          },
+        );
 
-      if (opts?.fromAuto) {
-        // silent auto-generation
+      if (upsertErr) {
+        console.error(
+          'FAILED TO SAVE AFFIRMATION:',
+          {
+            message: upsertErr.message,
+            code: upsertErr.code,
+            details: upsertErr.details,
+            hint: upsertErr.hint,
+          },
+        );
+
+        /*
+         * Important:
+         * Do NOT remove the affirmation from the screen.
+         * Local storage is the source of truth for the
+         * current affirmation/timer.
+         */
+        setError(
+          'Affirmation saved on this device.',
+        );
+      } else {
+        setSaveMsg('Saved.');
       }
+
+      setSaving(false);
     },
-    [affirmationIdx, saveAffirmation],
+    [user],
   );
 
-  /* ---- on mount: auto-generate if 5 hours have passed ---- */
+  /* -------------------------------------------------------------- */
+  /* Generate a new affirmation                                     */
+  /* -------------------------------------------------------------- */
+
+  const generateNew = useCallback(
+    async (opts?: { fromAuto?: boolean }) => {
+      const nextIdx =
+        pickRandomIndex(affirmationIdx);
+
+      const nextText =
+        AFFIRMATIONS[nextIdx];
+
+      const generatedAt = Date.now();
+
+      /*
+       * Update UI immediately.
+       * This prevents the affirmation from reverting
+       * while Supabase is saving.
+       */
+      setAffirmationIdx(nextIdx);
+      setAffirmation(nextText);
+      setLastGenerated(generatedAt);
+      setNow(generatedAt);
+      setSaveMsg(null);
+      setError(null);
+
+      /*
+       * Persist immediately so closing/reopening the
+       * screen does not reset the affirmation.
+       */
+      await persistLocal(
+        nextIdx,
+        generatedAt,
+      );
+
+      /*
+       * Supabase save is secondary.
+       */
+      await saveAffirmation(nextText);
+
+      if (opts?.fromAuto) {
+        setSaveMsg(null);
+        setError(null);
+      }
+    },
+    [
+      affirmationIdx,
+      persistLocal,
+      saveAffirmation,
+    ],
+  );
+
+  /* -------------------------------------------------------------- */
+  /* Load persisted affirmation                                      */
+  /* -------------------------------------------------------------- */
+
   useEffect(() => {
-    const elapsed = Date.now() - lastGenerated;
+    let cancelled = false;
 
-    if (elapsed >= REGEN_INTERVAL_MS) {
-      generateNew({ fromAuto: true });
-    }
+    const loadAffirmation = async () => {
+      try {
+        const stored =
+          await AsyncStorage.getItem(
+            STORAGE_KEY,
+          );
 
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+        if (cancelled) {
+          return;
+        }
 
-  /* ---- ticking clock for countdown ---- */
+        if (!stored) {
+          /*
+           * First time opening affirmations.
+           * The timer starts NOW.
+           */
+          const firstIdx = 0;
+          const generatedAt = Date.now();
+
+          setAffirmationIdx(firstIdx);
+          setAffirmation(
+            AFFIRMATIONS[firstIdx],
+          );
+          setLastGenerated(generatedAt);
+          setNow(generatedAt);
+
+          await persistLocal(
+            firstIdx,
+            generatedAt,
+          );
+
+          setLoading(false);
+          return;
+        }
+
+        const parsed =
+          JSON.parse(stored) as StoredAffirmation;
+
+        const storedIndex =
+          Number.isInteger(parsed.index) &&
+          parsed.index >= 0 &&
+          parsed.index < AFFIRMATIONS.length
+            ? parsed.index
+            : 0;
+
+        const storedGeneratedAt =
+          typeof parsed.generatedAt === 'number'
+            ? parsed.generatedAt
+            : Date.now();
+
+        const elapsed =
+          Date.now() - storedGeneratedAt;
+
+        /*
+         * Five hours have passed:
+         * generate a new affirmation immediately.
+         */
+        if (
+          elapsed >= REGEN_INTERVAL_MS
+        ) {
+          const nextIdx =
+            pickRandomIndex(storedIndex);
+
+          const nextText =
+            AFFIRMATIONS[nextIdx];
+
+          const generatedAt =
+            Date.now();
+
+          setAffirmationIdx(nextIdx);
+          setAffirmation(nextText);
+          setLastGenerated(
+            generatedAt,
+          );
+          setNow(generatedAt);
+
+          await persistLocal(
+            nextIdx,
+            generatedAt,
+          );
+
+          setLoading(false);
+
+          /*
+           * Save in background.
+           */
+          void saveAffirmation(nextText);
+
+          return;
+        }
+
+        /*
+         * Restore the existing affirmation.
+         */
+        setAffirmationIdx(storedIndex);
+        setAffirmation(
+          AFFIRMATIONS[storedIndex],
+        );
+        setLastGenerated(
+          storedGeneratedAt,
+        );
+        setNow(Date.now());
+      } catch (loadError) {
+        console.error(
+          'FAILED TO LOAD AFFIRMATION:',
+          loadError,
+        );
+
+        /*
+         * Safe fallback.
+         * Timer starts from this opening.
+         */
+        const fallbackIdx = 0;
+        const generatedAt = Date.now();
+
+        setAffirmationIdx(
+          fallbackIdx,
+        );
+
+        setAffirmation(
+          AFFIRMATIONS[fallbackIdx],
+        );
+
+        setLastGenerated(
+          generatedAt,
+        );
+
+        setNow(generatedAt);
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void loadAffirmation();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    persistLocal,
+    saveAffirmation,
+  ]);
+
+  /* -------------------------------------------------------------- */
+  /* Countdown                                                       */
+  /* -------------------------------------------------------------- */
+
   useEffect(() => {
     const interval = setInterval(() => {
       setNow(Date.now());
     }, 30 * 1000);
 
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+    };
   }, []);
 
+  /* -------------------------------------------------------------- */
+  /* Automatically generate after five hours                        */
+  /* -------------------------------------------------------------- */
+
+  useEffect(() => {
+    if (loading) {
+      return;
+    }
+
+    const elapsed =
+      now - lastGenerated;
+
+    if (
+      elapsed >= REGEN_INTERVAL_MS
+    ) {
+      void generateNew({
+        fromAuto: true,
+      });
+    }
+  }, [
+    now,
+    lastGenerated,
+    loading,
+    generateNew,
+  ]);
+
   const remainingMs = useMemo(() => {
-    const elapsed = now - lastGenerated;
-    return Math.max(0, REGEN_INTERVAL_MS - elapsed);
+    const elapsed =
+      now - lastGenerated;
+
+    return Math.max(
+      0,
+      REGEN_INTERVAL_MS - elapsed,
+    );
   }, [now, lastGenerated]);
 
-  const countdownText = formatCountdown(remainingMs);
+  const countdownText =
+    formatCountdown(remainingMs);
+
+  /* -------------------------------------------------------------- */
+  /* Settings                                                         */
+  /* -------------------------------------------------------------- */
 
   const openSettings = useCallback(() => {
     setMenuOpen(false);
@@ -216,25 +629,58 @@ export default function AffirmationsScreen() {
   }, []);
 
   /* ---------------------------------------------------------------- */
+  /* Render                                                            */
+  /* ---------------------------------------------------------------- */
+
   return (
-    <View style={styles.safe}>
+    <SafeAreaView
+      style={styles.safe}
+      edges={['top', 'bottom']}
+    >
       {/* Header */}
-      <View style={[styles.header, { paddingTop: 28 }]}>
+
+      <View
+        style={[
+          styles.header,
+          { paddingTop: 28 },
+        ]}
+      >
         <Pressable
-          onPress={() => router.push('/(tabs)/modules/wellbeing')}
-          style={[styles.backBtn, { backgroundColor: accent }]}
+          onPress={() =>
+            router.push(
+              '/(tabs)/modules/wellbeing',
+            )
+          }
+          style={[
+            styles.backBtn,
+            {
+              backgroundColor: accent,
+            },
+          ]}
           hitSlop={12}
           accessibilityLabel="Go back"
         >
-          <ChevronLeft color="#FFFFFF" size={22} strokeWidth={2.4} />
+          <ChevronLeft
+            color="#FFFFFF"
+            size={22}
+            strokeWidth={2.4}
+          />
         </Pressable>
 
-        <View style={styles.headerTitleWrap}>
-          <Text style={styles.headerTitle}>AFFIRMATIONS</Text>
+        <View
+          style={styles.headerTitleWrap}
+        >
+          <Text
+            style={styles.headerTitle}
+          >
+            AFFIRMATIONS
+          </Text>
         </View>
 
         <Pressable
-          onPress={() => setMenuOpen(prev => !prev)}
+          onPress={() =>
+            setMenuOpen(prev => !prev)
+          }
           style={styles.menuBtn}
           hitSlop={12}
           accessibilityLabel="Open settings menu"
@@ -247,13 +693,17 @@ export default function AffirmationsScreen() {
         </Pressable>
       </View>
 
+      {/* Settings menu */}
+
       {menuOpen ? (
         <View
           style={[
             styles.menu,
             {
-              backgroundColor: COLORS.card,
-              borderColor: COLORS.cardBorder,
+              backgroundColor:
+                COLORS.card,
+              borderColor:
+                COLORS.cardBorder,
             },
           ]}
         >
@@ -261,75 +711,146 @@ export default function AffirmationsScreen() {
             onPress={openSettings}
             style={({ pressed }) => [
               styles.menuItem,
-              pressed && styles.menuItemPressed,
+              pressed &&
+                styles.menuItemPressed,
             ]}
           >
-            <Text style={styles.menuItemText}>Settings</Text>
+            <Text
+              style={styles.menuItemText}
+            >
+              Settings
+            </Text>
           </Pressable>
         </View>
       ) : null}
 
+      {/* Main content */}
+
       <ScrollView
-        contentContainerStyle={styles.scroll}
+        contentContainerStyle={
+          styles.scroll
+        }
         showsVerticalScrollIndicator={false}
       >
-        {/* Eyebrow */}
-        <Text style={[styles.eyebrow, { color: accent }]}>
-          TODAY'S AFFIRMATION
-        </Text>
+        <View style={styles.centerContent}>
 
-        {/* Center affirmation card */}
-        <View style={styles.card}>
-          <View style={[styles.cardAccent, { backgroundColor: accent }]} />
-          <Text style={styles.affirmationText}>{affirmation}</Text>
-        </View>
+          {/* Eyebrow */}
 
-        {/* Save feedback */}
-        {saveMsg ? (
-          <Text style={[styles.saveMsg, { color: accent }]}>{saveMsg}</Text>
-        ) : null}
 
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          {/* Affirmation card */}
 
-        {/* Spacer pushes button + countdown toward the bottom */}
-        <View style={styles.spacer} />
-
-        {/* Countdown */}
-        <Text style={styles.countdown}>{countdownText}</Text>
-
-        {/* Generate button */}
-        <Pressable
-          onPress={() => generateNew()}
-          disabled={saving}
-          style={({ pressed }) => [
-            styles.generateBtn,
-            { backgroundColor: accent },
-            saving && styles.generateBtnDisabled,
-            pressed && styles.generateBtnPressed,
-          ]}
-          accessibilityLabel="Generate new affirmation"
-        >
-          {saving ? (
-            <ActivityIndicator size="small" color={onAccent} />
+          {loading ? (
+            <View
+              style={styles.loadingContainer}
+            >
+              <ActivityIndicator
+                size="large"
+                color={accent}
+              />
+            </View>
           ) : (
+            <View style={styles.card}>
+              <View
+                style={[
+                  styles.cardAccent,
+                  {
+                    backgroundColor:
+                      accent,
+                  },
+                ]}
+              />
+
+              <Text
+                style={
+                  styles.affirmationText
+                }
+              >
+                {affirmation}
+              </Text>
+            </View>
+          )}
+
+          {/* Feedback */}
+
+          {saveMsg ? (
             <Text
               style={[
-                styles.generateBtnText,
-                { color: onAccent },
+                styles.saveMsg,
+                { color: accent },
               ]}
             >
-              GENERATE NEW AFFIRMATION
+              {saveMsg}
             </Text>
-          )}
-        </Pressable>
+          ) : null}
+
+          {error ? (
+            <Text
+              style={styles.errorText}
+            >
+              {error}
+            </Text>
+          ) : null}
+
+        </View>
+
+        {/* Bottom controls */}
+
+        <View
+          style={styles.bottomControls}
+        >
+          <Text
+            style={styles.countdown}
+          >
+            {countdownText}
+          </Text>
+
+          <Pressable
+            onPress={() =>
+              void generateNew()
+            }
+            disabled={saving}
+            style={({ pressed }) => [
+              styles.generateBtn,
+              {
+                backgroundColor:
+                  accent,
+              },
+              saving &&
+                styles.generateBtnDisabled,
+              pressed &&
+                styles.generateBtnPressed,
+            ]}
+            accessibilityLabel="Generate new affirmation"
+          >
+            {saving ? (
+              <ActivityIndicator
+                size="small"
+                color={onAccent}
+              />
+            ) : (
+              <Text
+                style={[
+                  styles.generateBtnText,
+                  {
+                    color: onAccent,
+                  },
+                ]}
+              >
+                GENERATE NEW AFFIRMATION
+              </Text>
+            )}
+          </Pressable>
+        </View>
+
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
 /* ------------------------------------------------------------------ */
 /* Styles                                                              */
 /* ------------------------------------------------------------------ */
+
 type Palette = typeof DARK_PALETTE;
 
 function makeStyles(C: Palette) {
@@ -340,16 +861,16 @@ function makeStyles(C: Palette) {
     },
 
     /* Header */
+
     header: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      paddingHorizontal: 14,
+      paddingHorizontal: 16,
+      paddingTop: 28,
       paddingVertical: 12,
       borderBottomWidth: 1,
       borderBottomColor: C.divider,
-      position: 'relative',
-      zIndex: 20,
     },
 
     backBtn: {
@@ -414,15 +935,29 @@ function makeStyles(C: Palette) {
       color: C.text,
     },
 
-    /* Scroll */
+    /* Main scroll area */
+
     scroll: {
       flexGrow: 1,
-      padding: 20,
+      paddingHorizontal: 20,
+      paddingTop: 20,
       paddingBottom: 110,
+    },
+
+    /*
+     * This makes the affirmation area occupy the available
+     * screen and centers the card vertically.
+     */
+
+    centerContent: {
+      flex: 1,
+      alignItems: 'center',
       justifyContent: 'center',
+      width: '100%',
     },
 
     /* Eyebrow */
+
     eyebrow: {
       fontFamily: FONT_SEMI,
       fontSize: 13,
@@ -433,13 +968,16 @@ function makeStyles(C: Palette) {
     },
 
     /* Affirmation card */
+
     card: {
+      width: '100%',
+      maxWidth: 520,
       backgroundColor: C.card,
       borderWidth: 1,
       borderColor: C.cardBorder,
       borderRadius: 18,
-      padding: 24,
-      paddingTop: 26,
+      paddingHorizontal: 24,
+      paddingVertical: 26,
       overflow: 'hidden',
     },
 
@@ -459,7 +997,14 @@ function makeStyles(C: Palette) {
       textAlign: 'center',
     },
 
-    /* Save feedback */
+    loadingContainer: {
+      minHeight: 180,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+
+    /* Feedback */
+
     saveMsg: {
       fontFamily: FONT_SEMI,
       fontSize: 12.5,
@@ -476,13 +1021,15 @@ function makeStyles(C: Palette) {
       lineHeight: 18,
     },
 
-    /* Spacer */
-    spacer: {
-      flex: 1,
-      minHeight: 32,
+    /* Bottom controls */
+
+    bottomControls: {
+      width: '100%',
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+      marginTop: 24,
     },
 
-    /* Countdown */
     countdown: {
       fontFamily: FONT,
       fontSize: 12.5,
@@ -493,7 +1040,10 @@ function makeStyles(C: Palette) {
     },
 
     /* Generate button */
+
     generateBtn: {
+      width: '100%',
+      maxWidth: 520,
       alignItems: 'center',
       justifyContent: 'center',
       paddingVertical: 16,

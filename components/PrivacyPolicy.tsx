@@ -373,7 +373,7 @@ export default function PrivacyPolicy({
         borderColor={borderColor}
       >
         If you have a privacy question, request, concern, or complaint, contact us at
-        [YOUR PRIVACY EMAIL]. Please include enough information for us to understand
+        theallapplication@gmail.com. Please include enough information for us to understand
         and respond to your request. This policy should be reviewed and finalized for
         the specific Sidekick operating entity, jurisdictions, service providers, and
         legal requirements before public launch.

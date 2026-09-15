@@ -43,12 +43,18 @@ export function PageHeader({
 
   /*
    * Finance keeps its special header styling.
-   * The right-side control is now the three-dot menu.
+   * The right-side control is the three-dot menu.
    */
+
   if (financeMode) {
     return (
       <View>
-        <View style={[styles.container, isDark && styles.containerDark]}>
+        <View
+          style={[
+            styles.container,
+            isDark && styles.containerDark,
+          ]}
+        >
           <Pressable
             onPress={handleBack}
             style={[
@@ -67,7 +73,9 @@ export function PageHeader({
           <Text
             style={[
               styles.title,
-              { color: accentForeground },
+              {
+                color: isDark ? '#FFFFFF' : accentForeground,
+              },
             ]}
           >
             {title.toUpperCase()}
@@ -163,7 +171,9 @@ export function PageHeader({
         <Text
           style={[
             styles.title,
-            { color: accentForeground },
+            {
+              color: isDark ? '#FFFFFF' : accentForeground,
+            },
           ]}
         >
           {title.toUpperCase()}

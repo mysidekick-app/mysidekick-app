@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native';
 
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 
 import { ChevronLeft, MoreVertical } from 'lucide-react-native';
@@ -51,19 +52,24 @@ const FONT_XB = 'Poppins-ExtraBold';
 /* Box breathing constants                                             */
 /* ------------------------------------------------------------------ */
 
-const PHASE_SECONDS = 4; // each phase lasts 4 seconds
+const PHASE_SECONDS = 4;
 const PHASE_MS = PHASE_SECONDS * 1000;
-const TICK_MS = 250; // 250ms tick for phase/timer logic
+const TICK_MS = 250;
 
 // Rectangle dimensions
 const RECT_SIZE = 240;
 const RECT_RADIUS = 12;
 const DOT_SIZE = 16;
-const DOT_OFFSET = DOT_SIZE / 2; // center offset for the dot
+const DOT_OFFSET = DOT_SIZE / 2;
 
 type Phase = 0 | 1 | 2 | 3;
 
-const PHASE_LABELS: string[] = ['INHALE', 'HOLD', 'EXHALE', 'HOLD'];
+const PHASE_LABELS: string[] = [
+  'INHALE',
+  'HOLD',
+  'EXHALE',
+  'HOLD',
+];
 
 /* ------------------------------------------------------------------ */
 /* Map perimeter progress (0..1) to x,y along the rectangle edges.     */
@@ -79,10 +85,9 @@ const PHASE_LABELS: string[] = ['INHALE', 'HOLD', 'EXHALE', 'HOLD'];
 function perimeterToXY(progress: number) {
   'worklet';
 
-  // progress is 0..1 across the full perimeter
-  const seg = progress * 4; // 0..4
-  const phase = Math.floor(seg); // 0..3
-  const t = seg - phase; // 0..1 within current phase
+  const seg = progress * 4;
+  const phase = Math.floor(seg);
+  const t = seg - phase;
 
   let x = 0;
   let y = 0;
@@ -119,6 +124,13 @@ export default function BreathworkScreen() {
   const COLORS = isDark ? DARK_PALETTE : LIGHT_PALETTE;
   const styles = makeStyles(COLORS);
 
+  /*
+   * In dark mode, the breathing elements should be white rather than
+   * using the user's accent color.
+   */
+  const breathingColor = isDark ? '#FFFFFF' : accent;
+  const resetColor = isDark ? '#AAA59D' : accent;
+
   const [running, setRunning] = useState(false);
   const [phase, setPhase] = useState<Phase>(0);
   const [countdown, setCountdown] = useState(PHASE_SECONDS);
@@ -135,7 +147,7 @@ export default function BreathworkScreen() {
   const dotProgress = useSharedValue(0);
 
   // Track timing in refs so the interval callback stays stable.
-  const elapsedInPhaseRef = useRef(0); // ms accumulated in current phase
+  const elapsedInPhaseRef = useRef(0);
   const runningRef = useRef(false);
   const phaseRef = useRef<Phase>(0);
 
@@ -145,7 +157,7 @@ export default function BreathworkScreen() {
 
   const animateToPhaseStart = useCallback(
     (p: Phase) => {
-      const startProgress = p / 4; // 0, 0.25, 0.5, 0.75
+      const startProgress = p / 4;
 
       dotProgress.value = withTiming(startProgress, {
         duration: 0,
@@ -172,13 +184,11 @@ export default function BreathworkScreen() {
         },
         finished => {
           if (finished) {
-            // Snap back to segment start to avoid drift on the next cycle.
             runOnJS(animateToPhaseStart)(p);
           }
         },
       );
 
-      // Ensure we start from the correct position.
       void startProgress;
     },
     [dotProgress, animateToPhaseStart],
@@ -195,15 +205,12 @@ export default function BreathworkScreen() {
       phaseRef.current = next;
 
       if (next === 0) {
-        // Completed a full cycle.
         setCycles(c => c + 1);
       }
 
-      // Reset countdown for the new phase.
       setCountdown(PHASE_SECONDS);
       elapsedInPhaseRef.current = 0;
 
-      // Start the animation for the new phase if still running.
       if (runningRef.current) {
         runPhaseAnimation(next);
       }
@@ -224,18 +231,15 @@ export default function BreathworkScreen() {
     elapsedInPhaseRef.current = 0;
     setCountdown(PHASE_SECONDS);
 
-    // Continue from current dot position instead of snapping to phase start.
     const currentProgress = dotProgress.value;
     const phaseStart = phaseRef.current / 4;
     const phaseEnd = (phaseRef.current + 1) / 4;
 
-    // If dot is already at or past phase end, advance to next phase.
     if (currentProgress >= phaseEnd - 0.001) {
       advancePhase();
       return;
     }
 
-    // Animate from current position to end of current phase.
     dotProgress.value = withTiming(
       phaseEnd,
       {
@@ -250,7 +254,11 @@ export default function BreathworkScreen() {
         }
       },
     );
-  }, [dotProgress, advancePhase, animateToPhaseStart]);
+  }, [
+    dotProgress,
+    advancePhase,
+    animateToPhaseStart,
+  ]);
 
   /* ---------------------------------------------------------------- */
   /* Pause the session — dot stays at current position.               */
@@ -307,7 +315,6 @@ export default function BreathworkScreen() {
 
       elapsedInPhaseRef.current += TICK_MS;
 
-      // Update countdown (ceiling division to show 4,3,2,1).
       const remainingMs =
         PHASE_MS - elapsedInPhaseRef.current;
 
@@ -318,7 +325,6 @@ export default function BreathworkScreen() {
 
       setCountdown(remainingSeconds);
 
-      // Phase complete?
       if (elapsedInPhaseRef.current >= PHASE_MS) {
         advancePhase();
       }
@@ -347,7 +353,10 @@ export default function BreathworkScreen() {
   /* ---------------------------------------------------------------- */
 
   return (
-    <View style={styles.safe}>
+    <SafeAreaView
+      style={styles.safe}
+      edges={['top', 'bottom']}
+    >
       {/* Header */}
       <View style={[styles.header, { paddingTop: 28 }]}>
         <Pressable
@@ -368,7 +377,9 @@ export default function BreathworkScreen() {
           />
         </Pressable>
 
-        <Text style={styles.headerTitle}>BREATHWORK</Text>
+        <Text style={styles.headerTitle}>
+          BREATHWORK
+        </Text>
 
         <Pressable
           onPress={() => setMenuOpen(prev => !prev)}
@@ -422,16 +433,27 @@ export default function BreathworkScreen() {
           <View
             style={[
               styles.rect,
-              { borderColor: accent },
+
+              /*
+               * WHITE in black/dark mode.
+               * Accent in light mode.
+               */
+              { borderColor: breathingColor },
             ]}
           >
             <Animated.View
               style={[
                 styles.dot,
+
+                /*
+                 * WHITE in black/dark mode.
+                 * Accent in light mode.
+                 */
                 {
-                  backgroundColor: accent,
-                  shadowColor: accent,
+                  backgroundColor: breathingColor,
+                  shadowColor: breathingColor,
                 },
+
                 dotStyle,
               ]}
             />
@@ -443,7 +465,12 @@ export default function BreathworkScreen() {
           <Text
             style={[
               styles.phaseLabel,
-              { color: accent },
+
+              /*
+               * INHALE / HOLD / EXHALE are WHITE
+               * in black/dark mode.
+               */
+              { color: breathingColor },
             ]}
           >
             {PHASE_LABELS[phase]}
@@ -494,7 +521,12 @@ export default function BreathworkScreen() {
             <Text
               style={[
                 styles.secondaryBtnText,
-                { color: accent },
+
+                /*
+                 * RESET is LIGHT GREY in dark mode,
+                 * accent in light mode.
+                 */
+                { color: resetColor },
               ]}
             >
               RESET
@@ -502,7 +534,7 @@ export default function BreathworkScreen() {
           </Pressable>
         </View>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -524,7 +556,8 @@ function makeStyles(C: Palette) {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      paddingHorizontal: 14,
+      paddingHorizontal: 16,
+      paddingTop: 28,
       paddingVertical: 12,
       borderBottomWidth: 1,
       borderBottomColor: C.divider,
@@ -617,8 +650,6 @@ function makeStyles(C: Palette) {
       height: RECT_SIZE,
       borderWidth: 2,
       borderRadius: RECT_RADIUS,
-      // The dot is positioned relative to this rect's inner top-left.
-      // We use absolute positioning of the dot within this container.
     },
 
     dot: {

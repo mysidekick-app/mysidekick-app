@@ -56,6 +56,15 @@ type DashboardState = {
   games: number;
 };
 
+type SidekickUpdate = {
+  id: string;
+  content: string;
+  source_module: string | null;
+  priority: number;
+  created_at: string;
+  shown_at: string | null;
+};
+
 /* =========================================================
    FONTS
 ========================================================= */
@@ -363,6 +372,34 @@ function taskOccursToday(
    SCREEN
 ========================================================= */
 
+/* =========================================================
+   ONBOARDING BODY FORMATTER
+   Turns **text** into bold text while preserving line breaks.
+   ========================================================= */
+
+function renderOnboardingBody(
+  text: string,
+  bodyStyle: any,
+  boldStyle: any,
+) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+
+  return parts.map((part, index) => {
+    const isBold =
+      part.startsWith('**') &&
+      part.endsWith('**');
+
+    return (
+      <Text
+        key={index}
+        style={isBold ? boldStyle : bodyStyle}
+      >
+        {isBold ? part.slice(2, -2) : part}
+      </Text>
+    );
+  });
+}
+
 export default function ModulesScreen() {
   const appContext = useApp() as any;
 
@@ -391,13 +428,84 @@ export default function ModulesScreen() {
   const [hasError, setHasError] =
     useState(false);
 
+  const [onboardingCompleted, setOnboardingCompleted] =
+    useState<boolean | null>(null);
+
+  const [onboardingStep, setOnboardingStep] =
+    useState(0);
+
+  const [sidekickUpdates, setSidekickUpdates] =
+    useState<SidekickUpdate[]>([]);
+
+  const [sidekickUpdateIndex, setSidekickUpdateIndex] =
+    useState(0);
+
+  const [sidekickBriefingLoading, setSidekickBriefingLoading] =
+    useState(false);
+
+  // This is true only when the briefing function explicitly says
+  // there is nothing actionable to surface right now.
+  const [sidekickNoActionableUpdate, setSidekickNoActionableUpdate] =
+    useState(false);
+
+  /* =======================================================
+     ONBOARDING
+  ======================================================= */
+
+  const onboardingSteps = [
+    {
+      title: `Welcome to Sidekick. Let's do a tour!`,
+      body:
+        'Sideick is your personal life assistant, helping you keep track of the things that matter! It brings the important parts of your life together so you can see what needs your attention.  Let me show you what Sidekick can do...',
+    },
+    {
+      title: 'To Plan & Stay Consistent',
+      body:
+        '**Planner** will help you organize what needs to get done, keep track of your tasks, and stay on top of what\'s ahead.\n\n**Habits** will help you build consistency by keeping track of the things you want to do regularly.',
+    },
+    {
+      title: 'To Manage Your Money',
+      body:
+        '**Finance** will help you keep track of your money coming in and going out, manage expenses, and stay aware of where your money is going.\n\nYou can also keep track of bills and splits so you know what you owe and what others owe you.',
+    },
+    {
+      title: 'To Keep Life Organized',
+      body:
+        '**Lists** will give you a place for the things you don\'t want to forget, e.g shopping lists, packing lists, ideas, etc...\n\n**Reminders** will help you remember the things that need your attention at the right time.\n\n**Bookmarks** keeps useful resources in one place so you can find them when you need them.',
+    },
+    {
+      title: 'To Take Care of Your Space',
+      body:
+        '**Plants** will help you keep track of your plants and when they need attention, so they can stay healthy and thriving.',
+    },
+    {
+      title: 'To Take Care of Yourself',
+      body:
+        '**Well-being** will give you space to look after your mind and yourself through journaling, mood tracking, affirmations, breathwork, reflections, and more.',
+    },
+    {
+      title: 'To Make Time for Play',
+      body:
+        '**Games** will give you a little space to have fun, challenge yourself and friends, and take a break from everything else.',
+    },
+    {
+      title: 'Talk to Your Sidekick...',
+      body:
+        'Your Sidekick is here to help you make sense of what\'s happening across your life. It can give you important updates, guidance, reminders, and instructions when they matter.\n\nYou can simply talk to it whenever you need help thinking something through.',
+    },
+    {
+      title: "You're Ready",
+      body:
+        'Everything is in one place! Your Sidekick will help you pay attention to what matters. \n\nClick let\'s go to get started.',
+    },
+  ];
   /* =======================================================
      COLORS
   ======================================================= */
 
   const C = isDark
     ? {
-        bg: '#090909',
+        bg: '#000000',
         card: '#151515',
         border: '#2A2A2A',
         text: '#F4F2EE',
@@ -412,6 +520,354 @@ export default function ModulesScreen() {
         muted: '#8F8A82',
         soft: '#F3F2EF',
       };
+
+  /* =======================================================
+     ONBOARDING STATUS
+  ======================================================= */
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadOnboardingStatus = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user || cancelled) {
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('onboarding_completed')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (error) {
+        console.log(
+          'ONBOARDING STATUS ERROR:',
+          error,
+        );
+        // Existing users are allowed straight into the app if the
+        // status cannot be read, so onboarding never blocks the app.
+        if (!cancelled) {
+          setOnboardingCompleted(true);
+        }
+        return;
+      }
+
+      if (!cancelled) {
+        const completed =
+          data?.onboarding_completed === true;
+
+        setOnboardingCompleted(completed);
+      }
+    };
+
+    loadOnboardingStatus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const completeOnboarding = async () => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (user) {
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          onboarding_completed: true,
+        })
+        .eq('user_id', user.id);
+
+      if (error) {
+        console.log(
+          'ONBOARDING COMPLETE ERROR:',
+          error,
+        );
+        return;
+      }
+    }
+
+    setOnboardingCompleted(true);
+    setOnboardingStep(0);
+  };
+
+  const goToNextOnboardingStep = () => {
+    if (
+      onboardingStep >=
+      onboardingSteps.length - 1
+    ) {
+      completeOnboarding();
+      return;
+    }
+
+    setOnboardingStep((current) => current + 1);
+  };
+
+  const goToPreviousOnboardingStep = () => {
+    setOnboardingStep((current) =>
+      Math.max(0, current - 1),
+    );
+  };
+
+  /* =======================================================
+     SIDEKICK IMPORTANT UPDATES
+  ======================================================= */
+
+  const loadSidekickUpdates = useCallback(
+    async () => {
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError || !user) {
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('sidekick_updates')
+        .select(
+          'id, content, source_module, priority, created_at, shown_at',
+        )
+        .eq('user_id', user.id)
+        .eq('day_key', todayKey)
+        .order('priority', {
+          ascending: false,
+        })
+        .order('created_at', {
+          ascending: false,
+        })
+        .limit(20);
+
+      if (error) {
+        console.log(
+          'SIDEKICK UPDATES LOAD ERROR:',
+          error,
+        );
+        return;
+      }
+
+      const updates =
+        (data ?? []) as SidekickUpdate[];
+
+      setSidekickUpdates(updates);
+      setSidekickUpdateIndex((current) =>
+        Math.min(
+          current,
+          Math.max(0, updates.length - 1),
+        ),
+      );
+    },
+    [todayKey],
+  );
+
+  const buildSidekickAppData = useCallback(
+    async (userId: string) => {
+      const [
+        plannerResult,
+        habitsResult,
+        completionsResult,
+        remindersResult,
+        listsResult,
+        financeResult,
+        bookmarksResult,
+        plantsResult,
+        wellbeingResult,
+        gamesResult,
+      ] = await Promise.all([
+        supabase
+          .from('planner_tasks')
+          .select(
+            'id, title, start_date, end_date, start_time, end_time, completed, repeat, repeat_interval',
+          )
+          .eq('user_id', userId),
+
+        supabase
+          .from('habits')
+          .select(
+            'id, name, start_date, end_date',
+          )
+          .eq('user_id', userId),
+
+        supabase
+          .from('habit_completions')
+          .select('habit_id, completed_on')
+          .eq('user_id', userId)
+          .eq('completed_on', todayKey),
+
+        supabase
+          .from('reminders')
+          .select(
+            'id, title, due_date, due_time, completed',
+          )
+          .eq('user_id', userId)
+          .eq('completed', false),
+
+        supabase
+          .from('list_items')
+          .select(
+            'id, list_id, content, completed',
+          )
+          .eq('user_id', userId)
+          .eq('completed', false),
+
+        supabase
+          .from('finance_transactions')
+          .select(
+            'id, transaction_date, amount, type, title, category',
+          )
+          .eq('user_id', userId),
+
+        supabase
+          .from('bookmarks')
+          .select(
+            'id, title, url, created_at',
+          )
+          .eq('user_id', userId),
+
+        supabase
+          .from('plants')
+          .select(
+            'id, name, last_watered_on, watering_interval_days',
+          )
+          .eq('user_id', userId),
+
+        supabase
+          .from('wellbeing_entries')
+          .select(
+            'id, module_key, entry_date',
+          )
+          .eq('user_id', userId)
+          .order('entry_date', {
+            ascending: false,
+          })
+          .limit(30),
+
+        supabase
+          .from('game_scores')
+          .select(
+            'id, game_type, score, created_at',
+          )
+          .eq('player_id', userId)
+          .order('created_at', {
+            ascending: false,
+          })
+          .limit(30),
+      ]);
+
+      return {
+        planner: plannerResult.data ?? [],
+        habits: habitsResult.data ?? [],
+        habit_completions_today:
+          completionsResult.data ?? [],
+        reminders: remindersResult.data ?? [],
+        lists: listsResult.data ?? [],
+        finance: financeResult.data ?? [],
+        bookmarks: bookmarksResult.data ?? [],
+        plants: plantsResult.data ?? [],
+        wellbeing: wellbeingResult.data ?? [],
+        games: gamesResult.data ?? [],
+      };
+    },
+    [todayKey],
+  );
+
+  const requestSidekickBriefing = useCallback(
+    async () => {
+      if (
+        onboardingCompleted !== true ||
+        sidekickBriefingLoading
+      ) {
+        return;
+      }
+
+      setSidekickBriefingLoading(true);
+
+      try {
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser();
+
+        if (userError || !user) {
+          return;
+        }
+
+        const appData =
+          await buildSidekickAppData(user.id);
+
+        const { data, error } =
+          await supabase.functions.invoke(
+            'sidekick-briefing',
+            {
+              body: {
+                appData,
+                dayKey: todayKey,
+              },
+            },
+          );
+
+        if (error) {
+          console.log(
+            'SIDEKICK BRIEFING ERROR:',
+            error,
+          );
+          return;
+        }
+
+        if (data?.update) {
+          setSidekickNoActionableUpdate(false);
+          await loadSidekickUpdates();
+        } else if (data?.reason === 'no_update') {
+          // Only this explicit response means there are genuinely
+          // no actionable Sidekick updates right now.
+          setSidekickNoActionableUpdate(true);
+        }
+      } catch (error) {
+        console.log(
+          'SIDEKICK BRIEFING EXCEPTION:',
+          error,
+        );
+      } finally {
+        setSidekickBriefingLoading(false);
+      }
+    },
+    [
+      onboardingCompleted,
+      sidekickBriefingLoading,
+      buildSidekickAppData,
+      todayKey,
+      loadSidekickUpdates,
+    ],
+  );
+
+  useEffect(() => {
+    if (onboardingCompleted !== true) {
+      return;
+    }
+
+    loadSidekickUpdates();
+    requestSidekickBriefing();
+
+    // The Edge Function enforces the 20-update daily limit.
+    // Check for a new Sidekick update every 20 minutes.
+    const interval = setInterval(
+      requestSidekickBriefing,
+      20 * 60 * 1000,
+    );
+
+    return () => clearInterval(interval);
+  }, [
+    onboardingCompleted,
+    loadSidekickUpdates,
+    requestSidekickBriefing,
+  ]);
 
   /* =======================================================
      DATE REFRESH
@@ -430,6 +886,9 @@ export default function ModulesScreen() {
         setDashboard(
           emptyDashboard(),
         );
+        setSidekickUpdates([]);
+        setSidekickUpdateIndex(0);
+        setSidekickNoActionableUpdate(false);
       }
     };
 
@@ -1337,76 +1796,214 @@ export default function ModulesScreen() {
             />
           </View>
 
-          {/* Message indicators */}
-
           <View
-            style={styles.sidekickDots}
+            style={
+              styles.onboardingProgress
+            }
           >
-            <View
-              style={[
-                styles.sidekickDot,
-                styles.sidekickDotActive,
-              ]}
-            />
-
-            <View
-              style={styles.sidekickDot}
-            />
-
-            <View
-              style={styles.sidekickDot}
-            />
+            {onboardingCompleted === false &&
+              onboardingSteps.map(
+                (_, index) => (
+                  <View
+                    key={index}
+                    style={[
+                      styles.sidekickDot,
+                      index === onboardingStep &&
+                        styles.sidekickDotActive,
+                    ]}
+                  />
+                ),
+              )}
           </View>
 
           {/* Sidekick content */}
 
-          <View
-            style={styles.sidekickContent}
-          >
-            <Text
-              style={
-                styles.sidekickGreeting
-              }
-            >
-              Good morning {displayName},
-            </Text>
+          {onboardingCompleted === false ? (
+            <>
+              <View
+                style={[
+                  styles.sidekickContent,
+                  styles.onboardingContent,
+                ]}
+              >
+                <Text
+                  style={
+                    styles.sidekickGreeting
+                  }
+                >
+                  {onboardingSteps[onboardingStep].title}
+                </Text>
 
-            <Text
-              style={
-                styles.sidekickBody
-              }
-            >
-              Your Sidekick will use
-              this space for important
-              updates, guidance,
-              reminders, and
-              instructions.
-            </Text>
-          </View>
+                <Text style={styles.sidekickBody}>
+                  {renderOnboardingBody(
+                    onboardingSteps[onboardingStep].body,
+                    styles.sidekickBody,
+                    styles.sidekickBodyBold,
+                  )}
+                </Text>
+              </View>
 
-          {/* Navigation */}
+              {/* Onboarding navigation */}
 
-          <View
-            style={
-              styles.sidekickNavigation
-            }
-          >
-            <Text
-              style={
-                styles.sidekickNavigationText
-              }
-            >
-              Previous
-            </Text>
+              <View
+                style={
+                  styles.sidekickNavigation
+                }
+              >
+                <Pressable
+                  onPress={
+                    goToPreviousOnboardingStep
+                  }
+                  disabled={onboardingStep === 0}
+                  hitSlop={8}
+                >
+                  <Text
+                    style={[
+                      styles.sidekickNavigationText,
+                      onboardingStep === 0 &&
+                        styles.sidekickNavigationDisabled,
+                    ]}
+                  >
+                    Previous
+                  </Text>
+                </Pressable>
 
-            <Text
-              style={
-                styles.sidekickNavigationText
-              }
-            >
-              Next
-            </Text>
-          </View>
+                <Pressable
+                  onPress={
+                    goToNextOnboardingStep
+                  }
+                  hitSlop={8}
+                >
+                  <Text
+                    style={
+                      styles.sidekickNavigationText
+                    }
+                  >
+                    {onboardingStep ===
+                    onboardingSteps.length - 1
+                      ? "Let's Go"
+                      : 'Next'}
+                  </Text>
+                </Pressable>
+              </View>
+            </>
+          ) : (
+            <>
+              <View
+                style={
+                  styles.sidekickContent
+                }
+              >
+                <Text
+                  style={
+                    styles.sidekickGreeting
+                  }
+                >
+                  {sidekickUpdates.length > 0
+                    ? 'Sidekick'
+                    : sidekickNoActionableUpdate
+                      ? 'You\'re on top of things...'
+                      : 'Sidekick'}
+                </Text>
+
+                <Text style={styles.sidekickBody}>
+                  {sidekickUpdates.length > 0
+                    ? sidekickUpdates[
+                        sidekickUpdateIndex
+                      ]?.content
+                    : sidekickNoActionableUpdate
+                      ? 'You\'re all caught up. Keep going, there\'s nothing that needs your attention right now.'
+                      : sidekickBriefingLoading
+                        ? 'Sidekick is checking what needs your attention...'
+                        : 'Sidekick is checking what matters right now...'}
+                </Text>
+              </View>
+
+              {sidekickUpdates.length > 0 && (
+                <View
+                  style={
+                    styles.sidekickUpdateNavigation
+                  }
+                >
+                  <Pressable
+                    onPress={() =>
+                      setSidekickUpdateIndex(
+                        (current) =>
+                          Math.max(
+                            0,
+                            current - 1,
+                          ),
+                      )
+                    }
+                    disabled={
+                      sidekickUpdateIndex === 0
+                    }
+                    hitSlop={8}
+                  >
+                    <Text
+                      style={[
+                        styles.sidekickNavigationText,
+                        sidekickUpdateIndex === 0 &&
+                          styles.sidekickNavigationDisabled,
+                      ]}
+                    >
+                      Previous
+                    </Text>
+                  </Pressable>
+
+                  <Text
+                    style={
+                      styles.sidekickUpdateCount
+                    }
+                  >
+                    {sidekickUpdateIndex + 1}/
+                    {sidekickUpdates.length}
+                  </Text>
+
+                  <Pressable
+                    onPress={() =>
+                      setSidekickUpdateIndex(
+                        (current) =>
+                          Math.min(
+                            sidekickUpdates.length - 1,
+                            current + 1,
+                          ),
+                      )
+                    }
+                    disabled={
+                      sidekickUpdateIndex >=
+                      sidekickUpdates.length - 1
+                    }
+                    hitSlop={8}
+                  >
+                    <Text
+                      style={[
+                        styles.sidekickNavigationText,
+                        sidekickUpdateIndex >=
+                          sidekickUpdates.length - 1 &&
+                          styles.sidekickNavigationDisabled,
+                      ]}
+                    >
+                      Next
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
+
+              {sidekickUpdates.length === 0 &&
+                sidekickBriefingLoading && (
+                  <ActivityIndicator
+                    size="small"
+                    color="#FFFFFF"
+                    style={
+                      styles.sidekickBriefingIndicator
+                    }
+                  />
+                )}
+            </>
+
+        )}
+
         </View>
       </View>
 
@@ -1594,7 +2191,7 @@ const styles =
 
     sidekickPlaceholder: {
       width: '100%',
-      minHeight: 190,
+      minHeight: 220,
       borderRadius: 24,
       paddingHorizontal: 32,
       paddingTop: 58,
@@ -1615,16 +2212,6 @@ const styles =
       overflow: 'hidden',
     },
 
-    sidekickDots: {
-      position: 'absolute',
-      top: 22,
-      right: 28,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'flex-end',
-      gap: 7,
-    },
-
     sidekickDot: {
       width: 11,
       height: 11,
@@ -1642,12 +2229,25 @@ const styles =
       width: '100%',
     },
 
+    onboardingProgress: {
+      position: 'absolute',
+      top: 22,
+      right: 28,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+      gap: 5,
+    },
+
+    sidekickNavigationDisabled: {
+      opacity: 0.35,
+    },
+
     sidekickGreeting: {
       color: '#FFFFFF',
       fontFamily: FONT,
       fontSize: 15,
       lineHeight: 23,
-      fontStyle: 'italic',
       marginBottom: 2,
     },
 
@@ -1656,8 +2256,41 @@ const styles =
       fontFamily: FONT,
       fontSize: 12,
       lineHeight: 19,
-      fontStyle: 'italic',
       maxWidth: '95%',
+    },
+
+    sidekickBodyBold: {
+      color: '#FFFFFF',
+      fontFamily: FONT_BOLD,
+      fontSize: 12,
+      lineHeight: 19,
+    },
+
+    onboardingContent: {
+      minHeight: 112,
+    },
+
+    sidekickUpdateNavigation: {
+      position: 'absolute',
+      left: 32,
+      right: 28,
+      bottom: 18,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+
+    sidekickUpdateCount: {
+      color: '#FFFFFF',
+      fontFamily: FONT_MED,
+      fontSize: 10,
+      opacity: 0.8,
+    },
+
+    sidekickBriefingIndicator: {
+      position: 'absolute',
+      right: 30,
+      top: 24,
     },
 
     sidekickNavigation: {
@@ -1688,7 +2321,7 @@ const styles =
     modulesContent: {
       paddingHorizontal: 16,
       paddingTop: 14,
-      paddingBottom: 36,
+      paddingBottom: 100,
     },
 
     /* =====================================================

@@ -1,6 +1,10 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 
-import { Tabs } from 'expo-router';
+import {
+  Tabs,
+  usePathname,
+  useRouter,
+} from 'expo-router';
 
 import {
   Home,
@@ -8,7 +12,13 @@ import {
   User,
 } from 'lucide-react-native';
 
-import { View, StyleSheet } from 'react-native';
+import {
+  BackHandler,
+  View,
+  Text,
+  StyleSheet,
+  Platform,
+} from 'react-native';
 
 import { useApp } from '@/components/AppProvider';
 
@@ -18,172 +28,300 @@ export default function TabsLayout() {
     isDark,
   } = useApp();
 
-  const inactiveColor = isDark ? '#8C8982' : '#A4A09A';
-  const navBackground = isDark ? '#111111' : '#FFFFFF';
-  const navBorder = isDark ? '#292929' : '#ECE9E4';
+  const pathname = usePathname();
+  const router = useRouter();
+
+  const inactiveColor = isDark
+    ? '#8C8982'
+    : '#A4A09A';
+
+  const navBackground = isDark
+    ? '#000000'
+    : '#FFFFFF';
+
+  const navBorder = isDark
+    ? '#292929'
+    : '#ECE9E4';
+
+  const screenBackground = isDark
+    ? '#000000'
+    : '#FFFFFF';
+
+  /*
+   * ============================================================
+   * SYSTEM BACK
+   * ============================================================
+   *
+   * When the user is inside a module and uses the phone's
+   * system back button / back gesture, always return to
+   * Modules Home.
+   *
+   * Existing in-app arrows are NOT affected because this
+   * only listens to the native Android BackHandler.
+   */
+  useEffect(() => {
+    if (Platform.OS !== 'android') {
+      return;
+    }
+
+    const isInsideModule =
+      pathname.startsWith('/plants') ||
+      pathname.startsWith('/planner') ||
+      pathname.startsWith('/habits') ||
+      pathname.startsWith('/bookmarks') ||
+      pathname.startsWith('/reminders') ||
+      pathname.startsWith('/modules/');
+
+    if (!isInsideModule) {
+      return;
+    }
+
+    const subscription = BackHandler.addEventListener(
+      'hardwareBackPress',
+      () => {
+        router.replace('/modules');
+        return true;
+      },
+    );
+
+    return () => {
+      subscription.remove();
+    };
+  }, [pathname, router]);
+
+  /*
+   * ============================================================
+   * UI ONLY
+   * ============================================================
+   *
+   * Determine which tab gets the selected visual treatment.
+   *
+   * Home remains selected while inside any module.
+   */
+
+  const isProfileSelected =
+    pathname === '/profile' ||
+    pathname.startsWith('/profile/');
+
+  const isModuleSelected =
+    pathname === '/modules' ||
+    pathname.startsWith('/modules/') ||
+    pathname.startsWith('/plants') ||
+    pathname.startsWith('/planner') ||
+    pathname.startsWith('/habits') ||
+    pathname.startsWith('/bookmarks') ||
+    pathname.startsWith('/reminders');
+
+  const isChatSelected =
+    !isProfileSelected &&
+    !isModuleSelected;
 
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
 
-        tabBarActiveTintColor: accentForeground,
-        tabBarInactiveTintColor: inactiveColor,
+        sceneStyle: {
+          backgroundColor:
+            screenBackground,
+        },
 
         /*
-         * Keep the navbar floating.
+         * ========================================================
+         * NAVBAR
+         * ========================================================
          *
-         * The important part is that we DO NOT change the
-         * navigator's layout behavior. This prevents the
-         * extra white/black boxes that appeared previously.
+         * This is only the visual styling of the existing
+         * Expo Router tab bar.
          */
+
         tabBarStyle: {
-          position: 'absolute',
-
-          left: 8,
-          right: 8,
-          bottom: 10,
-
-          height: 58,
-
-          backgroundColor: navBackground,
-
-          borderTopColor: navBorder,
-          borderTopWidth: 1,
-
-          borderRadius: 18,
-
-          overflow: 'visible',
-
-          paddingTop: 4,
-          paddingBottom: 4,
-
+          height: 78,
+          backgroundColor:
+            navBackground,
+          borderTopColor:
+            navBorder,
+          borderTopWidth:
+            StyleSheet.hairlineWidth,
+          paddingTop: 10,
+          paddingBottom: 10,
+          paddingHorizontal: 14,
           elevation: 8,
-
           shadowOpacity: 0.08,
           shadowRadius: 8,
-
           shadowOffset: {
             width: 0,
-            height: 3,
+            height: -2,
           },
         },
 
+        /*
+         * We display the selected label ourselves.
+         */
+
         tabBarShowLabel: false,
 
-        tabBarLabelStyle: {
-          display: 'none',
-        },
+        /*
+         * Give each item comfortable space.
+         */
 
         tabBarItemStyle: {
-          height: 54,
-
-          paddingTop: 0,
-          paddingBottom: 0,
-
-          overflow: 'visible',
+          height: 58,
+          paddingHorizontal: 8,
+          paddingVertical: 6,
         },
       }}
     >
-      {/* =====================================================
+      {/* ============================================================
           CHAT
-          ===================================================== */}
+          ============================================================ */}
 
       <Tabs.Screen
         name="index"
         options={{
           title: 'Chat',
 
-          tabBarIcon: ({ focused }) => (
+          tabBarIcon: () => (
             <View
               style={[
-                styles.iconWrapper,
-
-                focused && [
-                  styles.selectedIconWrapper,
-                  {
-                    backgroundColor: accentForeground,
-                  },
-                ],
+                styles.tab,
+                isChatSelected &&
+                  styles.selectedTab,
+                isChatSelected && {
+                  backgroundColor:
+                    accentForeground,
+                },
               ]}
             >
               <MessageCircle
-                color={focused ? '#FFFFFF' : inactiveColor}
-                size={focused ? 24 : 21}
-                strokeWidth={focused ? 2.3 : 2}
+                color={
+                  isChatSelected
+                    ? '#FFFFFF'
+                    : inactiveColor
+                }
+                size={22}
+                strokeWidth={
+                  isChatSelected
+                    ? 2.3
+                    : 2
+                }
               />
+
+              {isChatSelected && (
+                <Text
+                  style={
+                    styles.selectedText
+                  }
+                >
+                  Chat
+                </Text>
+              )}
             </View>
           ),
         }}
       />
 
-      {/* =====================================================
+      {/* ============================================================
           HOME
-          ===================================================== */}
+          ============================================================ */}
 
       <Tabs.Screen
         name="modules"
         options={{
           title: 'Home',
 
-          tabBarIcon: ({ focused }) => (
+          tabBarIcon: () => (
             <View
               style={[
-                styles.iconWrapper,
-
-                focused && [
-                  styles.selectedIconWrapper,
-                  {
-                    backgroundColor: accentForeground,
-                  },
-                ],
+                styles.tab,
+                isModuleSelected &&
+                  styles.selectedTab,
+                isModuleSelected && {
+                  backgroundColor:
+                    accentForeground,
+                },
               ]}
             >
               <Home
-                color={focused ? '#FFFFFF' : inactiveColor}
-                size={focused ? 24 : 21}
-                strokeWidth={focused ? 2.3 : 2}
+                color={
+                  isModuleSelected
+                    ? '#FFFFFF'
+                    : inactiveColor
+                }
+                size={22}
+                strokeWidth={
+                  isModuleSelected
+                    ? 2.3
+                    : 2
+                }
               />
+
+              {isModuleSelected && (
+                <Text
+                  style={
+                    styles.selectedText
+                  }
+                >
+                  Home
+                </Text>
+              )}
             </View>
           ),
         }}
       />
 
-      {/* =====================================================
+      {/* ============================================================
           PROFILE
-          ===================================================== */}
+          ============================================================ */}
 
       <Tabs.Screen
         name="profile"
         options={{
           title: 'Profile',
 
-          tabBarIcon: ({ focused }) => (
+          tabBarIcon: () => (
             <View
               style={[
-                styles.iconWrapper,
-
-                focused && [
-                  styles.selectedIconWrapper,
-                  {
-                    backgroundColor: accentForeground,
-                  },
-                ],
+                styles.tab,
+                isProfileSelected &&
+                  styles.selectedTab,
+                isProfileSelected && {
+                  backgroundColor:
+                    accentForeground,
+                },
               ]}
             >
               <User
-                color={focused ? '#FFFFFF' : inactiveColor}
-                size={focused ? 24 : 21}
-                strokeWidth={focused ? 2.3 : 2}
+                color={
+                  isProfileSelected
+                    ? '#FFFFFF'
+                    : inactiveColor
+                }
+                size={22}
+                strokeWidth={
+                  isProfileSelected
+                    ? 2.3
+                    : 2
+                }
               />
+
+              {isProfileSelected && (
+                <Text
+                  style={
+                    styles.selectedText
+                  }
+                >
+                  Profile
+                </Text>
+              )}
             </View>
           ),
         }}
       />
 
-      {/* =====================================================
+      {/* ============================================================
           HIDDEN ROUTES
-          ===================================================== */}
+          ============================================================ */}
 
       <Tabs.Screen
         name="bookmarks"
@@ -265,51 +403,48 @@ export default function TabsLayout() {
   );
 }
 
+/* ================================================================
+   NAVBAR STYLES
+   ================================================================ */
+
 const styles = StyleSheet.create({
   /*
-   * Normal unselected icon
+   * Unselected:
+   * icon only.
    */
-  iconWrapper: {
-    width: 34,
-    height: 34,
 
+  tab: {
+    minWidth: 46,
+    height: 46,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-
-    borderRadius: 17,
+    paddingHorizontal: 10,
+    borderRadius: 23,
   },
 
   /*
-   * Selected icon
-   *
-   * Keeps the raised selected-state appearance from
-   * the original navbar.
+   * Selected:
+   * icon + title inside a rounded rectangle.
    */
-  selectedIconWrapper: {
-    width: 46,
+
+  selectedTab: {
+    minWidth: 96,
     height: 46,
-
-    borderRadius: 23,
-
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 16,
+    borderRadius: 23,
+    gap: 7,
+  },
 
-    marginTop: -14,
-
-    transform: [
-      {
-        scale: 1.02,
-      },
-    ],
-
-    elevation: 5,
-
-    shadowOpacity: 0.14,
-    shadowRadius: 5,
-
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+  selectedText: {
+    color: '#FFFFFF',
+    fontFamily:
+      'Poppins-SemiBold',
+    fontSize: 13,
+    lineHeight: 18,
+    includeFontPadding: false,
   },
 });

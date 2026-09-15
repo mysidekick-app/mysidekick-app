@@ -7,10 +7,11 @@ import {
   useState,
 } from 'react';
 
-import { useColorScheme } from 'react-native';
+import { Platform, useColorScheme } from 'react-native';
 
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/components/AuthProvider';
+import { registerForPushNotificationsAsync } from '@/lib/notifications';
 
 export type ThemeMode = 'system' | 'light' | 'dark';
 
@@ -41,6 +42,7 @@ type AppSettings = {
   timezone: string;
   username: string;
   avatar_url: string | null;
+
   // Selected Sidekick sticker/avatar.
   // null means the user has not selected a Sidekick yet.
   sidekick_id: string | null;
@@ -69,6 +71,7 @@ const fallbackSettings: AppSettings = {
   timezone: 'Africa/Nairobi',
   username: '',
   avatar_url: null,
+
   // No Sidekick selected yet.
   // SidekickAvatar will use assets/sidekick-favicon.png.
   sidekick_id: null,
@@ -80,7 +83,7 @@ export const accentPalettes: Record<
 > = {
   black: {
     light: '#5A5A5A',
-    standard: '#4F4F4F',
+    standard: '#333333',
     deep: '#111111',
     wash: '#E9E9E9',
   },
@@ -167,6 +170,7 @@ export function AppProvider({
           setSettings(fallbackSettings);
           setLoading(false);
         }
+
         return;
       }
 
@@ -301,6 +305,78 @@ export function AppProvider({
   }, [user, authLoading]);
 
   /*
+   * Register the signed-in user's device for push notifications.
+   *
+   * This runs only after authentication is ready and only on
+   * native iOS/Android. The Expo push token is saved to
+   * public.push_tokens so the backend can send notifications
+   * to this specific user's device.
+   */
+  useEffect(() => {
+    if (authLoading || !user?.id) {
+      return;
+    }
+
+    const userId = user.id;
+
+    let active = true;
+
+    async function registerDevice() {
+      try {
+        // Push registration is handled by the native app.
+        if (Platform.OS === 'web') {
+          return;
+        }
+
+        const expoPushToken =
+          await registerForPushNotificationsAsync();
+
+        if (!active || !expoPushToken) {
+          return;
+        }
+
+        const { error } = await supabase
+          .from('push_tokens')
+          .upsert(
+            {
+              user_id: userId,
+              expo_push_token: expoPushToken,
+              platform: Platform.OS,
+              updated_at: new Date().toISOString(),
+            },
+            {
+              onConflict: 'user_id,expo_push_token',
+            }
+          );
+
+        if (error) {
+          console.error(
+            'Failed to save push token:',
+            error.message
+          );
+
+          return;
+        }
+
+        console.log(
+          'Push token saved successfully.'
+        );
+      } catch (error) {
+        console.error(
+          'Push notification registration failed:',
+          error
+        );
+      }
+    }
+
+    registerDevice();
+
+    return () => {
+      active = false;
+    };
+  }, [user?.id, authLoading]);
+
+  /*
    * Publish the signed-in user's online presence globally
    * so chat screens can show Active / Inactive.
    */
@@ -341,6 +417,7 @@ export function AppProvider({
       console.warn(
         'Cannot update app settings without an authenticated user.'
       );
+
       return;
     }
 
@@ -405,7 +482,10 @@ export function AppProvider({
           'Failed to update app settings:',
           updateError.message
         );
-      } else if (!updatedRows || updatedRows.length === 0) {
+      } else if (
+        !updatedRows ||
+        updatedRows.length === 0
+      ) {
         /*
          * No row exists yet, so create it.
          */
@@ -422,6 +502,91 @@ export function AppProvider({
           console.error(
             'Failed to insert app settings:',
             insertError.message
+          );
+        }
+      }
+
+      /*
+       * ---------------------------------------------------------
+       * PUBLIC SOCIAL PROFILE SYNC
+       * ---------------------------------------------------------
+       *
+       * Bio and Title are stored privately in
+       * assistant_app_settings.
+       *
+       * Friends cannot use that private settings table to display
+       * another user's profile.
+       *
+       * social_profiles is the public profile used by chat.
+       *
+       * Whenever the user changes their display name, title, or bio,
+       * keep the public social profile synchronized.
+       */
+      if (
+        changes.display_name !== undefined ||
+        changes.title !== undefined ||
+        changes.bio !== undefined
+      ) {
+        const socialProfileUpdate: {
+          display_name?: string;
+          title?: string;
+          bio?: string;
+          updated_at: string;
+        } = {
+          updated_at:
+            new Date().toISOString(),
+        };
+
+        if (
+          changes.display_name !== undefined
+        ) {
+          socialProfileUpdate.display_name =
+            next.display_name;
+        }
+
+        if (
+          changes.title !== undefined
+        ) {
+          socialProfileUpdate.title =
+            next.title;
+        }
+
+        if (
+          changes.bio !== undefined
+        ) {
+          socialProfileUpdate.bio =
+            next.bio;
+        }
+
+        const {
+          data: socialProfileRows,
+          error: socialProfileError,
+        } = await supabase
+          .from('social_profiles')
+          .update(socialProfileUpdate)
+          .eq('user_id', user.id)
+          .select('user_id');
+
+        if (socialProfileError) {
+          console.error(
+            'Failed to sync public social profile:',
+            socialProfileError.message
+          );
+        } else if (
+          !socialProfileRows ||
+          socialProfileRows.length === 0
+        ) {
+          /*
+           * We intentionally do not create a new social_profiles
+           * row here.
+           *
+           * social_profiles already exists for users who are
+           * participating in the social/chat system, and its
+           * existing creation flow controls the required `id`,
+           * username, and other fields.
+           */
+          console.warn(
+            'No social_profiles row found for user. Bio and title could not be synced.'
           );
         }
       }
@@ -527,14 +692,22 @@ export function AppProvider({
     useMemo<AppContextValue>(
       () => ({
         ...settings,
+
         loading:
           loading || authLoading,
+
         isDark,
+
         accent,
+
         accentForeground,
+
         accentWash,
+
         onAccent,
+
         text,
+
         updateSettings,
       }),
       [

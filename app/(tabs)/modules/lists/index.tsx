@@ -165,7 +165,15 @@ export default function ListsScreen() {
         <Pressable onPress={() => router.push('/modules')} style={[styles.headerBack, { backgroundColor: accentForeground }]} hitSlop={12}>
           <ChevronLeft color="#FFFFFF" size={22} strokeWidth={2.4} />
         </Pressable>
-        <Text style={[styles.headerTitle, { color: accentForeground }]}>LISTS</Text>
+        <Text
+          style={[
+            styles.headerTitle,
+            {
+              color:
+                isDark ? '#FFFFFF' : accentForeground,
+            },
+          ]}
+        >LISTS</Text>
         <Pressable
           onPress={() => setMenuOpen(true)}
           style={styles.headerBtn}
@@ -408,7 +416,7 @@ const styles = StyleSheet.create({
   deleteListText: { fontFamily: FONT_MED, fontSize: 12 },
   fab: {
     position: 'absolute',
-    bottom: 82,
+    bottom: 30,
     alignSelf: 'center',
     width: 56,
     height: 56,

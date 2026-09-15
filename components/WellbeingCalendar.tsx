@@ -133,7 +133,7 @@ export function WellbeingCalendar({
         <View>
           <Text style={styles.calendarEyebrow}>DATE</Text>
 
-          <Text style={[styles.calendarTitle, { color: accent }]}>
+          <Text style={[styles.calendarTitle, { color: isDark ? '#FFFFFF' : accent }]}>
             {monthLabel}
           </Text>
         </View>
@@ -145,13 +145,15 @@ export function WellbeingCalendar({
             hitSlop={8}
           >
             <Text
-              style={[
-                styles.viewToggleText,
-                { color: accent },
-              ]}
-            >
-              {monthView ? 'WEEK' : 'MONTH'}
-            </Text>
+  style={[
+    styles.viewToggleText,
+    {
+      color: isDark ? '#FFFFFF' : accent,
+    },
+  ]}
+>
+  {monthView ? 'WEEK' : 'MONTH'}
+</Text>
           </Pressable>
         </View>
       </Pressable>
@@ -165,7 +167,7 @@ export function WellbeingCalendar({
               hitSlop={12}
             >
               <ChevronLeft
-                color={isDark ? '#F4F2EE' : '#27241F'}
+                color={isDark ? '#FFFFFF' : '#27241F'}
                 size={20}
               />
             </Pressable>
@@ -174,7 +176,7 @@ export function WellbeingCalendar({
               <Text
                 style={[
                   styles.todayLink,
-                  { color: accent },
+                  { color: isDark ? '#FFFFFF' : accent },
                 ]}
               >
                 Today
@@ -187,7 +189,7 @@ export function WellbeingCalendar({
               hitSlop={12}
             >
               <ChevronRight
-                color={isDark ? '#F4F2EE' : '#27241F'}
+                color={isDark ? '#FFFFFF' : '#27241F'}
                 size={20}
               />
             </Pressable>
@@ -224,7 +226,7 @@ export function WellbeingCalendar({
               const isToday = value === today;
               const isFuture = value > today;
               const hasDot = hasEntry(value);
-              const dotBg = dotColor ?? accent;
+              const dotBg = isDark ? '#FFFFFF' : (dotColor ?? accent);
 
               return (
                 <View
@@ -291,7 +293,7 @@ export function WellbeingCalendar({
               hitSlop={12}
             >
               <ChevronLeft
-                color={isDark ? '#F4F2EE' : '#27241F'}
+                color={isDark ? '#FFFFFF' : '#27241F'}
                 size={20}
               />
             </Pressable>
@@ -300,7 +302,7 @@ export function WellbeingCalendar({
               <Text
                 style={[
                   styles.todayLink,
-                  { color: accent },
+                  { color: isDark ? '#FFFFFF' : accent },
                 ]}
               >
                 Today
@@ -313,7 +315,7 @@ export function WellbeingCalendar({
               hitSlop={12}
             >
               <ChevronRight
-                color={isDark ? '#F4F2EE' : '#27241F'}
+                color={isDark ? '#FFFFFF' : '#27241F'}
                 size={20}
               />
             </Pressable>
@@ -326,7 +328,7 @@ export function WellbeingCalendar({
               const isToday = value === today;
               const isFuture = value > today;
               const hasDot = hasEntry(value);
-              const dotBg = dotColor ?? accent;
+              const dotBg = isDark ? '#FFFFFF' : (dotColor ?? accent);
 
               return (
                 <Pressable
@@ -402,7 +404,7 @@ export function WellbeingCalendar({
 function makeStyles(isDark: boolean) {
   return StyleSheet.create({
     wrapper: {
-      backgroundColor: isDark ? '#151515' : '#FFFFFF',
+      backgroundColor: isDark ? '#000000' : '#FFFFFF',
       borderRadius: 18,
       borderWidth: 1,
       borderColor: isDark ? '#2A2A2A' : '#ECE9E4',
@@ -419,7 +421,7 @@ function makeStyles(isDark: boolean) {
 
     calendarEyebrow: {
       fontFamily: 'Poppins-Bold',
-      color: isDark ? '#AAA59D' : '#8F8A82',
+      color: isDark ? '#FFFFFF' : '#8F8A82',
       fontSize: 10,
       letterSpacing: 1.2,
     },
@@ -463,7 +465,7 @@ function makeStyles(isDark: boolean) {
       borderRadius: 18,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: isDark ? '#1E1E1E' : '#F5F3EF',
+      backgroundColor: isDark ? '#111111' : '#F5F3EF',
     },
 
     todayLink: {
@@ -490,19 +492,19 @@ function makeStyles(isDark: boolean) {
     },
 
     dayLabel: {
-      color: isDark ? '#AAA59D' : '#8F8A82',
+      color: isDark ? '#FFFFFF' : '#8F8A82',
       fontFamily: 'Poppins-Medium',
       fontSize: 9,
     },
 
     dayNumber: {
-      color: isDark ? '#F4F2EE' : '#27241F',
+      color: isDark ? '#FFFFFF' : '#27241F',
       fontFamily: 'Poppins-SemiBold',
       fontSize: 15,
     },
 
     futureText: {
-      color: isDark ? '#555' : '#C8C5BE',
+      color: isDark ? '#777777' : '#C8C5BE',
     },
 
     selectedText: {
@@ -541,7 +543,7 @@ function makeStyles(isDark: boolean) {
       textAlign: 'center',
       fontFamily: 'Poppins-Medium',
       fontSize: 9,
-      color: isDark ? '#AAA59D' : '#8F8A82',
+      color: isDark ? '#FFFFFF' : '#8F8A82',
       marginBottom: 8,
     },
 
@@ -564,7 +566,7 @@ function makeStyles(isDark: boolean) {
     },
 
     monthDayNumber: {
-      color: isDark ? '#F4F2EE' : '#27241F',
+      color: isDark ? '#FFFFFF' : '#27241F',
       fontFamily: 'Poppins-Medium',
       fontSize: 13,
     },

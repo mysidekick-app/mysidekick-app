@@ -12,6 +12,8 @@ import {
   View,
 } from 'react-native';
 
+import { SafeAreaView } from 'react-native-safe-area-context';
+
 import { router, useLocalSearchParams } from 'expo-router';
 import { ChevronLeft, MoreVertical, RefreshCw } from 'lucide-react-native';
 
@@ -561,21 +563,18 @@ export default function WellbeingEntryScreen() {
     router.push('/(tabs)/profile');
   }, []);
 
-  /* ---------------------------------------------------------------- */
+  /* -------------------------------------------------------------- */
   /* Render                                                           */
-  /* ---------------------------------------------------------------- */
+  /* -------------------------------------------------------------- */
 
   return (
-    <View style={styles.safe}>
-
+    <SafeAreaView
+      style={styles.safe}
+      edges={['top', 'bottom']}
+    >
       {/* Header */}
 
-      <View
-        style={[
-          styles.header,
-          { paddingTop: 28 },
-        ]}
-      >
+      <View style={styles.header}>
         <Pressable
           onPress={() => router.back()}
           style={[
@@ -653,13 +652,16 @@ export default function WellbeingEntryScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-
           {/* Date */}
 
           <Text
             style={[
               styles.dateLabel,
-              { color: accent },
+              {
+                color: isDark
+                  ? '#FFFFFF'
+                  : accent,
+              },
             ]}
           >
             {prettyDateLabel(selectedDate)}
@@ -684,8 +686,9 @@ export default function WellbeingEntryScreen() {
               <Text
                 style={styles.futureText}
               >
-                You can only write for today or earlier.
-                Pick a past date to continue.
+                You can only write for today or
+                earlier. Pick a past date to
+                continue.
               </Text>
             </View>
           ) : null}
@@ -708,7 +711,6 @@ export default function WellbeingEntryScreen() {
               </Text>
             </View>
           ) : error ? (
-
             /* Error */
 
             <View
@@ -742,9 +744,7 @@ export default function WellbeingEntryScreen() {
                 </Text>
               </Pressable>
             </View>
-
           ) : (
-
             /* Editor */
 
             <>
@@ -755,7 +755,6 @@ export default function WellbeingEntryScreen() {
                 <View
                   style={styles.promptCard}
                 >
-
                   {/* Refresh prompt button */}
 
                   <Pressable
@@ -829,7 +828,6 @@ export default function WellbeingEntryScreen() {
                   </Text>
                 </Pressable>
               ) : (
-
                 /* New/editing entry */
 
                 <View
@@ -928,7 +926,7 @@ export default function WellbeingEntryScreen() {
           )}
         </ScrollView>
       </KeyboardAvoidingView>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -949,7 +947,8 @@ function makeStyles(C: Palette) {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      paddingHorizontal: 14,
+      paddingHorizontal: 16,
+      paddingTop: 28,
       paddingVertical: 12,
       borderBottomWidth: 1,
       borderBottomColor: C.divider,

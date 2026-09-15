@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
+  KeyboardAvoidingView,
   Modal,
   Pressable,
   ScrollView,
@@ -11,6 +12,7 @@ import {
 } from 'react-native';
 
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Platform } from 'react-native';
 
 import {
   ChevronLeft,
@@ -627,7 +629,8 @@ export default function PlantsScreen() {
           style={[
             styles.headerTitle,
             {
-              color: accentForeground,
+              color:
+                isDark ? '#FFFFFF' : accentForeground,
             },
           ]}
         >
@@ -765,15 +768,21 @@ export default function PlantsScreen() {
                 prettyDue(plant);
 
               return (
-                <View
+                <Pressable
                   key={plant.id}
-                  style={[
+                  onPress={() =>
+                    setDetailOpen(plant)
+                  }
+                  style={({ pressed }) => [
                     styles.card,
                     {
                       backgroundColor:
                         C.card,
                       borderColor:
                         C.border,
+                    },
+                    pressed && {
+                      opacity: 0.7,
                     },
                   ]}
                 >
@@ -803,9 +812,10 @@ export default function PlantsScreen() {
                     {/* EDIT PEN */}
 
                     <Pressable
-                      onPress={() =>
-                        openEdit(plant)
-                      }
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        openEdit(plant);
+                      }}
                       hitSlop={12}
                       style={({ pressed }) => [
                         styles.editPenButton,
@@ -824,17 +834,7 @@ export default function PlantsScreen() {
 
                   {/* PLANT NAME */}
 
-                  <Pressable
-                    onPress={() =>
-                      setDetailOpen(plant)
-                    }
-                    style={({ pressed }) => [
-                      styles.cardBodyPressable,
-                      pressed && {
-                        opacity: 0.7,
-                      },
-                    ]}
-                  >
+                  <View style={styles.cardBodyPressable}>
                     <Text
                       style={[
                         styles.plantName,
@@ -953,8 +953,8 @@ export default function PlantsScreen() {
                         d cycle
                       </Text>
                     </View>
-                  </Pressable>
-                </View>
+                  </View>
+                </Pressable>
               );
             })}
           </View>
@@ -994,6 +994,10 @@ export default function PlantsScreen() {
         }
       >
         <View style={styles.modalShade}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.keyboardModal}
+          >
           <View
             style={[
               styles.modalCard,
@@ -1352,6 +1356,7 @@ export default function PlantsScreen() {
               </Pressable>
             </View>
           </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
 
@@ -1912,7 +1917,6 @@ const styles = StyleSheet.create({
 
   content: {
     padding: 16,
-    paddingBottom: 100,
   },
 
   error: {
@@ -2034,7 +2038,7 @@ const styles = StyleSheet.create({
 
   fab: {
     position: 'absolute',
-    bottom: 82,
+    bottom: 30,
     alignSelf: 'center',
     width: 56,
     height: 56,
@@ -2055,11 +2059,19 @@ const styles = StyleSheet.create({
       'rgba(0,0,0,0.45)',
   },
 
+  keyboardModal: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+
   modalCard: {
+    width: '100%',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 22,
-    paddingBottom: 34,
+    paddingBottom: 18,
+    height: '88%',
     maxHeight: '92%',
   },
 

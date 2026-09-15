@@ -236,17 +236,6 @@ const dateIsAfter = (
   b: string,
 ) => a > b;
 
-/*
- * A task is considered overnight when its
- * end time is earlier than or equal to its
- * start time.
- *
- * Example:
- * 21:00 → 05:00
- *
- * becomes:
- * 21:00 → 29:00
- */
 const getTaskDurationMinutes = (
   task: PlannerTask,
 ) => {
@@ -267,38 +256,7 @@ const getTaskDurationMinutes = (
     return 60;
   }
 
-  if (end <= start) {
-    return (
-      end +
-      1440 -
-      start
-    );
-  }
-
-  return end - start;
-};
-
-const isOvernightTask = (
-  task: PlannerTask,
-) => {
-  const start =
-    timeToMinutes(
-      task.start_time,
-    );
-
-  const end =
-    timeToMinutes(
-      task.end_time,
-    );
-
-  if (
-    start === null ||
-    end === null
-  ) {
-    return false;
-  }
-
-  return end <= start;
+  return Math.max(0, end - start);
 };
 
 /*
@@ -507,24 +465,6 @@ const getTaskIntervalsForDate = (
       return segments;
     }
 
-    /*
-     * Overnight continuation on
-     * the following day.
-     */
-    if (
-      isOvernightTask(task) &&
-      date ===
-        addDays(
-          task.start_date,
-          1,
-        )
-    ) {
-      segments.push({
-        start: 0,
-        end,
-      });
-    }
-
     return segments;
   }
 
@@ -613,20 +553,6 @@ const getTaskCalendarDates = (
       );
     }
 
-    /*
-     * Overnight continuation.
-     */
-    if (
-      isOvernightTask(task)
-    ) {
-      result.add(
-        addDays(
-          task.start_date,
-          1,
-        ),
-      );
-    }
-
     return result;
   }
 
@@ -662,17 +588,6 @@ const getTaskCalendarDates = (
       )
     ) {
       result.add(date);
-
-      if (
-        isOvernightTask(task)
-      ) {
-        result.add(
-          addDays(
-            date,
-            1,
-          ),
-        );
-      }
     }
 
     date = addDays(
@@ -1253,19 +1168,18 @@ export default function PlannerScreen() {
           endTime,
         );
 
-      const overnight =
+      if (
         startMinutes !== null &&
         endMinutes !== null &&
-        endMinutes <=
-          startMinutes;
+        endMinutes < startMinutes
+      ) {
+        setError(
+          'End time cannot be before start time.',
+        );
+        return;
+      }
 
-      const endDate =
-        overnight
-          ? addDays(
-              startDate,
-              1,
-            )
-          : startDate;
+      const endDate = startDate;
 
       const dbRepeat:
         | 'none'
@@ -2021,7 +1935,7 @@ export default function PlannerScreen() {
             styles.headerTitle,
             {
               color:
-                accentForeground,
+                isDark ? '#FFFFFF' : accentForeground,
             },
           ]}
         >
@@ -2689,9 +2603,22 @@ export default function PlannerScreen() {
                     value={
                       startTime
                     }
-                    onChange={
-                      setStartTime
-                    }
+                    onChange={(nextStartTime) => {
+                      const nextStartMinutes =
+                        timeToMinutes(nextStartTime);
+                      const currentEndMinutes =
+                        timeToMinutes(endTime);
+
+                      setStartTime(nextStartTime);
+
+                      if (
+                        nextStartMinutes !== null &&
+                        currentEndMinutes !== null &&
+                        currentEndMinutes < nextStartMinutes
+                      ) {
+                        setEndTime(nextStartTime);
+                      }
+                    }}
                     label="Start time"
                     accent={
                       accentForeground
@@ -2714,9 +2641,26 @@ export default function PlannerScreen() {
                     value={
                       endTime
                     }
-                    onChange={
-                      setEndTime
-                    }
+                    onChange={(nextEndTime) => {
+                      const nextEndMinutes =
+                        timeToMinutes(nextEndTime);
+                      const currentStartMinutes =
+                        timeToMinutes(startTime);
+
+                      if (
+                        nextEndMinutes !== null &&
+                        currentStartMinutes !== null &&
+                        nextEndMinutes < currentStartMinutes
+                      ) {
+                        setError(
+                          'End time cannot be before start time.',
+                        );
+                        return;
+                      }
+
+                      setError(null);
+                      setEndTime(nextEndTime);
+                    }}
                     label="End time"
                     accent={
                       accentForeground
@@ -4706,7 +4650,7 @@ const styles =
 
     fab: {
       position: 'absolute',
-      bottom: 82,
+      bottom: 30,
       alignSelf: 'center',
       width: 56,
       height: 56,

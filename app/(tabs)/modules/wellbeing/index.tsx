@@ -16,13 +16,13 @@ import {
   ActivityIndicator,
   Modal,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useApp } from '@/components/AppProvider';
 import { supabase } from '@/lib/supabase';
@@ -301,11 +301,19 @@ export default function WellbeingDashboard() {
   return (
     <SafeAreaView style={styles.safe}>
       {/* Header */}
-      <View style={[styles.header, { paddingTop: 28 }]}>
+      <View style={styles.header}>
         <Pressable onPress={() => router.push('/modules')} style={[styles.headerBtn, { backgroundColor: accent }]} hitSlop={12}>
           <ChevronLeft color="#FFFFFF" size={24} />
         </Pressable>
-        <Text style={[styles.headerTitle, { color: accent }]}>WELL-BEING</Text>
+        <Text
+          style={[
+            styles.headerTitle,
+            {
+              color:
+                isDark ? '#FFFFFF' : accentForeground,
+            },
+          ]}
+        >WELL-BEING</Text>
         <Pressable
           onPress={() => setMenuOpen(true)}
           style={styles.headerBtn}
@@ -429,6 +437,7 @@ function makeStyles(C: Palette) {
       alignItems: 'center',
       justifyContent: 'space-between',
       paddingHorizontal: 16,
+      paddingTop: 28,
       paddingVertical: 12,
       borderBottomWidth: 1,
       borderBottomColor: C.divider,
@@ -622,6 +631,7 @@ function makeStyles(C: Palette) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 12,
+      paddingTop: 28,
       paddingVertical: 12,
       borderBottomWidth: 1,
       borderBottomColor: C.divider,

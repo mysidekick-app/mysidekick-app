@@ -38,6 +38,7 @@ const COLORS = {
 
 const MIN_USERNAME_LENGTH = 5;
 const MAX_USERNAME_LENGTH = 20;
+const MIN_PASSWORD_LENGTH = 6;
 
 export default function SignUpScreen() {
   const { signUp } = useAuth();
@@ -175,6 +176,28 @@ export default function SignUpScreen() {
     }
   };
 
+  // Password requirements
+  const passwordHasLetter = /[A-Za-z]/.test(password);
+  const passwordHasNumber = /[0-9]/.test(password);
+  const passwordHasSpecialCharacter = /[^A-Za-z0-9]/.test(password);
+
+  const passwordLengthValid =
+    password.length >= MIN_PASSWORD_LENGTH;
+
+  const passwordValid =
+    passwordLengthValid &&
+    passwordHasLetter &&
+    passwordHasNumber &&
+    passwordHasSpecialCharacter;
+
+  const handlePasswordChange = (value: string) => {
+    setPassword(value);
+
+    if (error) {
+      setError(null);
+    }
+  };
+
   const handleSignUp = async () => {
     setError(null);
 
@@ -221,13 +244,38 @@ export default function SignUpScreen() {
       return;
     }
 
-    if (!cleanEmail || !password) {
-      setError('Please enter your email and password.');
+    if (!cleanEmail) {
+      setError('Please enter your email.');
       return;
     }
 
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters.');
+    // Final password validation before creating the account.
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      setError(
+        `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`
+      );
+      return;
+    }
+
+    if (!passwordHasLetter) {
+      setError('Password must contain at least 1 letter.');
+      return;
+    }
+
+    if (!passwordHasNumber) {
+      setError('Password must contain at least 1 number.');
+      return;
+    }
+
+    if (!passwordHasSpecialCharacter) {
+      setError(
+        'Password must contain at least 1 special character.'
+      );
+      return;
+    }
+
+    if (!passwordValid) {
+      setError('Please meet all password requirements.');
       return;
     }
 
@@ -263,6 +311,7 @@ export default function SignUpScreen() {
   };
 
   const usernameLength = username.length;
+
   const usernameLengthValid =
     usernameLength >= MIN_USERNAME_LENGTH &&
     usernameLength <= MAX_USERNAME_LENGTH;
@@ -277,7 +326,10 @@ export default function SignUpScreen() {
     !submitting &&
     !usernameChecking &&
     usernameAvailable === true &&
-    usernameValid;
+    usernameValid &&
+    passwordValid &&
+    !!fullName.trim() &&
+    !!email.trim();
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -301,6 +353,7 @@ export default function SignUpScreen() {
 
             <View style={styles.heading}>
               <Text style={styles.title}>Create your account</Text>
+
               <Text style={styles.subtitle}>
                 A little sidekick for everyday life
               </Text>
@@ -313,6 +366,8 @@ export default function SignUpScreen() {
             ) : null}
 
             <View style={styles.form}>
+              {/* FULL NAME */}
+
               <View style={styles.field}>
                 <Text style={styles.label}>Full Name</Text>
 
@@ -320,7 +375,10 @@ export default function SignUpScreen() {
                   value={fullName}
                   onChangeText={(value) => {
                     setFullName(value);
-                    if (error) setError(null);
+
+                    if (error) {
+                      setError(null);
+                    }
                   }}
                   placeholder="John Doe"
                   placeholderTextColor={COLORS.placeholder}
@@ -330,6 +388,8 @@ export default function SignUpScreen() {
                   selectionColor={COLORS.text}
                 />
               </View>
+
+              {/* USERNAME */}
 
               <View style={styles.field}>
                 <View style={styles.labelRow}>
@@ -360,8 +420,10 @@ export default function SignUpScreen() {
                     style={[
                       styles.input,
                       styles.usernameInput,
-                      usernameAvailable === true && styles.inputSuccess,
-                      usernameAvailable === false && styles.inputError,
+                      usernameAvailable === true &&
+                        styles.inputSuccess,
+                      usernameAvailable === false &&
+                        styles.inputError,
                     ]}
                     selectionColor={COLORS.text}
                   />
@@ -394,8 +456,7 @@ export default function SignUpScreen() {
                   <Text
                     style={[
                       styles.usernameHint,
-                      usernameAvailable === false &&
-                        styles.usernameError,
+                      styles.usernameError,
                     ]}
                   >
                     {usernameError}
@@ -410,12 +471,21 @@ export default function SignUpScreen() {
                     Username available
                   </Text>
                 ) : (
-                  <Text style={styles.usernameHint}>
-                    5–20 characters. Lowercase letters, numbers, underscores
-                    and dots between letters.
+                  <Text
+                    style={[
+                      styles.usernameHint,
+                      usernameLength > 0 &&
+                        usernameLength < MIN_USERNAME_LENGTH &&
+                        styles.usernameRequirement,
+                    ]}
+                  >
+                    5–20 characters. Lowercase letters, numbers,
+                    underscores and dots between letters.
                   </Text>
                 )}
               </View>
+
+              {/* EMAIL */}
 
               <View style={styles.field}>
                 <Text style={styles.label}>Email</Text>
@@ -424,7 +494,10 @@ export default function SignUpScreen() {
                   value={email}
                   onChangeText={(value) => {
                     setEmail(value);
-                    if (error) setError(null);
+
+                    if (error) {
+                      setError(null);
+                    }
                   }}
                   autoCapitalize="none"
                   autoCorrect={false}
@@ -437,21 +510,36 @@ export default function SignUpScreen() {
                 />
               </View>
 
+              {/* PASSWORD */}
+
               <View style={styles.field}>
-                <Text style={styles.label}>Password</Text>
+                <View style={styles.labelRow}>
+                  <Text style={styles.label}>Password</Text>
+
+                  <Text
+                    style={[
+                      styles.counter,
+                      passwordValid && styles.counterValid,
+                    ]}
+                  >
+                    {password.length}
+                  </Text>
+                </View>
 
                 <View style={styles.passwordInputWrap}>
                   <TextInput
                     value={password}
-                    onChangeText={(value) => {
-                      setPassword(value);
-                      if (error) setError(null);
-                    }}
+                    onChangeText={handlePasswordChange}
                     secureTextEntry={!showPassword}
                     autoComplete="new-password"
-                    placeholder="At least 6 characters"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    placeholder="Create password"
                     placeholderTextColor={COLORS.placeholder}
-                    style={[styles.input, styles.passwordInput]}
+                    style={[
+                      styles.input,
+                      styles.passwordInput,
+                    ]}
                     selectionColor={COLORS.text}
                   />
 
@@ -463,7 +551,9 @@ export default function SignUpScreen() {
                     hitSlop={8}
                     accessibilityRole="button"
                     accessibilityLabel={
-                      showPassword ? 'Hide password' : 'Show password'
+                      showPassword
+                        ? 'Hide password'
+                        : 'Show password'
                     }
                   >
                     {showPassword ? (
@@ -481,15 +571,42 @@ export default function SignUpScreen() {
                     )}
                   </Pressable>
                 </View>
+
+                <View style={styles.passwordRequirements}>
+                  <PasswordRequirement
+                    met={passwordLengthValid}
+                    text="At least 6 characters"
+                  />
+
+                  <PasswordRequirement
+                    met={passwordHasLetter}
+                    text="At least 1 letter"
+                  />
+
+                  <PasswordRequirement
+                    met={passwordHasNumber}
+                    text="At least 1 number"
+                  />
+
+                  <PasswordRequirement
+                    met={passwordHasSpecialCharacter}
+                    text="At least 1 special character"
+                  />
+                </View>
               </View>
+
+              {/* SIGN UP */}
 
               <Pressable
                 onPress={handleSignUp}
                 disabled={!canSubmit}
                 style={({ pressed }) => [
                   styles.primaryButton,
-                  pressed && canSubmit && styles.buttonPressed,
-                  !canSubmit && styles.buttonDisabled,
+                  pressed &&
+                    canSubmit &&
+                    styles.buttonPressed,
+                  !canSubmit &&
+                    styles.buttonDisabled,
                 ]}
               >
                 <Text style={styles.primaryButtonText}>
@@ -509,7 +626,9 @@ export default function SignUpScreen() {
 
               <Link href="/login" asChild>
                 <Pressable hitSlop={8}>
-                  <Text style={styles.link}>Sign In</Text>
+                  <Text style={styles.link}>
+                    Sign In
+                  </Text>
                 </Pressable>
               </Link>
             </View>
@@ -517,6 +636,41 @@ export default function SignUpScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
+  );
+}
+
+function PasswordRequirement({
+  met,
+  text,
+}: {
+  met: boolean;
+  text: string;
+}) {
+  return (
+    <View style={styles.passwordRequirementRow}>
+      {met ? (
+        <Check
+          size={14}
+          color={COLORS.success}
+          strokeWidth={3}
+        />
+      ) : (
+        <X
+          size={14}
+          color={COLORS.error}
+          strokeWidth={2.5}
+        />
+      )}
+
+      <Text
+        style={[
+          styles.passwordRequirementText,
+          met && styles.passwordRequirementTextMet,
+        ]}
+      >
+        {text}
+      </Text>
+    </View>
   );
 }
 
@@ -697,12 +851,40 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
 
+  usernameRequirement: {
+    color: COLORS.error,
+  },
+
   usernameSuccess: {
     color: COLORS.success,
   },
 
   usernameError: {
     color: COLORS.error,
+  },
+
+  passwordRequirements: {
+    marginTop: 8,
+    marginHorizontal: 3,
+    gap: 4,
+  },
+
+  passwordRequirementRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 18,
+  },
+
+  passwordRequirementText: {
+    marginLeft: 7,
+    color: COLORS.error,
+    fontFamily: 'Poppins-Regular',
+    fontSize: 10.5,
+    lineHeight: 16,
+  },
+
+  passwordRequirementTextMet: {
+    color: COLORS.success,
   },
 
   primaryButton: {

@@ -115,7 +115,18 @@ export default function DebtScreen() {
 
         <View style={[styles.summaryCard, isDark && styles.cardDark]}>
           <Text style={[styles.summaryLabel, isDark && styles.darkMuted]}>Total debt</Text>
-          <Text style={[styles.summaryValue, { color: accentForeground }]}>{fmt(total)}</Text>
+          <Text
+  style={[
+    styles.summaryValue,
+    {
+      color: isDark
+        ? '#FFFFFF'
+        : accentForeground,
+    },
+  ]}
+>
+  {fmt(total)}
+</Text>
         </View>
 
         {loading ? <Text style={[styles.emptyText, isDark && styles.darkMuted]}>Loading...</Text> : debts.length === 0 ? (

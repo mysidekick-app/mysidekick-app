@@ -473,15 +473,17 @@ export default function SavingsScreen() {
           </Text>
 
           <Text
-            style={[
-              styles.summaryValue,
-              {
-                color: accentForeground,
-              },
-            ]}
-          >
-            {fmt(totalSaved)}
-          </Text>
+  style={[
+    styles.summaryValue,
+    {
+      color: isDark
+        ? '#FFFFFF'
+        : accentForeground,
+    },
+  ]}
+>
+  {fmt(totalSaved)}
+</Text>
         </View>
 
         {/* Loading */}

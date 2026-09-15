@@ -569,7 +569,7 @@ export default function LeaderboardScreen() {
             styles.headerTitle,
             {
               color:
-                colors.accent,
+                isDark ? '#FFFFFF' : accentForeground,
             },
           ]}
         >

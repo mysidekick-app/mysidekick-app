@@ -772,10 +772,13 @@ export default function HabitsScreen() {
         <Text
           style={[
             styles.headerTitle,
-            isDark && styles.darkText,
+            {
+              color:
+                isDark ? '#FFFFFF' : accentForeground,
+            },
           ]}
         >
-          Habits
+          HABITS
         </Text>
 
         <Pressable
@@ -868,8 +871,9 @@ export default function HabitsScreen() {
               style={[
                 styles.progressCount,
                 {
-                  color:
-                    accentForeground,
+                  color: isDark
+                    ? '#FFFFFF'
+                    : accentForeground,
                 },
               ]}
             >
@@ -897,7 +901,9 @@ export default function HabitsScreen() {
                       : 0
                   }%`,
                   backgroundColor:
-                    accentForeground,
+                    isDark
+                      ? '#000000'
+                      : accentForeground,
                 },
               ]}
             />
@@ -1028,7 +1034,7 @@ export default function HabitsScreen() {
                         style={[
                           styles.habitMeta,
                           isDark &&
-                            styles.darkMuted,
+                            styles.darkText,
                         ]}
                       >
                         {habit.category}
@@ -1055,10 +1061,10 @@ export default function HabitsScreen() {
                     >
                       <Flame
                         color={
-                          done
+                          isDark
+                            ? '#FFFFFF'
+                            : done
                             ? accentForeground
-                            : isDark
-                            ? '#555'
                             : '#C8C5BE'
                         }
                         size={14}
@@ -1068,10 +1074,10 @@ export default function HabitsScreen() {
                         style={[
                           styles.streakText,
                           {
-                            color: done
+                            color: isDark
+                              ? '#FFFFFF'
+                              : done
                               ? accentForeground
-                              : isDark
-                              ? '#AAA59D'
                               : '#89857D',
                           },
                         ]}
@@ -1553,7 +1559,7 @@ const styles = StyleSheet.create({
   },
 
   trackDark: {
-    backgroundColor: '#222',
+    backgroundColor: '#FFFFFF',
   },
 
   progressFill: {
@@ -1655,7 +1661,7 @@ const styles = StyleSheet.create({
 
   fab: {
     position: 'absolute',
-    bottom: 82,
+    bottom: 30,
     alignSelf: 'center',
     width: 56,
     height: 56,

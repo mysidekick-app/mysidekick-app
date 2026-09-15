@@ -1,71 +1,81 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+
 import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Image,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   Pressable,
   SafeAreaView,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
-  Image,
-  Linking,
 } from 'react-native';
-import * as DocumentPicker from 'expo-document-picker';
+
 import { router, useLocalSearchParams } from 'expo-router';
 import { Audio } from 'expo-av';
+import * as DocumentPicker from 'expo-document-picker';
+
 import {
+  BarChart3,
+  Calendar,
   ChevronLeft,
-  MoreVertical,
-  Paperclip,
-  Search,
-  Send,
-  Shield,
-  UserPlus,
-  X,
-  File,
+  FileText,
   Image as ImageIcon,
   Mic,
+  MoreVertical,
   Pause,
+  Paperclip,
   Play,
-  Tag,
+  Send,
+  Square,
+  X,
 } from 'lucide-react-native';
+
 import { useApp } from '@/components/AppProvider';
 import { supabase } from '@/lib/supabase';
-import { ensureGroupConversation, loadChatMessages, sendChatMessage } from '../chatHelpers';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+import {
+  deleteConversationForUser,
+  ensureDirectConversation,
+  loadChatMessages,
+  markConversationRead,
+  sendChatMessage,
+} from '../chatHelpers';
 
-type Group = {
-  id: string;
-  name: string;
-  description: string;
-};
+/*
+ * Poppins
+ *
+ * These names match the font aliases registered in app/_layout.tsx.
+ */
+const FONT = 'Poppins-Regular';
+const FONT_MED = 'Poppins-Medium';
+const FONT_SEMI = 'Poppins-SemiBold';
+const FONT_BOLD = 'Poppins-Bold';
+const FONT_EXTRA_BOLD = 'Poppins-ExtraBold';
 
-type Member = {
+type Profile = {
   user_id: string;
-  profile_id: string;
-  role: 'member' | 'admin' | 'owner';
   display_name: string;
   username: string;
+  bio?: string | null;
+  badge?: string | null;
+  avatar_url?: string | null;
   title?: string | null;
   tag?: string | null;
   profile_title?: string | null;
-};
+} | null;
 
-type Friend = {
-  id: string;
-  display_name: string;
-  username: string;
-  title?: string | null;
-  tag?: string | null;
-  profile_title?: string | null;
-};
+type AttachmentType =
+  | 'image'
+  | 'video'
+  | 'audio'
+  | 'document';
 
 type Message = {
   id: string;
@@ -74,26 +84,258 @@ type Message = {
   content: string;
   created_at: string;
   attachment_url?: string | null;
+  attachment_type?: AttachmentType | null;
   attachment_name?: string | null;
-  attachment_type?: string | null;
 };
 
-type MenuAction = 'clear' | 'delete' | 'exit' | 'edit' | 'tag';
+const SYSTEM_CHAT_TITLES: Record<string, string> = {
+  sidekick: 'Sidekick',
+};
 
-const FONT = 'Poppins-Regular';
-const FONT_MED = 'Poppins-Medium';
-const FONT_SEMI = 'Poppins-SemiBold';
-const FONT_BOLD = 'Poppins-Bold';
+function getLocalDateKey(value: string): string {
+  const date = new Date(value);
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
+}
 
-const ATTACHMENT_BUCKET = 'chat-attachments';
+function formatMessageDateLabel(value: string): string {
+  const date = new Date(value);
+  const now = new Date();
 
-// ─── Component ───────────────────────────────────────────────────────────────
+  const todayStart = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  );
+  const messageStart = new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+  );
 
-export default function GroupScreen() {
-  const { id: groupId } = useLocalSearchParams<{ id: string }>();
+  const dayDifference = Math.round(
+    (todayStart.getTime() - messageStart.getTime()) /
+      (24 * 60 * 60 * 1000),
+  );
+
+  if (dayDifference === 0) {
+    return 'Today';
+  }
+
+  if (dayDifference === 1) {
+    return 'Yesterday';
+  }
+
+  if (dayDifference >= 2 && dayDifference <= 6) {
+    return date.toLocaleDateString([], {
+      weekday: 'long',
+    });
+  }
+
+  return date.toLocaleDateString([], {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+type DirectConversationResult = {
+  id: string | null;
+  error: any;
+};
+
+/**
+ * Find a direct conversation that the current user already belongs to.
+ * This is intentionally lookup-only: opening a deleted contact must not
+ * recreate the chat and put it back in the chat list.
+ */
+async function findExistingDirectConversation(
+  myUserId: string,
+  otherUserId: string,
+): Promise<DirectConversationResult> {
+  const { data: myMemberships, error: myMembershipError } =
+    await supabase
+      .from('chat_conversation_members')
+      .select('conversation_id')
+      .eq('user_id', myUserId);
+
+  if (myMembershipError) {
+    return {
+      id: null,
+      error: myMembershipError,
+    };
+  }
+
+  const candidateIds = [
+    ...new Set(
+      (myMemberships ?? [])
+        .map((row: any) => row.conversation_id)
+        .filter(Boolean),
+    ),
+  ];
+
+  if (candidateIds.length === 0) {
+    return { id: null, error: null };
+  }
+
+  const { data: directConversations, error: directError } =
+    await supabase
+      .from('chat_conversations')
+      .select('id')
+      .eq('type', 'direct')
+      .in('id', candidateIds);
+
+  if (directError) {
+    return {
+      id: null,
+      error: directError,
+    };
+  }
+
+  const directIds = (directConversations ?? []).map(
+    (row: any) => row.id,
+  );
+
+  if (directIds.length === 0) {
+    return { id: null, error: null };
+  }
+
+  const { data: otherMemberships, error: otherMembershipError } =
+    await supabase
+      .from('chat_conversation_members')
+      .select('conversation_id')
+      .in('conversation_id', directIds)
+      .eq('user_id', otherUserId);
+
+  if (otherMembershipError) {
+    return {
+      id: null,
+      error: otherMembershipError,
+    };
+  }
+
+  const existing = (otherMemberships ?? []).find((row: any) =>
+    directIds.includes(row.conversation_id),
+  );
+
+  return {
+    id: existing?.conversation_id ?? null,
+    error: null,
+  };
+}
+
+/**
+ * Find an existing direct chat first. When the user is intentionally
+ * sending a message to someone who was previously deleted from the chat
+ * list, create a fresh direct conversation only at send time.
+ *
+ * The normal RPC remains the first choice. The client-side fallback exists
+ * so this screen also works when the RPC is unavailable in the current
+ * Supabase schema.
+ */
+async function ensureDirectConversationForSend(
+  myUserId: string,
+  otherUserId: string,
+): Promise<DirectConversationResult> {
+  const existing = await findExistingDirectConversation(
+    myUserId,
+    otherUserId,
+  );
+
+  if (existing.id || existing.error) {
+    return existing;
+  }
+
+  const rpcResult = await ensureDirectConversation(
+    myUserId,
+    otherUserId,
+  );
+
+  if (rpcResult.id) {
+    return {
+      id: rpcResult.id,
+      error: null,
+    };
+  }
+
+  const { data: conversation, error: createError } =
+    await supabase
+      .from('chat_conversations')
+      .insert({
+        type: 'direct',
+        group_id: null,
+        channel_id: null,
+        created_by: myUserId,
+      })
+      .select('id')
+      .single();
+
+  if (createError || !conversation?.id) {
+    return {
+      id: null,
+      error: createError ?? rpcResult.error ?? new Error('Unable to create direct conversation.'),
+    };
+  }
+
+  const { error: memberError } = await supabase
+    .from('chat_conversation_members')
+    .insert([
+      {
+        conversation_id: conversation.id,
+        user_id: myUserId,
+      },
+      {
+        conversation_id: conversation.id,
+        user_id: otherUserId,
+      },
+    ]);
+
+  if (memberError) {
+    await supabase
+      .from('chat_conversations')
+      .delete()
+      .eq('id', conversation.id);
+
+    return {
+      id: null,
+      error: memberError,
+    };
+  }
+
+  return {
+    id: conversation.id,
+    error: null,
+  };
+}
+
+export default function ChatDetailScreen() {
+  const { id, from } =
+    useLocalSearchParams<{
+      id: string;
+      from?: string;
+    }>();
+
   const appContext = useApp() as any;
-  const { isDark, accentForeground, onAccent } = appContext;
-  const isBlackDark = isDark && appContext.accent_family === 'black';
+
+  const {
+    isDark,
+    accentForeground,
+    onAccent,
+  } = appContext;
+
+  const isBlackDark =
+    isDark &&
+    appContext.accent_family === 'black';
+
+  const normalizedId =
+    (id ?? '').toLowerCase();
+
+  const isSidekick =
+    normalizedId === 'sidekick';
 
   const colors = isDark
     ? {
@@ -102,9 +344,6 @@ export default function GroupScreen() {
         border: '#2A2A2A',
         text: '#F4F2EE',
         muted: '#AAA59D',
-        input: '#1B1B1B',
-        danger: '#E06B6B',
-        overlay: 'rgba(0,0,0,0.65)',
       }
     : {
         bg: '#FBFAF8',
@@ -112,1862 +351,3997 @@ export default function GroupScreen() {
         border: '#ECE9E4',
         text: '#27241F',
         muted: '#8F8A82',
-        input: '#F7F5F1',
-        danger: '#C84D4D',
-        overlay: 'rgba(0,0,0,0.45)',
       };
 
-  const [conversationId, setConversationId] = useState('');
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordingSeconds, setRecordingSeconds] = useState(0);
-  const recordingRef = useRef<Audio.Recording | null>(null);
-  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const soundRef = useRef<Audio.Sound | null>(null);
-  const [editingGroup, setEditingGroup] = useState(false);
-  const [editName, setEditName] = useState('');
-  const [editDescription, setEditDescription] = useState('');
+  const [profile, setProfile] =
+    useState<Profile>(null);
 
-  // ── Main state ────────────────────────────────────────────────────────────
+  const [profileLoading, setProfileLoading] =
+    useState(!isSidekick);
 
-  const [myId, setMyId] = useState<string | null>(null);
-  const [view, setView] = useState<'chat' | 'info'>('chat');
+  const [profileError, setProfileError] =
+    useState<string | null>(null);
 
-  const [group, setGroup] = useState<Group | null>(null);
-  const [members, setMembers] = useState<Member[]>([]);
-  const [friends, setFriends] = useState<Friend[]>([]);
+  const [myId, setMyId] =
+    useState<string | null>(null);
 
-  const [infoLoading, setInfoLoading] = useState(true);
-  const [messagesLoading, setMessagesLoading] = useState(true);
+  const [isBlocked, setIsBlocked] =
+    useState(false);
 
-  // ── Menu ─────────────────────────────────────────────────────────────────
+  const [isBlockedByOther, setIsBlockedByOther] =
+    useState(false);
 
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [messages, setMessages] =
+    useState<Message[]>([]);
 
-  // ── Invite state ──────────────────────────────────────────────────────────
+  const [messagesLoading, setMessagesLoading] =
+    useState(!isSidekick);
 
-  const [pendingInviteIds, setPendingInviteIds] = useState<Set<string>>(
-    new Set(),
+  const [messagesError, setMessagesError] =
+    useState<string | null>(null);
+
+  const [draft, setDraft] =
+    useState('');
+
+  const [sending, setSending] =
+    useState(false);
+
+  const [uploadingAttachment, setUploadingAttachment] =
+    useState(false);
+
+  const [pendingAttachment, setPendingAttachment] =
+    useState<{
+      uri: string;
+      type: AttachmentType;
+      name: string;
+      mimeType: string;
+    } | null>(null);
+
+  const [attachmentReviewOpen, setAttachmentReviewOpen] =
+    useState(false);
+
+  const [attachmentSending, setAttachmentSending] =
+    useState(false);
+
+  const [reviewPlaying, setReviewPlaying] =
+    useState(false);
+
+  const [isRecording, setIsRecording] =
+    useState(false);
+
+  const [recordingSeconds, setRecordingSeconds] =
+    useState(0);
+
+  const [playingMessageId, setPlayingMessageId] =
+    useState<string | null>(null);
+
+  const recordingRef =
+    useRef<Audio.Recording | null>(null);
+
+  const recordingTimerRef =
+    useRef<ReturnType<typeof setInterval> | null>(
+      null,
+    );
+
+  const soundRef =
+    useRef<Audio.Sound | null>(null);
+
+  const [menuOpen, setMenuOpen] =
+    useState(false);
+
+  const [reportOpen, setReportOpen] =
+    useState(false);
+
+  const [reportReason, setReportReason] =
+    useState('');
+
+  const [reportSubmitting, setReportSubmitting] =
+    useState(false);
+
+  const [reportSuccess, setReportSuccess] =
+    useState(false);
+
+  const [groupName, setGroupName] =
+    useState('');
+
+  const [groupSubmitting, setGroupSubmitting] =
+    useState(false);
+
+  const [groupSuccess, setGroupSuccess] =
+    useState<string | null>(null);
+
+  const [pollOpen, setPollOpen] =
+    useState(false);
+
+  const [eventOpen, setEventOpen] =
+    useState(false);
+
+  const [tagModalOpen, setTagModalOpen] =
+    useState(false);
+
+  const [chatTags, setChatTags] =
+    useState<
+      {
+        id: string;
+        name: string;
+      }[]
+    >([]);
+
+  const [assignedTagIds, setAssignedTagIds] =
+    useState<string[]>([]);
+
+  const [pollQuestion, setPollQuestion] =
+    useState('');
+
+  const [pollOptions, setPollOptions] =
+    useState<string[]>(['', '']);
+
+  const [eventTitle, setEventTitle] =
+    useState('');
+
+  const [eventDate, setEventDate] =
+    useState('');
+
+  const [eventTime, setEventTime] =
+    useState('');
+
+  const [eventDesc, setEventDesc] =
+    useState('');
+
+  const [toast, setToast] =
+    useState<string | null>(null);
+
+  const [actionLoading, setActionLoading] =
+    useState<string | null>(null);
+
+  const listRef =
+    useRef<FlatList<Message>>(null);
+
+  const [conversationId, setConversationId] =
+    useState('');
+
+  const showToast = useCallback(
+    (message: string) => {
+      setToast(message);
+
+      setTimeout(() => {
+        setToast(null);
+      }, 2500);
+    },
+    [],
   );
-  const [inviteSearch, setInviteSearch] = useState('');
-  const [invitingId, setInvitingId] = useState<string | null>(null);
 
-  // ── Messages ──────────────────────────────────────────────────────────────
+  const scrollToBottom =
+    useCallback((animated = true) => {
+      setTimeout(() => {
+        listRef.current?.scrollToEnd({
+          animated,
+        });
+      }, 60);
+    }, []);
 
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [draft, setDraft] = useState('');
-  const [sending, setSending] = useState(false);
+  /*
+   * TAGS
+   */
+  const loadChatTags = useCallback(
+    async () => {
+      if (!myId) return;
 
-  const [selectedAttachment, setSelectedAttachment] = useState<{
-    uri: string;
-    name: string;
-    mimeType: string;
-    size?: number;
-  } | null>(null);
+      const [
+        { data: tags },
+        { data: assignments },
+      ] = await Promise.all([
+        supabase
+          .from('social_chat_tags')
+          .select('id, name')
+          .eq('user_id', myId)
+          .order('created_at', {
+            ascending: true,
+          }),
 
-  const [uploadingAttachment, setUploadingAttachment] = useState(false);
-  const [tagModalOpen, setTagModalOpen] = useState(false);
-  const [exitModalOpen, setExitModalOpen] = useState(false);
-  const [chatTags, setChatTags] = useState<any[]>([]);
-  const [chatTagAssignments, setChatTagAssignments] = useState<any[]>([]);
-  const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
+        supabase
+          .from('social_chat_tag_assignments')
+          .select('tag_id')
+          .eq('user_id', myId)
+          .eq('chat_id', id ?? ''),
+      ]);
 
-  const listRef = useRef<FlatList<Message>>(null);
+      setChatTags(
+        (tags ?? []) as {
+          id: string;
+          name: string;
+        }[],
+      );
 
-  const myRole = members.find((m) => m.profile_id === myId)?.role;
-  const isAdmin = myRole === 'admin' || myRole === 'owner';
-  const MAX_MEMBERS = 100;
-
-  // ── Load group ────────────────────────────────────────────────────────────
-
-  const loadGroup = useCallback(async () => {
-    if (!groupId) return;
-
-    const { data, error } = await supabase
-      .from('chat_groups')
-      .select('id, name, description')
-      .eq('id', groupId)
-      .maybeSingle();
-
-    if (error) {
-      console.error('LOAD GROUP ERROR:', error);
-      return;
-    }
-
-    setGroup(
-      data
-        ? {
-            id: data.id,
-            name: data.name ?? 'Group',
-            description: data.description ?? '',
-          }
-        : null,
-    );
-  }, [groupId]);
-
-  // ── Load members ──────────────────────────────────────────────────────────
-
-  const loadMembers = useCallback(async () => {
-    if (!groupId) return;
-
-    const { data: memberRows, error: memberError } = await supabase
-      .from('chat_group_members')
-      .select('user_id, role')
-      .eq('group_id', groupId);
-
-    if (memberError) {
-      console.error('LOAD GROUP MEMBERS ERROR:', memberError);
-      setMembers([]);
-      return;
-    }
-
-    const ids = (memberRows ?? []).map((r) => r.user_id);
-
-    if (!ids.length) {
-      setMembers([]);
-      return;
-    }
-
-    const { data: profileRows, error: profileError } = await supabase
-      .from('social_profiles')
-      .select('*')
-      .in('user_id', ids);
-
-    if (profileError) {
-      console.error('LOAD GROUP MEMBER PROFILES ERROR:', profileError);
-      setMembers([]);
-      return;
-    }
-
-    const profileMap = new Map(
-      (profileRows ?? []).map((p: any) => [
-        p.user_id,
-        {
-          display_name: p.display_name ?? 'Member',
-          username: p.username ?? '',
-          title: p.title ?? null,
-          tag: p.tag ?? null,
-          profile_title: p.profile_title ?? null,
-        },
-      ]),
-    );
-
-    setMembers(
-      (memberRows ?? []).map((r) => ({
-        user_id: r.user_id,
-        profile_id: r.user_id,
-        role: r.role,
-        display_name:
-          profileMap.get(r.user_id)?.display_name ?? 'Member',
-        username: profileMap.get(r.user_id)?.username ?? '',
-        title: profileMap.get(r.user_id)?.title ?? null,
-        tag: profileMap.get(r.user_id)?.tag ?? null,
-        profile_title: profileMap.get(r.user_id)?.profile_title ?? null,
-      })),
-    );
-  }, [groupId]);
-
-  // ── Load friends ──────────────────────────────────────────────────────────
-
-  const loadFriends = useCallback(async () => {
-    if (!myId) return;
-
-    const { data: friendshipRows, error: friendshipError } = await supabase
-      .from('friendships')
-      .select('user_id, friend_user_id')
-      .or(`user_id.eq.${myId},friend_user_id.eq.${myId}`);
-
-    if (friendshipError) {
-      console.error('LOAD FRIENDSHIPS ERROR:', friendshipError);
-      setFriends([]);
-      return;
-    }
-
-    const friendIds = [
-      ...new Set(
-        (friendshipRows ?? []).map((r) =>
-          r.user_id === myId ? r.friend_user_id : r.user_id,
+      setAssignedTagIds(
+        (assignments ?? []).map(
+          (row: any) => row.tag_id,
         ),
-      ),
-    ];
+      );
+    },
+    [myId, id],
+  );
 
-    if (!friendIds.length) {
-      setFriends([]);
-      return;
-    }
+  const toggleChatTag =
+    async (tagId: string) => {
+      if (!myId || !id) return;
 
-    const { data: profileRows, error: profileError } = await supabase
-      .from('social_profiles')
-      .select('*')
-      .in('user_id', friendIds);
+      const assigned =
+        assignedTagIds.includes(tagId);
 
-    if (profileError) {
-      console.error('LOAD FRIEND PROFILES ERROR:', profileError);
-      setFriends([]);
-      return;
-    }
+      if (assigned) {
+        const { error } =
+          await supabase
+            .from(
+              'social_chat_tag_assignments',
+            )
+            .delete()
+            .eq('user_id', myId)
+            .eq('chat_id', id)
+            .eq('tag_id', tagId);
 
-    setFriends(
-      (profileRows ?? []).map((p) => ({
-        id: p.user_id,
-        display_name: p.display_name ?? 'Friend',
-        username: p.username ?? '',
-        title: p.title ?? null,
-        tag: p.tag ?? null,
-        profile_title: p.profile_title ?? null,
-      })),
-    );
-  }, [myId]);
+        if (error) {
+          showToast(
+            error.message ||
+              'Could not remove tag.',
+          );
+          return;
+        }
 
-  // ── Load pending group invites ────────────────────────────────────────────
-
-  const loadPendingInvites = useCallback(async () => {
-    if (!groupId) return;
-
-    const { data, error } = await supabase
-      .from('chat_group_invitations')
-      .select('invitee_id')
-      .eq('group_id', groupId)
-      .eq('status', 'pending');
-
-    if (error) {
-      console.error('LOAD GROUP INVITES ERROR:', error);
-      return;
-    }
-
-    setPendingInviteIds(
-      new Set((data ?? []).map((row) => row.invitee_id)),
-    );
-  }, [groupId]);
-
-  // ── Load messages ─────────────────────────────────────────────────────────
-  const loadMessages = useCallback(async () => {
-    if (!conversationId) { setMessages([]); setMessagesLoading(false); return; }
-    setMessagesLoading(true);
-    const result = await loadChatMessages(conversationId);
-    if (result.error) {
-      console.error('LOAD GROUP MESSAGES ERROR:', result.error);
-      setMessages([]);
-    } else {
-      setMessages(result.messages as Message[]);
-    }
-    setMessagesLoading(false);
-    setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 80);
-  }, [conversationId]);
-
-  // ── Initial loading ───────────────────────────────────────────────────────
-  useEffect(() => {
-    let mounted = true;
-    const initialize = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!mounted || !user || !groupId) return;
-      setMyId(user.id);
-      await loadGroup();
-      const result = await ensureGroupConversation(groupId, user.id);
-      if (!mounted) return;
-      if (result.error || !result.id) {
-        console.error('ENSURE GROUP CONVERSATION ERROR:', result.error);
+        setAssignedTagIds(
+          previous =>
+            previous.filter(
+              value => value !== tagId,
+            ),
+        );
       } else {
-        setConversationId(result.id);
+        const { error } =
+          await supabase
+            .from(
+              'social_chat_tag_assignments',
+            )
+            .insert({
+              user_id: myId,
+              chat_id: id,
+              tag_id: tagId,
+            });
+
+        if (
+          error &&
+          error.code !== '23505'
+        ) {
+          showToast(
+            error.message ||
+              'Could not add tag.',
+          );
+          return;
+        }
+
+        setAssignedTagIds(
+          previous =>
+            previous.includes(tagId)
+              ? previous
+              : [...previous, tagId],
+        );
       }
     };
-    void initialize();
-    return () => { mounted = false; };
-  }, [groupId, loadGroup]);
 
-  useEffect(() => {
-    if (conversationId) void loadMessages();
-  }, [conversationId, loadMessages]);
+  /*
+   * PROFILE
+   */
+  const loadProfile =
+    useCallback(async () => {
+      if (
+        isSidekick ||
+        SYSTEM_CHAT_TITLES[
+          normalizedId
+        ]
+      ) {
+        setProfile(null);
+        setProfileLoading(false);
+        return;
+      }
 
-  useEffect(() => {
-    if (!myId || !groupId) return;
-    const loadTags = async () => {
-      const [{ data: tags }, { data: assignments }] = await Promise.all([
-        supabase.from('social_chat_tags').select('id,name').eq('user_id', myId).order('name'),
-        supabase.from('social_chat_tag_assignments').select('tag_id').eq('user_id', myId).eq('chat_id', groupId),
-      ]);
-      setChatTags(tags ?? []);
-      setChatTagAssignments(assignments ?? []);
-    };
-    void loadTags();
-  }, [myId, groupId]);
+      if (!id) {
+        setProfileLoading(false);
+        return;
+      }
 
-  useEffect(() => {
-    if (!myId) return;
+      setProfileLoading(true);
+      setProfileError(null);
 
-    setInfoLoading(true);
+      const { data, error } =
+        await supabase
+          .from('social_profiles')
+          .select('*')
+          .eq('user_id', id)
+          .maybeSingle();
 
-    Promise.all([
-      loadMembers(),
-      loadFriends(),
-      loadPendingInvites(),
-    ]).finally(() => {
-      setInfoLoading(false);
-    });
-  }, [myId, loadMembers, loadFriends, loadPendingInvites]);
-
-  // ── Filtered friends ──────────────────────────────────────────────────────
-
-  const invitableFriends = useMemo(() => {
-    const memberIds = new Set(members.map((m) => m.profile_id));
-    const query = inviteSearch.trim().toLowerCase();
-
-    return friends.filter((friend) => {
-      if (memberIds.has(friend.id)) return false;
-
-      if (!query) return true;
-
-      return (
-        friend.display_name.toLowerCase().includes(query) ||
-        friend.username.toLowerCase().includes(query)
-      );
-    });
-  }, [friends, members, inviteSearch]);
-
-  // ── Invite friend ─────────────────────────────────────────────────────────
-
-  const handleInviteFriend = async (friendId: string) => {
-    if (!myId || !groupId || invitingId === friendId || !isAdmin) return;
-    if (members.length >= MAX_MEMBERS) { Alert.alert('Group is full', 'A group can have up to 100 members.'); return; }
-
-    setInvitingId(friendId);
-
-    const { error } = await supabase
-      .from('chat_group_invitations')
-      .insert({
-        group_id: groupId,
-        inviter_id: myId,
-        invitee_id: friendId,
-        status: 'pending',
-      });
-
-    if (error) {
-      console.error('INVITE FRIEND ERROR:', error);
-
-      Alert.alert(
-        'Could not invite friend',
-        error.message || 'Please try again.',
-      );
-    } else {
-      setPendingInviteIds((previous) => {
-        const next = new Set(previous);
-        next.add(friendId);
-        return next;
-      });
-    }
-
-    setInvitingId(null);
-  };
-
-  // ── Promote member ────────────────────────────────────────────────────────
-
-  const handlePromote = async (profileId: string) => {
-    if (!isAdmin || profileId === myId || !groupId) return;
-
-    Alert.alert('Make admin?', 'This member will become an admin of the group.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Make Admin',
-        onPress: async () => {
-          let { error } = await supabase.rpc('chat_group_set_member_role', {
-            p_group_id: groupId,
-            p_user_id: profileId,
-            p_role: 'admin',
-          });
-
-          if (error) {
-            const fallback = await supabase
-              .from('chat_group_members')
-              .update({ role: 'admin' })
-              .eq('group_id', groupId)
-              .eq('user_id', profileId);
-            error = fallback.error;
-          }
-
-          if (error) {
-            console.error('MAKE ADMIN ERROR:', error);
-            Alert.alert('Could not make admin', error.message || 'The admin action could not be completed.');
-            return;
-          }
-
-          await loadMembers();
-        },
-      },
-    ]);
-  };
-
-  const handleRemoveMember = (profileId: string, name: string) => {
-    if (!isAdmin || profileId === myId || !groupId) return;
-
-    Alert.alert('Remove member?', `Remove ${name} from this group?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: async () => {
-          let { error } = await supabase.rpc('chat_group_remove_member', {
-            p_group_id: groupId,
-            p_user_id: profileId,
-          });
-
-          if (error) {
-            const fallback = await supabase
-              .from('chat_group_members')
-              .delete()
-              .eq('group_id', groupId)
-              .eq('user_id', profileId);
-            error = fallback.error;
-          }
-
-          if (error) {
-            console.error('REMOVE MEMBER ERROR:', error);
-            Alert.alert('Could not remove member', error.message || 'The remove action could not be completed.');
-            return;
-          }
-
-          setMembers(previous => previous.filter(member => member.user_id !== profileId));
-          await loadMembers();
-        },
-      },
-    ]);
-  };
-
-  const openEditGroup = () => {
-    if (!isAdmin || !group) return;
-    setEditName(group.name);
-    setEditDescription(group.description);
-    setEditingGroup(true);
-    setMenuOpen(false);
-  };
-
-  const saveGroupEdits = async () => {
-    const name = editName.trim();
-    if (!name) return;
-    const { error } = await supabase.from('chat_groups').update({ name, description: editDescription.trim(), updated_at: new Date().toISOString() }).eq('id', groupId);
-    if (error) { Alert.alert('Could not update group', error.message); return; }
-    await supabase.from('chat_channels').update({ name, description: editDescription.trim(), updated_at: new Date().toISOString() }).eq('group_id', groupId).eq('is_default', true);
-    setGroup({ id: groupId!, name, description: editDescription.trim() });
-    setEditingGroup(false);
-  };
-
-  const handleSend = async () => {
-    const text = draft.trim();
-
-    if (
-      !text ||
-      sending ||
-      uploadingAttachment ||
-      !conversationId ||
-      !myId
-    ) {
-      return;
-    }
-
-    setSending(true);
-
-    const optimistic: Message = {
-      id: `local-${Date.now()}`,
-      conversation_id: conversationId,
-      sender_id: myId,
-      content: text,
-      created_at: new Date().toISOString(),
-    };
-
-    setMessages((previous) => [...previous, optimistic]);
-    setDraft('');
-
-    try {
-      const result = await sendChatMessage(
-        conversationId,
-        myId,
-        text,
-      );
-
-      if (result.error || !result.message) {
+      if (error) {
         console.error(
-          'SEND GROUP MESSAGE ERROR:',
+          'Profile load error:',
+          error,
+        );
+
+        setProfile(null);
+        setProfileError(
+          'Could not load profile.',
+        );
+      } else {
+        setProfile(
+          data as Profile,
+        );
+      }
+
+      setProfileLoading(false);
+    }, [
+      id,
+      isSidekick,
+      normalizedId,
+    ]);
+
+  /*
+   * MESSAGES
+   */
+  const loadMessages =
+    useCallback(async () => {
+      if (isSidekick) {
+        setMessages([]);
+        setMessagesLoading(false);
+        setMessagesError(null);
+        return;
+      }
+
+      if (!conversationId) {
+        setMessagesLoading(false);
+        return;
+      }
+
+      setMessagesLoading(true);
+      setMessagesError(null);
+
+      const result =
+        await loadChatMessages(
+          conversationId,
+        );
+
+      if (result.error) {
+        console.error(
+          'Messages load error:',
           result.error,
         );
 
-        setMessages((previous) =>
-          previous.filter(
-            (message) => message.id !== optimistic.id,
-          ),
-        );
-
-        Alert.alert(
-          'Message not sent',
-          result.error?.message ||
-            'Could not send the message.',
+        setMessagesError(
+          'Could not load messages.',
         );
       } else {
-        setMessages((previous) =>
-          previous.map((message) =>
-            message.id === optimistic.id
-              ? (result.message as Message)
-              : message,
-          ),
+        setMessages(
+          result.messages as Message[],
         );
+
+        if (myId) {
+          const readResult = await markConversationRead(
+            conversationId,
+            myId,
+          );
+          if (readResult.error) {
+            console.error('MARK CHAT READ AFTER LOAD ERROR:', readResult.error);
+          }
+        }
       }
-    } catch (error: any) {
-      console.error(
-        'SEND GROUP MESSAGE ERROR:',
-        error,
+
+      setMessagesLoading(false);
+    }, [
+      conversationId,
+      isSidekick,
+      myId,
+    ]);
+
+  /*
+   * CURRENT USER
+   */
+  useEffect(() => {
+    let mounted = true;
+
+    supabase.auth
+      .getUser()
+      .then(
+        ({
+          data: { user },
+        }) => {
+          if (mounted) {
+            setMyId(
+              user?.id ?? null,
+            );
+          }
+        },
       );
 
-      setMessages((previous) =>
-        previous.filter(
-          (message) => message.id !== optimistic.id,
-        ),
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  /*
+   * BLOCK STATE
+   */
+  useEffect(() => {
+    if (!myId || !id || isSidekick) {
+      setIsBlocked(false);
+      setIsBlockedByOther(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadBlockState = async () => {
+      const [{ data: blockedByMe, error: blockedByMeError }, { data: blockedByOther, error: blockedByOtherError }] =
+        await Promise.all([
+          supabase
+            .from('social_blocks')
+            .select('id')
+            .eq('blocker_id', myId)
+            .eq('blocked_id', id)
+            .maybeSingle(),
+          supabase
+            .from('social_blocks')
+            .select('id')
+            .eq('blocker_id', id)
+            .eq('blocked_id', myId)
+            .maybeSingle(),
+        ]);
+
+      if (cancelled) return;
+
+      if (blockedByMeError) {
+        console.error('BLOCK STATE ERROR (MY BLOCK):', blockedByMeError);
+      }
+
+      if (blockedByOtherError) {
+        console.error('BLOCK STATE ERROR (OTHER BLOCK):', blockedByOtherError);
+      }
+
+      setIsBlocked(Boolean(blockedByMe));
+      setIsBlockedByOther(Boolean(blockedByOther));
+    };
+
+    void loadBlockState();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [myId, id, isSidekick]);
+
+  /*
+   * DIRECT CONVERSATION
+   *
+   * Lookup only. A deleted chat must stay out of the chat list until the
+   * user actually sends a new message.
+   */
+  useEffect(() => {
+    if (!myId || !id || isSidekick) {
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      const result = await findExistingDirectConversation(
+        myId,
+        id,
       );
+
+      if (cancelled) return;
+
+      if (result.error) {
+        console.error(
+          'DIRECT CONVERSATION LOOKUP ERROR:',
+          result.error,
+        );
+
+        setConversationId('');
+        setMessages([]);
+        setMessagesError('Could not open conversation.');
+        setMessagesLoading(false);
+        return;
+      }
+
+      if (!result.id) {
+        setConversationId('');
+        setMessages([]);
+        setMessagesError(null);
+        setMessagesLoading(false);
+        return;
+      }
+
+      setConversationId(result.id);
+      const readResult = await markConversationRead(
+        result.id,
+        myId,
+      );
+      if (readResult.error) {
+        console.error('MARK CHAT READ ERROR:', readResult.error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    myId,
+    id,
+    isSidekick,
+  ]);
+
+  useEffect(() => {
+    void loadProfile();
+    void loadMessages();
+  }, [
+    loadProfile,
+    loadMessages,
+  ]);
+
+  useEffect(() => {
+    if (
+      myId &&
+      !isSidekick
+    ) {
+      void loadChatTags();
+    }
+  }, [
+    myId,
+    isSidekick,
+    loadChatTags,
+  ]);
+
+  useEffect(() => {
+    if (messages.length > 0) {
+      scrollToBottom(false);
+    }
+  }, [
+    messages.length,
+    scrollToBottom,
+  ]);
+
+  /*
+   * SIDEKICK
+   */
+  const handleSendSidekick =
+    async (text: string) => {
+      if (!text || sending) {
+        return;
+      }
+
+      setSending(true);
+      setMessagesError(null);
+
+      const userId =
+        myId ??
+        `user-${Date.now()}`;
+
+      const optimisticUserMessage: Message =
+        {
+          id: `local-user-${Date.now()}`,
+          conversation_id:
+            'sidekick',
+          sender_id: userId,
+          content: text,
+          created_at:
+            new Date().toISOString(),
+        };
+
+      setMessages(previous => [
+        ...previous,
+        optimisticUserMessage,
+      ]);
+
+      setDraft('');
+      scrollToBottom();
+
+      try {
+        const {
+          data,
+          error,
+        } =
+          await supabase.functions.invoke(
+            'sidekick-chat',
+            {
+              body: {
+                message: text,
+              },
+            },
+          );
+
+        if (error) {
+          console.error(
+            'Sidekick Edge Function error:',
+            error,
+          );
+
+          setMessages(
+            previous =>
+              previous.filter(
+                message =>
+                  message.id !==
+                  optimisticUserMessage.id,
+              ),
+          );
+
+          showToast(
+            'Sidekick is unavailable right now. Please try again later.',
+          );
+
+          return;
+        }
+
+        const reply =
+          typeof data?.reply ===
+          'string'
+            ? data.reply.trim()
+            : '';
+
+        if (!reply) {
+          console.error(
+            'Sidekick returned no reply:',
+            data,
+          );
+
+          setMessages(
+            previous =>
+              previous.filter(
+                message =>
+                  message.id !==
+                  optimisticUserMessage.id,
+              ),
+          );
+
+          showToast(
+            'Sidekick is unavailable right now. Please try again later.',
+          );
+
+          return;
+        }
+
+        const sidekickMessage: Message =
+          {
+            id: `sidekick-${Date.now()}`,
+            conversation_id:
+              'sidekick',
+            sender_id:
+              'sidekick',
+            content: reply,
+            created_at:
+              new Date().toISOString(),
+          };
+
+        setMessages(previous => [
+          ...previous,
+          sidekickMessage,
+        ]);
+
+        scrollToBottom();
+      } catch (error) {
+        console.error(
+          'Sidekick request failed:',
+          error,
+        );
+
+        setMessages(
+          previous =>
+            previous.filter(
+              message =>
+                message.id !==
+                optimisticUserMessage.id,
+            ),
+        );
+
+        showToast(
+          'Sidekick is unavailable right now. Please try again later.',
+        );
+      } finally {
+        setSending(false);
+      }
+    };
+
+  /*
+   * NORMAL CHAT
+   */
+  const handleSendNormalChat =
+    async (text: string) => {
+      if (
+        !text ||
+        sending ||
+        !myId ||
+        !id ||
+        isBlocked
+      ) {
+        return;
+      }
+
+      setSending(true);
+
+      let activeConversationId =
+        conversationId;
+
+      /*
+       * A contact that was deleted from the chat list has no membership
+       * anymore. Recreate the conversation only when the user actually
+       * sends a message.
+       */
+      if (!activeConversationId) {
+        const conversationResult =
+          await ensureDirectConversationForSend(
+            myId,
+            id,
+          );
+
+        if (
+          conversationResult.error ||
+          !conversationResult.id
+        ) {
+          console.error(
+            'CREATE DIRECT CONVERSATION ERROR:',
+            conversationResult.error,
+          );
+
+          showToast(
+            conversationResult.error?.message ||
+              'Could not start the conversation.',
+          );
+          setSending(false);
+          return;
+        }
+
+        activeConversationId =
+          conversationResult.id;
+        setConversationId(
+          activeConversationId,
+        );
+
+        const readResult = await markConversationRead(
+          activeConversationId,
+          myId,
+        );
+        if (readResult.error) {
+          console.error('MARK CHAT READ ERROR:', readResult.error);
+        }
+      }
+
+      const optimistic: Message = {
+        id: `local-${Date.now()}`,
+        conversation_id:
+          activeConversationId,
+        sender_id: myId,
+        content: text,
+        created_at:
+          new Date().toISOString(),
+      };
+
+      setMessages(previous => [
+        ...previous,
+        optimistic,
+      ]);
+
+      setDraft('');
+      scrollToBottom();
+
+      const result =
+        await sendChatMessage(
+          activeConversationId,
+          myId,
+          text,
+        );
+
+      if (result.error) {
+        console.error(
+          'Send message error:',
+          result.error,
+        );
+
+        setMessages(
+          previous =>
+            previous.filter(
+              message =>
+                message.id !==
+                optimistic.id,
+            ),
+        );
+
+        showToast(
+          'Failed to send message.',
+        );
+      } else if (
+        result.message
+      ) {
+        setMessages(
+          previous =>
+            previous.map(
+              message =>
+                message.id ===
+                optimistic.id
+                  ? result.message as Message
+                  : message,
+            ),
+        );
+      }
+
+      setSending(false);
+    };
+
+  const handleSend =
+    async () => {
+      const text =
+        draft.trim();
+
+      if (
+        !text ||
+        sending
+      ) {
+        return;
+      }
+
+      if (isSidekick) {
+        await handleSendSidekick(
+          text,
+        );
+      } else {
+        await handleSendNormalChat(
+          text,
+        );
+      }
+    };
+
+  /*
+   * ATTACHMENTS
+   */
+  const uploadAttachment =
+    async (
+      uri: string,
+      type: AttachmentType,
+      fileName: string,
+      mimeType: string,
+    ): Promise<string | null> => {
+      if (!myId) {
+        return null;
+      }
+
+      try {
+        const response =
+          await fetch(uri);
+
+        const blob =
+          await response.blob();
+
+        const path =
+          `${myId}/${Date.now()}-${fileName}`;
+
+        const {
+          error: uploadError,
+        } =
+          await supabase.storage
+            .from(
+              'chat-attachments',
+            )
+            .upload(
+              path,
+              blob,
+              {
+                contentType:
+                  mimeType,
+                upsert: false,
+              },
+            );
+
+        if (uploadError) {
+          console.error(
+            'ATTACHMENT UPLOAD ERROR:',
+            uploadError,
+          );
+
+          return null;
+        }
+
+        const { data } =
+          supabase.storage
+            .from(
+              'chat-attachments',
+            )
+            .getPublicUrl(path);
+
+        return data.publicUrl;
+      } catch (error) {
+        console.error(
+          'ATTACHMENT UPLOAD EXCEPTION:',
+          error,
+        );
+
+        return null;
+      }
+    };
+
+  const sendAttachmentMessage =
+    async (
+      type: AttachmentType,
+      url: string,
+      fileName: string,
+    ) => {
+      if (
+        !myId ||
+        !conversationId
+      ) {
+        return;
+      }
+
+      const fallbackContent =
+        type === 'image'
+          ? '📷 Photo'
+          : type === 'video'
+            ? '🎬 Video'
+            : type === 'audio'
+              ? '🎤 Voice message'
+              : `📄 ${fileName}`;
+
+      const optimistic: Message = {
+        id: `local-${Date.now()}`,
+        conversation_id:
+          conversationId,
+        sender_id: myId,
+        content:
+          fallbackContent,
+        created_at:
+          new Date().toISOString(),
+        attachment_url: url,
+        attachment_type:
+          type,
+        attachment_name:
+          fileName,
+      };
+
+      setMessages(previous => [
+        ...previous,
+        optimistic,
+      ]);
+
+      scrollToBottom();
+
+      const result =
+        await sendChatMessage(
+          conversationId,
+          myId,
+          fallbackContent,
+          {
+            url,
+            name: fileName,
+            type:
+              type === 'image'
+                ? 'image/jpeg'
+                : type === 'video'
+                  ? 'video/mp4'
+                  : type === 'audio'
+                    ? 'audio/m4a'
+                    : 'application/octet-stream',
+          },
+        );
+
+      if (result.error) {
+        console.error(
+          'SEND ATTACHMENT MESSAGE ERROR:',
+          result.error,
+        );
+
+        setMessages(
+          previous =>
+            previous.filter(
+              message =>
+                message.id !==
+                optimistic.id,
+            ),
+        );
+
+        showToast(
+          'Failed to send attachment.',
+        );
+      } else if (
+        result.message
+      ) {
+        setMessages(
+          previous =>
+            previous.map(
+              message =>
+                message.id ===
+                optimistic.id
+                  ? result.message as Message
+                  : message,
+            ),
+        );
+      }
+    };
+
+  const handlePickDocument =
+    async (
+      audioOnly: boolean,
+    ) => {
+      if (
+        !myId ||
+        !conversationId ||
+        uploadingAttachment ||
+        attachmentSending
+      ) {
+        return;
+      }
+
+      try {
+        const result =
+          await DocumentPicker.getDocumentAsync(
+            {
+              type: audioOnly
+                ? 'audio/*'
+                : '*/*',
+              copyToCacheDirectory:
+                true,
+              multiple: false,
+            },
+          );
+
+        if (
+          result.canceled ||
+          !result.assets?.length
+        ) {
+          return;
+        }
+
+        const asset =
+          result.assets[0];
+
+        const fileName =
+          asset.name ??
+          `file-${Date.now()}`;
+
+        const mimeType =
+          asset.mimeType ??
+          'application/octet-stream';
+
+        const type: AttachmentType =
+          audioOnly
+            ? 'audio'
+            : mimeType.startsWith(
+                'image/',
+              )
+              ? 'image'
+              : mimeType.startsWith(
+                  'video/',
+                )
+                ? 'video'
+                : mimeType.startsWith(
+                    'audio/',
+                  )
+                  ? 'audio'
+                  : 'document';
+
+        setPendingAttachment({
+          uri: asset.uri,
+          type,
+          name: fileName,
+          mimeType,
+        });
+
+        setAttachmentReviewOpen(
+          true,
+        );
+      } catch (error) {
+        console.error(
+          'PICK DOCUMENT ERROR:',
+          error,
+        );
+
+        showToast(
+          'Could not select attachment.',
+        );
+      }
+    };
+
+  /*
+   * VOICE RECORDING
+   */
+  const startRecording =
+    async () => {
+      const permission =
+        await Audio.requestPermissionsAsync();
+
+      if (!permission.granted) {
+        showToast(
+          'Microphone access is needed to record a voice note.',
+        );
+
+        return;
+      }
+
+      try {
+        await Audio.setAudioModeAsync(
+          {
+            allowsRecordingIOS:
+              true,
+            playsInSilentModeIOS:
+              true,
+          },
+        );
+
+        const { recording } =
+          await Audio.Recording.createAsync(
+            Audio.RecordingOptionsPresets
+              .HIGH_QUALITY,
+          );
+
+        recordingRef.current =
+          recording;
+
+        setIsRecording(true);
+        setRecordingSeconds(0);
+
+        recordingTimerRef.current =
+          setInterval(() => {
+            setRecordingSeconds(
+              seconds =>
+                seconds + 1,
+            );
+          }, 1000);
+      } catch (error) {
+        console.error(
+          'START RECORDING ERROR:',
+          error,
+        );
+
+        showToast(
+          'Could not start recording.',
+        );
+      }
+    };
+
+  const cancelRecording =
+    async () => {
+      if (
+        recordingTimerRef.current
+      ) {
+        clearInterval(
+          recordingTimerRef.current,
+        );
+
+        recordingTimerRef.current =
+          null;
+      }
+
+      setIsRecording(false);
+      setRecordingSeconds(0);
+
+      try {
+        await recordingRef.current?.stopAndUnloadAsync();
+      } catch {}
+
+      recordingRef.current =
+        null;
+    };
+
+  const stopRecordingAndSend =
+    async () => {
+      if (
+        recordingTimerRef.current
+      ) {
+        clearInterval(
+          recordingTimerRef.current,
+        );
+
+        recordingTimerRef.current =
+          null;
+      }
+
+      setIsRecording(false);
+
+      const recording =
+        recordingRef.current;
+
+      if (!recording) {
+        return;
+      }
+
+      try {
+        await recording.stopAndUnloadAsync();
+
+        const uri =
+          recording.getURI();
+
+        recordingRef.current =
+          null;
+
+        setRecordingSeconds(0);
+
+        if (!uri) return;
+
+        const fileName =
+          `voice-${Date.now()}.m4a`;
+
+        setPendingAttachment({
+          uri,
+          type: 'audio',
+          name: fileName,
+          mimeType:
+            'audio/m4a',
+        });
+
+        setAttachmentReviewOpen(
+          true,
+        );
+      } catch (error) {
+        console.error(
+          'STOP RECORDING ERROR:',
+          error,
+        );
+
+        showToast(
+          'Could not save voice note.',
+        );
+      }
+    };
+
+  const togglePlayback =
+    async (
+      message: Message,
+    ) => {
+      if (
+        !message.attachment_url
+      ) {
+        return;
+      }
+
+      if (
+        playingMessageId ===
+        message.id
+      ) {
+        await soundRef.current?.stopAsync();
+        await soundRef.current?.unloadAsync();
+
+        soundRef.current =
+          null;
+
+        setPlayingMessageId(
+          null,
+        );
+
+        return;
+      }
+
+      if (soundRef.current) {
+        await soundRef.current.stopAsync();
+        await soundRef.current.unloadAsync();
+
+        soundRef.current =
+          null;
+      }
+
+      try {
+        await Audio.setAudioModeAsync(
+          {
+            allowsRecordingIOS: false,
+            playsInSilentModeIOS: true,
+            staysActiveInBackground: false,
+            shouldDuckAndroid: false,
+            playThroughEarpieceAndroid: false,
+          },
+        );
+
+        const { sound } =
+          await Audio.Sound.createAsync(
+            {
+              uri: message.attachment_url,
+            },
+            {
+              shouldPlay: false,
+              volume: 1.0,
+              isMuted: false,
+            },
+          );
+
+        await sound.setVolumeAsync(1.0);
+        await sound.setIsMutedAsync(false);
+        await sound.playAsync();
+
+        soundRef.current =
+          sound;
+
+        setPlayingMessageId(
+          message.id,
+        );
+
+        sound.setOnPlaybackStatusUpdate(
+          status => {
+            if (
+              status.isLoaded &&
+              status.didJustFinish
+            ) {
+              setPlayingMessageId(
+                null,
+              );
+
+              void sound.unloadAsync();
+
+              soundRef.current =
+                null;
+            }
+          },
+        );
+      } catch (error) {
+        console.error(
+          'PLAYBACK ERROR:',
+          error,
+        );
+
+        showToast(
+          'Could not play voice note.',
+        );
+      }
+    };
+
+  useEffect(() => {
+    return () => {
+      void soundRef.current?.unloadAsync();
+
+      if (
+        recordingTimerRef.current
+      ) {
+        clearInterval(
+          recordingTimerRef.current,
+        );
+      }
+
+      recordingRef.current
+        ?.stopAndUnloadAsync()
+        .catch(() => {});
+    };
+  }, []);
+
+  /*
+   * ATTACHMENT PICKER
+   */
+  const handlePickAttachment =
+    async () => {
+      if (
+        uploadingAttachment ||
+        attachmentSending ||
+        !myId ||
+        !conversationId
+      ) {
+        return;
+      }
+
+      try {
+        const result =
+          await DocumentPicker.getDocumentAsync(
+            {
+              type: '*/*',
+              copyToCacheDirectory:
+                true,
+              multiple: false,
+            },
+          );
+
+        if (
+          result.canceled ||
+          !result.assets?.length
+        ) {
+          return;
+        }
+
+        const asset =
+          result.assets[0];
+
+        const fileName =
+          asset.name ??
+          `file-${Date.now()}`;
+
+        const mimeType =
+          asset.mimeType ??
+          'application/octet-stream';
+
+        const type: AttachmentType =
+          mimeType.startsWith(
+            'image/',
+          )
+            ? 'image'
+            : mimeType.startsWith(
+                'video/',
+              )
+              ? 'video'
+              : mimeType.startsWith(
+                  'audio/',
+                )
+                ? 'audio'
+                : 'document';
+
+        setPendingAttachment({
+          uri: asset.uri,
+          type,
+          name: fileName,
+          mimeType,
+        });
+
+        setAttachmentReviewOpen(
+          true,
+        );
+      } catch (error) {
+        console.error(
+          'PICK ATTACHMENT ERROR:',
+          error,
+        );
+
+        showToast(
+          'Could not select attachment.',
+        );
+      }
+    };
+
+  const closeAttachmentReview =
+    async () => {
+      setAttachmentReviewOpen(
+        false,
+      );
+
+      setPendingAttachment(
+        null,
+      );
+
+      setReviewPlaying(false);
+    };
+
+  const toggleReviewAudio =
+    async () => {
+      if (
+        !pendingAttachment ||
+        pendingAttachment.type !==
+          'audio'
+      ) {
+        return;
+      }
+
+      if (reviewPlaying) {
+        await soundRef.current?.stopAsync();
+        await soundRef.current?.unloadAsync();
+
+        soundRef.current =
+          null;
+
+        setReviewPlaying(false);
+
+        return;
+      }
+
+      try {
+        await soundRef.current?.unloadAsync();
+
+        soundRef.current =
+          null;
+
+        await Audio.setAudioModeAsync(
+          {
+            allowsRecordingIOS: false,
+            playsInSilentModeIOS: true,
+            staysActiveInBackground: false,
+            shouldDuckAndroid: false,
+            playThroughEarpieceAndroid: false,
+          },
+        );
+
+        const { sound } =
+          await Audio.Sound.createAsync(
+            {
+              uri: pendingAttachment.uri,
+            },
+            {
+              shouldPlay: false,
+              volume: 1.0,
+              isMuted: false,
+            },
+          );
+
+        await sound.setVolumeAsync(1.0);
+        await sound.setIsMutedAsync(false);
+        await sound.playAsync();
+
+        soundRef.current =
+          sound;
+
+        setReviewPlaying(true);
+
+        sound.setOnPlaybackStatusUpdate(
+          status => {
+            if (
+              status.isLoaded &&
+              status.didJustFinish
+            ) {
+              setReviewPlaying(
+                false,
+              );
+
+              void sound.unloadAsync();
+
+              soundRef.current =
+                null;
+            }
+          },
+        );
+      } catch (error) {
+        console.error(
+          'REVIEW AUDIO ERROR:',
+          error,
+        );
+
+        showToast(
+          'Could not play voice note preview.',
+        );
+      }
+    };
+
+  const sendPendingAttachment =
+    async () => {
+      if (
+        !pendingAttachment ||
+        !myId ||
+        !conversationId ||
+        attachmentSending
+      ) {
+        return;
+      }
+
+      setAttachmentSending(
+        true,
+      );
+
+      setUploadingAttachment(
+        true,
+      );
+
+      try {
+        const url =
+          await uploadAttachment(
+            pendingAttachment.uri,
+            pendingAttachment.type,
+            pendingAttachment.name,
+            pendingAttachment.mimeType,
+          );
+
+        if (!url) {
+          showToast(
+            'Could not upload attachment.',
+          );
+
+          return;
+        }
+
+        await sendAttachmentMessage(
+          pendingAttachment.type,
+          url,
+          pendingAttachment.name,
+        );
+
+        try {
+          await soundRef.current?.stopAsync();
+        } catch {}
+
+        try {
+          await soundRef.current?.unloadAsync();
+        } catch {}
+
+        soundRef.current =
+          null;
+
+        setReviewPlaying(
+          false,
+        );
+
+        setAttachmentReviewOpen(
+          false,
+        );
+
+        setPendingAttachment(
+          null,
+        );
+      } catch (error) {
+        console.error(
+          'SEND PENDING ATTACHMENT ERROR:',
+          error,
+        );
+
+        showToast(
+          'Failed to send attachment.',
+        );
+      } finally {
+        setUploadingAttachment(
+          false,
+        );
+
+        setAttachmentSending(
+          false,
+        );
+      }
+    };
+
+  /*
+   * POLL
+   */
+  const sendPoll =
+    async () => {
+      const question =
+        pollQuestion.trim();
+
+      const options =
+        pollOptions
+          .map(
+            option =>
+              option.trim(),
+          )
+          .filter(Boolean);
+
+      if (
+        !question ||
+        options.length < 2 ||
+        !myId
+      ) {
+        return;
+      }
+
+      const content =
+        `📊 Poll: ${question}\n` +
+        options
+          .map(
+            (
+              option,
+              index,
+            ) =>
+              `${index + 1}. ${option}`,
+          )
+          .join('\n');
+
+      setPollOpen(false);
+
+      const optimistic: Message =
+        {
+          id: `local-${Date.now()}`,
+          conversation_id:
+            conversationId,
+          sender_id: myId,
+          content,
+          created_at:
+            new Date().toISOString(),
+        };
+
+      setMessages(previous => [
+        ...previous,
+        optimistic,
+      ]);
+
+      scrollToBottom();
+
+      const result =
+        await sendChatMessage(
+          conversationId,
+          myId,
+          content,
+        );
+
+      if (result.error) {
+        console.error(
+          'SEND POLL ERROR:',
+          result.error,
+        );
+
+        setMessages(
+          previous =>
+            previous.filter(
+              message =>
+                message.id !==
+                optimistic.id,
+            ),
+        );
+
+        showToast(
+          'Failed to send poll.',
+        );
+      }
+    };
+
+  /*
+   * EVENT
+   */
+  const sendEvent =
+    async () => {
+      const title =
+        eventTitle.trim();
+
+      if (!title || !myId) {
+        return;
+      }
+
+      let content =
+        `📅 Event: ${title}`;
+
+      if (
+        eventDate.trim()
+      ) {
+        content +=
+          `\nDate: ${eventDate.trim()}`;
+      }
+
+      if (
+        eventTime.trim()
+      ) {
+        content +=
+          `\nTime: ${eventTime.trim()}`;
+      }
+
+      if (
+        eventDesc.trim()
+      ) {
+        content +=
+          `\n${eventDesc.trim()}`;
+      }
+
+      content +=
+        '\nReply YES to add to calendar';
+
+      setEventOpen(false);
+
+      const optimistic: Message =
+        {
+          id: `local-${Date.now()}`,
+          conversation_id:
+            conversationId,
+          sender_id: myId,
+          content,
+          created_at:
+            new Date().toISOString(),
+        };
+
+      setMessages(previous => [
+        ...previous,
+        optimistic,
+      ]);
+
+      scrollToBottom();
+
+      const result =
+        await sendChatMessage(
+          conversationId,
+          myId,
+          content,
+        );
+
+      if (result.error) {
+        console.error(
+          'SEND EVENT ERROR:',
+          result.error,
+        );
+
+        setMessages(
+          previous =>
+            previous.filter(
+              message =>
+                message.id !==
+                optimistic.id,
+            ),
+        );
+
+        showToast(
+          'Failed to send event.',
+        );
+      }
+    };
+
+  /*
+   * REPORT
+   */
+  const handleReport =
+    async () => {
+      const reason =
+        reportReason.trim();
+
+      if (
+        !reason ||
+        reportSubmitting ||
+        !myId ||
+        !id ||
+        isSidekick
+      ) {
+        return;
+      }
+
+      setReportSubmitting(
+        true,
+      );
+
+      const { error } =
+        await supabase
+          .from('social_reports')
+          .insert({
+            reporter_id: myId,
+            reported_id: id,
+            reason,
+          });
+
+      setReportSubmitting(
+        false,
+      );
+
+      if (error) {
+        console.error(
+          'REPORT ERROR:',
+          error,
+        );
+
+        showToast(
+          'Could not submit report.',
+        );
+
+        return;
+      }
+
+      setReportSuccess(true);
+      setReportReason('');
+
+      setTimeout(() => {
+        setReportSuccess(false);
+        setReportOpen(false);
+      }, 1600);
+    };
+
+  /*
+   * BLOCK
+   */
+  const handleBlock =
+    async () => {
+      if (!myId || !id || isSidekick) return;
+
+      setActionLoading('block');
+
+      const { error } = await supabase
+        .from('social_blocks')
+        .insert({ blocker_id: myId, blocked_id: id });
+
+      setActionLoading(null);
+
+      if (error) {
+        console.error('BLOCK ERROR:', error);
+        showToast('Could not block user.');
+        return;
+      }
+
+      setIsBlocked(true);
+      setDraft('');
+      setPendingAttachment(null);
+      setAttachmentReviewOpen(false);
+      showToast(`Blocked ${profile?.display_name ?? 'user'}`);
+    };
+
+  const handleUnblock = async () => {
+    if (!myId || !id || isSidekick) return;
+
+    setActionLoading('unblock');
+
+    const { error } = await supabase
+      .from('social_blocks')
+      .delete()
+      .eq('blocker_id', myId)
+      .eq('blocked_id', id);
+
+    setActionLoading(null);
+
+    if (error) {
+      console.error('UNBLOCK ERROR:', error);
+      showToast('Could not unblock user.');
+      return;
+    }
+
+    setIsBlocked(false);
+    showToast('User unblocked.');
+  };
+
+  /*
+   * DELETE CHAT
+   */
+  const handleDeleteChat =
+    async () => {
+      if (!myId || isSidekick) {
+        return;
+      }
+
+      setActionLoading(
+        'delete',
+      );
+
+      // Use the current conversation when available. If it has not finished
+      // loading into state yet, do a lookup-only recovery so the Delete action
+      // still works without ever creating a conversation.
+      let targetConversationId = conversationId;
+
+      if (!targetConversationId && id) {
+        const existing = await findExistingDirectConversation(
+          myId,
+          id,
+        );
+        if (existing.error) {
+          setActionLoading(null);
+          showToast(existing.error.message || 'Could not find chat.');
+          return;
+        }
+        targetConversationId = existing.id ?? '';
+      }
+
+      if (!targetConversationId) {
+        setActionLoading(null);
+        showToast('There is no conversation to delete.');
+        return;
+      }
+
+      const { error } =
+        await deleteConversationForUser(
+          targetConversationId,
+          myId,
+          id,
+        );
+
+      setActionLoading(null);
+
+      if (error) {
+        console.error(
+          'DELETE CHAT ERROR:',
+          error,
+        );
+
+        showToast(
+          error.message ||
+            'Could not delete chat.',
+        );
+        return;
+      }
+
+      /*
+       * The current user's membership is the only thing removed.
+       * The other person's membership and the conversation itself remain,
+       * allowing the chat to be reopened later by sending a new message.
+       */
+
+      /* Remove the local chat immediately as well. */
+      setConversationId('');
+      setMessages([]);
+      setDraft('');
+      setPendingAttachment(null);
+      setAttachmentReviewOpen(false);
+
+      router.replace(
+        '/chat' as never,
+      );
+    };
+
+  /*
+   * UNSEND
+   */
+  const handleUnsendMessage =
+    async (
+      message: Message,
+    ) => {
+      if (
+        !myId ||
+        message.sender_id !==
+          myId ||
+        message.id.startsWith(
+          'local-',
+        )
+      ) {
+        return;
+      }
+
+      const age =
+        Date.now() -
+        new Date(
+          message.created_at,
+        ).getTime();
+
+      const fiveMinutes =
+        5 * 60 * 1000;
+
+      if (
+        age >
+        fiveMinutes
+      ) {
+        Alert.alert(
+          'Unsend unavailable',
+          'Messages can only be unsent within 5 minutes of sending.',
+        );
+
+        return;
+      }
 
       Alert.alert(
-        'Message not sent',
-        error?.message ||
-          'Could not send the message.',
+        'Message options',
+        'What would you like to do with this message?',
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+          },
+          {
+            text: 'Unsend',
+            style: 'destructive',
+            onPress:
+              async () => {
+                const {
+                  error,
+                } =
+                  await supabase.rpc(
+                    'chat_unsend_direct_message',
+                    {
+                      p_message_id:
+                        message.id,
+                    },
+                  );
+
+                if (error) {
+                  console.error(
+                    'UNSEND DIRECT MESSAGE ERROR:',
+                    error,
+                  );
+
+                  Alert.alert(
+                    'Could not unsend message',
+                    error.message ||
+                      'Please try again.',
+                  );
+
+                  return;
+                }
+
+                setMessages(
+                  previous =>
+                    previous.filter(
+                      item =>
+                        item.id !==
+                        message.id,
+                    ),
+                );
+              },
+          },
+        ],
       );
-    } finally {
-      setSending(false);
-    }
-  };
+    };
 
-  // ── Attachments + voice notes ─────────────────────────────────────────────
-  const uploadGroupAttachment = async (uri: string, name: string, mimeType: string) => {
-    if (!myId) return null;
-    try {
-      const response = await fetch(uri);
-      const arrayBuffer = await response.arrayBuffer();
-      const safeName = name.replace(/[^a-zA-Z0-9._-]/g, '_');
-      const path = `${groupId}/${myId}/${Date.now()}-${safeName}`;
-      const { error } = await supabase.storage.from(ATTACHMENT_BUCKET).upload(path, arrayBuffer, { contentType: mimeType, upsert: false });
-      if (error) throw error;
-      return supabase.storage.from(ATTACHMENT_BUCKET).getPublicUrl(path).data.publicUrl;
-    } catch (error: any) {
-      Alert.alert('Attachment upload failed', error?.message || 'Could not upload the attachment.');
-      return null;
-    }
-  };
-
-  const handlePickAttachment = async () => {
-    if (!conversationId || !myId || uploadingAttachment) return;
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        copyToCacheDirectory: true,
-        multiple: false,
-      });
-      if (result.canceled || !result.assets?.length) return;
-      const file = result.assets[0];
-      setSelectedAttachment({
-        uri: file.uri,
-        name: file.name || `file-${Date.now()}`,
-        mimeType: file.mimeType || 'application/octet-stream',
-        size: file.size,
-      });
-    } catch (error: any) {
-      Alert.alert('Could not select attachment', error?.message || 'Please try again.');
-    }
-  };
-
-  const sendSelectedAttachment = async () => {
-    if (!selectedAttachment || !conversationId || !myId || uploadingAttachment) return;
-    setUploadingAttachment(true);
-    try {
-      const url = await uploadGroupAttachment(
-        selectedAttachment.uri,
-        selectedAttachment.name,
-        selectedAttachment.mimeType,
-      );
-      if (!url) return;
-      const mime = selectedAttachment.mimeType;
-      const content = mime.startsWith('image/') ? '📷 Photo' : mime.startsWith('video/') ? '🎬 Video' : mime.startsWith('audio/') ? '🎤 Voice message' : `📄 ${selectedAttachment.name}`;
-      const result = await sendChatMessage(conversationId, myId, content, {
-        url,
-        name: selectedAttachment.name,
-        type: mime,
-      });
-      if (result.error || !result.message) {
-        console.error('GROUP ATTACHMENT SEND ERROR:', result.error);
-        Alert.alert(
-          'Attachment not sent',
-          result.error?.message || 'Could not save the attachment. Make sure chat_message_attachments and its RLS policies exist in Supabase.',
+  /*
+   * CLEAR CHAT
+   */
+  const handleClearChat =
+    async () => {
+      if (!myId) {
+        showToast(
+          'Could not identify your account.',
         );
+
         return;
       }
-      setMessages(prev => [...prev, result.message as Message]);
-      setSelectedAttachment(null);
-    } catch (error: any) {
-      Alert.alert('Attachment upload failed', error?.message || 'Could not send the attachment.');
-    } finally {
-      setUploadingAttachment(false);
-    }
-  };
 
-  const startRecording = async () => {
-    if (!conversationId || !myId || isRecording) return;
-    const permission = await Audio.requestPermissionsAsync();
-    if (!permission.granted) { Alert.alert('Microphone permission', 'Microphone access is needed for voice notes.'); return; }
-    try {
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
-      const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
-      recordingRef.current = recording;
-      setIsRecording(true); setRecordingSeconds(0);
-      recordingTimerRef.current = setInterval(() => setRecordingSeconds(s => s + 1), 1000);
-    } catch (error) { console.error('START GROUP RECORDING ERROR:', error); }
-  };
+      setActionLoading(
+        'clear',
+      );
 
-  const cancelRecording = async () => {
-    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
-    recordingTimerRef.current = null;
-    setIsRecording(false); setRecordingSeconds(0);
-    try { await recordingRef.current?.stopAndUnloadAsync(); } catch {}
-    recordingRef.current = null;
-  };
+      if (isSidekick) {
+        const { error } =
+          await supabase
+            .from('system_messages')
+            .delete()
+            .eq(
+              'user_id',
+              myId,
+            )
+            .eq(
+              'module_key',
+              'sidekick',
+            );
 
-  const stopRecordingAndSend = async () => {
-    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
-    recordingTimerRef.current = null;
-    const recording = recordingRef.current;
-    recordingRef.current = null;
-    setIsRecording(false); setRecordingSeconds(0);
-    if (!recording) return;
-    try {
-      await recording.stopAndUnloadAsync();
-      const uri = recording.getURI();
-      if (!uri) return;
-      const fileName = `voice-${Date.now()}.m4a`;
-      setSelectedAttachment({ uri, name: fileName, mimeType: 'audio/m4a' });
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true, staysActiveInBackground: false, shouldDuckAndroid: true, playThroughEarpieceAndroid: false });
-    } catch (error) { console.error('STOP GROUP RECORDING ERROR:', error); }
-  };
+        setActionLoading(null);
 
-  const togglePlayback = async (url: string, messageId: string) => {
-    try {
-      if (playingMessageId === messageId) {
-        await soundRef.current?.pauseAsync();
-        setPlayingMessageId(null);
+        if (error) {
+          console.error(
+            'CLEAR SIDEKICK ERROR:',
+            error,
+          );
+
+          showToast(
+            'Could not clear Sidekick chat.',
+          );
+
+          return;
+        }
+
+        setMessages([]);
+
+        showToast(
+          'Sidekick chat cleared.',
+        );
+
         return;
       }
-      await soundRef.current?.unloadAsync();
-      soundRef.current = null;
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true, staysActiveInBackground: false, shouldDuckAndroid: true, playThroughEarpieceAndroid: false });
-      const { sound } = await Audio.Sound.createAsync({ uri: url }, { shouldPlay: true });
-      soundRef.current = sound;
-      setPlayingMessageId(messageId);
-      sound.setOnPlaybackStatusUpdate(status => {
-        if ('didJustFinish' in status && status.didJustFinish) setPlayingMessageId(null);
-      });
-    } catch (error) {
-      console.error('GROUP AUDIO PLAYBACK ERROR:', error);
-      setPlayingMessageId(null);
-    }
-  };
 
-  const handleUnsend = async (message: Message) => {
-    if (!myId || message.sender_id !== myId || message.id.startsWith('local-')) return;
+      const { error } =
+        await supabase
+          .from('chat_messages')
+          .delete()
+          .eq(
+            'conversation_id',
+            conversationId,
+          )
+          .eq(
+            'sender_id',
+            myId,
+          );
 
-    const age = Date.now() - new Date(message.created_at).getTime();
-    if (age > 10 * 60 * 1000) {
-      Alert.alert('Cannot unsend', 'Messages can only be unsent within 10 minutes.');
-      return;
-    }
+      setActionLoading(null);
 
-    Alert.alert(
-      'Message options',
-      'Choose an action for this message.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Unsend',
-          style: 'destructive',
-          onPress: async () => {
-            const { error } = await supabase.rpc('chat_unsend_message', {
-              p_message_id: message.id,
+      if (error) {
+        console.error(
+          'CLEAR CHAT ERROR:',
+          error,
+        );
+
+        showToast(
+          'Could not clear chat.',
+        );
+
+        return;
+      }
+
+      setMessages([]);
+
+      showToast(
+        'Chat cleared.',
+      );
+    };
+
+  /*
+   * CREATE GROUP
+   */
+  const handleCreateGroup =
+    async () => {
+      const name =
+        groupName.trim();
+
+      if (
+        !name ||
+        groupSubmitting ||
+        !myId ||
+        !id ||
+        isSidekick
+      ) {
+        return;
+      }
+
+      setGroupSubmitting(
+        true,
+      );
+
+      try {
+        const {
+          data: groupData,
+          error: groupError,
+        } =
+          await supabase
+            .from('chat_groups')
+            .insert({
+              name,
+              description: '',
+              visibility:
+                'private',
+              owner_id: myId,
+            })
+            .select('id')
+            .single();
+
+        if (
+          groupError ||
+          !groupData
+        ) {
+          throw (
+            groupError ??
+            new Error(
+              'Could not create group.',
+            )
+          );
+        }
+
+        const groupId =
+          groupData.id;
+
+        const {
+          error: memberError,
+        } =
+          await supabase
+            .from(
+              'chat_group_members',
+            )
+            .insert({
+              group_id: groupId,
+              user_id: myId,
+              role: 'owner',
             });
-            if (error) {
-              console.error('UNSEND GROUP MESSAGE ERROR:', error);
-              Alert.alert('Could not unsend message', error.message || 'Please try again.');
-              return;
-            }
-            setMessages(prev => prev.filter(m => m.id !== message.id));
-          },
-        },
-      ],
-    );
-  };
 
-  // ── Clear chat ────────────────────────────────────────────────────────────
+        if (memberError) {
+          throw memberError;
+        }
 
-  const handleClearChat = () => {
-    setMenuOpen(false);
+        const {
+          data: channelData,
+          error: channelError,
+        } =
+          await supabase
+            .from(
+              'chat_channels',
+            )
+            .insert({
+              group_id: groupId,
+              name,
+              description: '',
+              position: 0,
+              is_default: true,
+              created_by: myId,
+            })
+            .select('id')
+            .single();
 
-    Alert.alert(
-      'Clear chat?',
-      'This will permanently delete all messages in this group chat.',
-      [
+        if (
+          channelError ||
+          !channelData
+        ) {
+          throw (
+            channelError ??
+            new Error(
+              'Could not create group channel.',
+            )
+          );
+        }
+
+        const {
+          data: conversationData,
+          error:
+            conversationError,
+        } =
+          await supabase
+            .from(
+              'chat_conversations',
+            )
+            .insert({
+              type: 'channel',
+              group_id:
+                groupId,
+              channel_id:
+                channelData.id,
+              created_by: myId,
+            })
+            .select('id')
+            .single();
+
+        if (
+          conversationError ||
+          !conversationData
+        ) {
+          throw (
+            conversationError ??
+            new Error(
+              'Could not create group conversation.',
+            )
+          );
+        }
+
+        const {
+          error:
+            conversationMemberError,
+        } =
+          await supabase
+            .from(
+              'chat_conversation_members',
+            )
+            .insert({
+              conversation_id:
+                conversationData.id,
+              user_id: myId,
+            });
+
+        if (
+          conversationMemberError
+        ) {
+          throw conversationMemberError;
+        }
+
+        const {
+          data: inviteData,
+          error: inviteError,
+        } =
+          await supabase
+            .from(
+              'chat_group_invitations',
+            )
+            .insert({
+              group_id: groupId,
+              inviter_id: myId,
+              invitee_id: id,
+              status:
+                'pending',
+            })
+            .select('id')
+            .single();
+
+        if (inviteError) {
+          throw inviteError;
+        }
+
+        setGroupSuccess(
+          `Group created${
+            inviteData
+              ? ` and invite sent to ${
+                  profile?.display_name ??
+                  'user'
+                }`
+              : ''
+          }`,
+        );
+
+        setGroupName('');
+      } catch (error: any) {
+        console.error(
+          'CREATE GROUP ERROR:',
+          error,
+        );
+
+        showToast(
+          error?.message ||
+            'Could not create group.',
+        );
+      } finally {
+        setGroupSubmitting(
+          false,
+        );
+      }
+    };
+
+  /*
+   * MESSAGE RENDERING
+   */
+  const renderMessage = ({
+    item,
+    index,
+  }: {
+    item: Message;
+    index: number;
+  }) => {
+    const isMine =
+      item.sender_id ===
+      myId;
+
+    const isSidekickReply =
+      isSidekick &&
+      item.sender_id ===
+        'sidekick';
+
+    const time =
+      new Date(
+        item.created_at,
+      ).toLocaleTimeString(
+        [],
         {
-          text: 'Cancel',
-          style: 'cancel',
+          hour: '2-digit',
+          minute: '2-digit',
         },
-        {
-          text: 'Clear Chat',
-          style: 'destructive',
-          onPress: async () => {
-            const { error } = await supabase
-              .from('chat_messages')
-              .delete()
-              .eq('conversation_id', conversationId);
+      );
 
-            if (error) {
-              console.error('CLEAR GROUP CHAT ERROR:', error);
+    const previousMessage =
+      index > 0 ? messages[index - 1] : null;
 
-              Alert.alert(
-                'Could not clear chat',
-                error.message || 'Please try again.',
-              );
+    const showDateSeparator =
+      !previousMessage ||
+      getLocalDateKey(previousMessage.created_at) !==
+        getLocalDateKey(item.created_at);
 
-              return;
-            }
+    const outgoing =
+      isMine &&
+      !isSidekickReply;
 
-            setMessages([]);
-          },
-        },
-      ],
-    );
-  };
-
-  // ── Delete group ──────────────────────────────────────────────────────────
-
-  const handleDeleteGroup = () => {
-    setMenuOpen(false);
-
-    if (!isAdmin) return;
-
-    Alert.alert(
-      'Delete group?',
-      'This will permanently delete the group, its members, invites and chat history. This cannot be undone.',
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-        {
-          text: 'Delete Group',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              // Delete messages first.
-              const { error: messageError } = await supabase
-                .from('chat_messages')
-                .delete()
-                .eq('conversation_id', conversationId);
-
-              if (messageError) {
-                throw messageError;
-              }
-
-              // Delete group invites.
-              const { error: inviteError } = await supabase
-                .from('chat_group_invitations')
-                .delete()
-                .eq('group_id', groupId);
-
-              if (inviteError) {
-                throw inviteError;
-              }
-
-              // Delete group memberships.
-              const { error: memberError } = await supabase
-                .from('chat_group_members')
-                .delete()
-                .eq('group_id', groupId);
-
-              if (memberError) {
-                throw memberError;
-              }
-
-              // Finally delete the group.
-              const { error: groupError } = await supabase
-                .from('chat_groups')
-                .delete()
-                .eq('id', groupId);
-
-              if (groupError) {
-                throw groupError;
-              }
-
-              router.replace('/(tabs)' as never);
-            } catch (error: any) {
-              console.error('DELETE GROUP ERROR:', error);
-
-              Alert.alert(
-                'Could not delete group',
-                error?.message ||
-                  'The group could not be deleted. Please try again.',
-              );
-            }
-          },
-        },
-      ],
-    );
-  };
-
-  // ── Exit group ────────────────────────────────────────────────────────────
-
-  const handleExitGroup = () => {
-    setMenuOpen(false);
-    setExitModalOpen(true);
-  };
-
-  const confirmExitGroup = async () => {
-    if (!myId) return;
-    const adminCount = members.filter(member => member.role === 'admin' || member.role === 'owner').length;
-    if (isAdmin && adminCount === 1 && members.length > 1) {
-      setExitModalOpen(false);
-      Alert.alert('You are the only admin', 'Please make another member an admin before leaving the group.');
-      return;
-    }
-    const { error } = await supabase.from('chat_group_members').delete().eq('group_id', groupId).eq('user_id', myId);
-    if (error) {
-      Alert.alert('Could not leave group', error.message || 'Please try again.');
-      return;
-    }
-    setExitModalOpen(false);
-    router.replace('/(tabs)' as never);
-  };
-
-  // ── Menu action ───────────────────────────────────────────────────────────
-
-  const handleMenuAction = (action: MenuAction) => {
-    if (action === 'clear') {
-      handleClearChat();
-      return;
-    }
-
-    if (action === 'delete') {
-      handleDeleteGroup();
-      return;
-    }
-
-    if (action === 'exit') { handleExitGroup(); return; }
-    if (action === 'tag') { setMenuOpen(false); setTagModalOpen(true); return; }
-    if (action === 'edit') { openEditGroup(); }
-  };
-
-  // ── Message renderer ──────────────────────────────────────────────────────
-
-  const renderMessage = ({ item }: { item: Message }) => {
-    const isMine = item.sender_id === myId;
-
-    const sender = members.find(
-      (member) => member.user_id === item.sender_id,
-    );
-
-    const author = sender?.username
-      ? `@${sender.username}`
-      : sender?.display_name ?? 'Member';
-
-    const isImage = item.attachment_type === 'image' || item.attachment_type?.startsWith('image/') === true;
-    const isAudio = item.attachment_type === 'audio' || item.attachment_type?.startsWith('audio/') === true;
-    const isVideo = item.attachment_type === 'video' || item.attachment_type?.startsWith('video/') === true;
-    const hasAttachment = Boolean(item.attachment_url);
+    const contentColor =
+      outgoing
+        ? onAccent
+        : colors.text;
 
     return (
-      <View
-        style={[
-          styles.bubbleRow,
-          isMine && styles.bubbleRowMine,
-        ]}
-      >
-        <Pressable
-          onLongPress={() => handleUnsend(item)}
-          delayLongPress={450}
-          style={[styles.messagePressable, isMine && styles.messagePressableMine]}
-        >
-        <View
-          style={[
-            styles.bubble,
-            {
-              backgroundColor: colors.card,
-              borderColor: colors.border,
-            },
-            isMine && {
-              backgroundColor: accentForeground,
-              borderBottomRightRadius: 6,
-            },
-          ]}
-        >
-          {!isMine && (
+      <>
+        {showDateSeparator ? (
+          <View style={styles.dateSeparator}>
             <Text
               style={[
-                styles.bubbleAuthor,
+                styles.dateSeparatorText,
                 { color: colors.muted },
               ]}
             >
-              {author}
+              {formatMessageDateLabel(item.created_at)}
             </Text>
-          )}
+          </View>
+        ) : null}
 
-          {item.content ? (
-            <Text
-              style={[
-                styles.bubbleText,
-                {
-                  color: isMine
-                    ? onAccent
-                    : colors.text,
-                },
-              ]}
-            >
-              {item.content}
-            </Text>
-          ) : null}
-
-          {hasAttachment && item.attachment_url && (
-            <View style={[styles.attachmentMessage, { borderTopColor: isMine ? 'rgba(255,255,255,0.25)' : colors.border }]}> 
-              {isImage ? (
-                <Pressable onPress={() => Linking.openURL(item.attachment_url!)} style={{ width: 190, height: 150, borderRadius: 12, overflow: 'hidden' }}>
-                  <Image source={{ uri: item.attachment_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-                </Pressable>
-              ) : isAudio ? (
-                <Pressable onPress={() => togglePlayback(item.attachment_url!, item.id)} style={[styles.audioAttachment, { borderColor: isMine ? 'rgba(255,255,255,0.25)' : colors.border }]}> 
-                  {playingMessageId === item.id ? <Pause size={18} color={isMine ? onAccent : accentForeground} /> : <Play size={18} color={isMine ? onAccent : accentForeground} />}
-                  <Text style={[styles.attachmentName, { color: isMine ? onAccent : colors.text }]} numberOfLines={1}>{item.attachment_name || 'Voice note'}</Text>
-                </Pressable>
-              ) : (
-                <Pressable onPress={() => Linking.openURL(item.attachment_url!)} style={styles.audioAttachment}>
-                  {isVideo ? <Play size={20} color={isMine ? onAccent : accentForeground} /> : <File size={20} color={isMine ? onAccent : accentForeground} />}
-                  <Text numberOfLines={2} style={[styles.attachmentName, { color: isMine ? onAccent : colors.text }]}>{item.attachment_name || 'Attachment'}</Text>
-                </Pressable>
-              )}
-            </View>
-          )}
-
-          <Text
-            style={[
-              styles.messageTime,
-              {
-                color: isMine
-                  ? 'rgba(255,255,255,0.72)'
-                  : colors.muted,
-              },
-            ]}
-          >
-            {formatTime(item.created_at)}
-          </Text>
-        </View>
-        </Pressable>
-      </View>
-    );
-  };
-
-  // ── Header ────────────────────────────────────────────────────────────────
-
-  const renderHeader = () => (
-    <View
-      style={[
-        styles.header,
-        {
-          backgroundColor: colors.bg,
-          borderBottomColor: colors.border,
-        },
-      ]}
-    >
-      <Pressable
-        onPress={() => router.replace('/(tabs)' as never)}
-        style={styles.headerSide}
-        hitSlop={10}
-      >
-        <ChevronLeft
-          color={colors.text}
-          size={24}
-          strokeWidth={2.2}
-        />
-      </Pressable>
-
-      <Pressable
-        onPress={() => {
-          setMenuOpen(false);
-          setView('info');
-        }}
-        style={styles.headerTitleButton}
-        hitSlop={6}
-      >
-        <Text
-          style={[
-            styles.headerTitle,
-            { color: isBlackDark ? '#FFFFFF' : accentForeground },
-          ]}
-          numberOfLines={1}
-        >
-          {group?.name ?? 'Group'}
-        </Text>
-
-        <Text
-          style={[
-            styles.headerSubtitle,
-            { color: colors.muted },
-          ]}
-        >
-          {members.length} {members.length === 1 ? 'member' : 'members'}
-        </Text>
-      </Pressable>
-
-      <Pressable
-        onPress={() => setMenuOpen((previous) => !previous)}
-        style={styles.headerSide}
-        hitSlop={10}
-      >
-        <MoreVertical
-          color={colors.text}
-          size={22}
-        />
-      </Pressable>
-
-      {menuOpen && (
         <View
           style={[
-            styles.menu,
-            {
-              backgroundColor: colors.card,
-              borderColor: colors.border,
-            },
+            styles.msgRow,
+          isMine
+            ? styles.msgRowMine
+            : styles.msgRowTheirs,
+        ]}
+      >
+        <Pressable
+          onLongPress={() => {
+            if (
+              isMine &&
+              !isSidekickReply
+            ) {
+              void handleUnsendMessage(
+                item,
+              );
+            }
+          }}
+          delayLongPress={350}
+          disabled={
+            !isMine ||
+            isSidekickReply
+          }
+          style={({ pressed }) => [
+            styles.messagePressable,
+            pressed &&
+              isMine &&
+              !isSidekickReply &&
+              styles.messagePressed,
           ]}
         >
-          {isAdmin && (
-            <Pressable onPress={() => handleMenuAction('edit')} style={styles.menuItem}>
-              <Text style={[styles.menuText, { color: colors.text }]}>Edit group</Text>
-            </Pressable>
-          )}
-
-          <Pressable
-            onPress={() => handleMenuAction('clear')}
-            style={styles.menuItem}
+          <View
+            style={[
+              styles.bubble,
+              isSidekickReply
+                ? {
+                    backgroundColor:
+                      colors.card,
+                    borderColor:
+                      colors.border,
+                    borderWidth: 1,
+                    borderBottomLeftRadius: 6,
+                  }
+                : outgoing
+                  ? {
+                      backgroundColor:
+                        accentForeground,
+                      borderBottomRightRadius: 6,
+                    }
+                  : {
+                      backgroundColor:
+                        colors.card,
+                      borderColor:
+                        colors.border,
+                      borderWidth: 1,
+                      borderBottomLeftRadius: 6,
+                    },
+            ]}
           >
-            <Text
-              style={[
-                styles.menuText,
-                { color: colors.text },
-              ]}
-            >
-              Clear chat
-            </Text>
-          </Pressable>
-
-          {isAdmin && (
-            <Pressable
-              onPress={() => handleMenuAction('delete')}
-              style={styles.menuItem}
-            >
+            {isSidekickReply ? (
               <Text
                 style={[
-                  styles.menuText,
-                  { color: colors.danger },
-                ]}
-              >
-                Delete group
-              </Text>
-            </Pressable>
-          )}
-
-          <Pressable
-            onPress={() => handleMenuAction('exit')}
-            style={styles.menuItem}
-          >
-            <Text
-              style={[
-                styles.menuText,
-                { color: colors.danger },
-              ]}
-            >
-              Exit group
-            </Text>
-          </Pressable>
-        </View>
-      )}
-    </View>
-  );
-
-  // ── Info screen ───────────────────────────────────────────────────────────
-
-  const renderInfo = () => {
-    const firstFiveFriends = invitableFriends.slice(0, 5);
-    const remainingFriends = invitableFriends.slice(5);
-
-    return (
-      <View style={styles.infoContainer}>
-        <View
-          style={[
-            styles.infoHeader,
-            { borderBottomColor: colors.border },
-          ]}
-        >
-          <Pressable
-            onPress={() => setView('chat')}
-            style={styles.infoBack}
-            hitSlop={10}
-          >
-            <ChevronLeft
-              color={colors.text}
-              size={24}
-            />
-          </Pressable>
-
-          <Text
-            style={[
-              styles.infoTitle,
-              { color: colors.text },
-            ]}
-          >
-            Group Info
-          </Text>
-
-          <View style={styles.infoBack} />
-        </View>
-
-        {infoLoading ? (
-          <View style={styles.centerState}>
-            <ActivityIndicator
-              color={accentForeground}
-            />
-          </View>
-        ) : (
-          <ScrollView
-            style={styles.infoScroll}
-            contentContainerStyle={styles.infoBody}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-          >
-            {/* Group name + description */}
-
-            <View style={styles.groupIntro}>
-              <View
-                style={[
-                  styles.groupAvatar,
+                  styles.sidekickLabel,
                   {
-                    backgroundColor:
+                    color:
                       accentForeground,
                   },
                 ]}
               >
-                <Text
-                  style={[
-                    styles.groupAvatarText,
-                    { color: onAccent },
-                  ]}
-                >
-                  {(group?.name || 'G')
-                    .slice(0, 1)
-                    .toUpperCase()}
-                </Text>
-              </View>
-
-              <Text
-                style={[
-                  styles.groupInfoName,
-                  { color: colors.text },
-                ]}
-              >
-                {group?.name ?? 'Group'}
+                SIDEKICK
               </Text>
+            ) : null}
 
-              {group?.description ? (
-                <Text
-                  style={[
-                    styles.groupDescription,
-                    { color: colors.muted },
-                  ]}
-                >
-                  {group.description}
-                </Text>
-              ) : (
-                <Text
-                  style={[
-                    styles.groupDescriptionEmpty,
-                    { color: colors.muted },
-                  ]}
-                >
-                  No group description yet.
-                </Text>
-              )}
-            </View>
+            {item.attachment_type ===
+              'image' &&
+            item.attachment_url ? (
+              <Image
+                source={{
+                  uri: item.attachment_url,
+                }}
+                style={
+                  styles.attachmentImage
+                }
+                resizeMode="cover"
+              />
+            ) : null}
 
-            {/* Invite friends */}
-
-            <View style={styles.section}>
-              <Text
+            {item.attachment_type ===
+              'video' &&
+            item.attachment_url ? (
+              <Pressable
+                onPress={() =>
+                  Linking.openURL(
+                    item.attachment_url!,
+                  )
+                }
                 style={[
-                  styles.sectionLabel,
-                  { color: colors.muted },
-                ]}
-              >
-                INVITE FRIENDS
-              </Text>
-
-              <View
-                style={[
-                  styles.searchBox,
+                  styles.docBubble,
                   {
-                    backgroundColor: colors.input,
-                    borderColor: colors.border,
+                    borderColor:
+                      outgoing
+                        ? 'rgba(255,255,255,0.4)'
+                        : colors.border,
                   },
                 ]}
               >
-                <Search
-                  color={colors.muted}
-                  size={18}
-                />
-
-                <TextInput
-                  value={inviteSearch}
-                  onChangeText={setInviteSearch}
-                  placeholder="Search friends..."
-                  placeholderTextColor={colors.muted}
-                  style={[
-                    styles.searchInput,
-                    { color: colors.text },
-                  ]}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-              </View>
-
-              {!friends.length ? (
                 <Text
                   style={[
-                    styles.emptyText,
-                    { color: colors.muted },
-                  ]}
-                >
-                  You don't have any friends to invite yet.
-                </Text>
-              ) : !invitableFriends.length ? (
-                <Text
-                  style={[
-                    styles.emptyText,
-                    { color: colors.muted },
-                  ]}
-                >
-                  No friends match your search.
-                </Text>
-              ) : (
-                <>
-                  {firstFiveFriends.map(renderFriendRow)}
-
-                  {remainingFriends.length > 0 && (
-                    <View
-                      style={[
-                        styles.friendOverflow,
-                        {
-                          borderColor: colors.border,
-                          backgroundColor: colors.bg,
-                        },
-                      ]}
-                    >
-                      <ScrollView
-                        nestedScrollEnabled
-                        showsVerticalScrollIndicator
-                        style={styles.friendOverflowScroll}
-                      >
-                        {remainingFriends.map(
-                          renderFriendRow,
-                        )}
-                      </ScrollView>
-                    </View>
-                  )}
-                </>
-              )}
-            </View>
-
-            {/* Members */}
-
-            <View style={styles.section}>
-              <Text
-                style={[
-                  styles.sectionLabel,
-                  { color: colors.muted },
-                ]}
-              >
-                MEMBERS · {members.length}
-              </Text>
-
-              {members.map((member) => (
-                <View
-                  key={member.user_id}
-                  style={[
-                    styles.memberRow,
+                    styles.docBubbleText,
                     {
-                      backgroundColor: colors.card,
-                      borderColor: colors.border,
+                      color:
+                        outgoing
+                          ? onAccent
+                          : colors.text,
                     },
                   ]}
                 >
-                  <View
-                    style={[
-                      styles.memberAvatar,
-                      {
-                        backgroundColor:
-                          accentForeground,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.memberAvatarText,
-                        { color: onAccent },
-                      ]}
-                    >
-                      {(member.display_name || 'M')
-                        .slice(0, 1)
-                        .toUpperCase()}
-                    </Text>
-                  </View>
+                  🎬 Video
+                </Text>
+              </Pressable>
+            ) : null}
 
-                  <View style={styles.memberDetails}>
-                    <Text
-                      style={[
-                        styles.rowTitle,
-                        { color: colors.text },
-                      ]}
-                    >
-                      {member.display_name}
-                      {member.user_id === myId
-                        ? ' (You)'
-                        : ''}
-                    </Text>
-
-                    {!!member.username && (
-                      <Text style={[styles.rowSub, { color: colors.muted }]}>@{member.username}</Text>
-                    )}
-                    {(member as any).title || (member as any).tag || (member as any).profile_title ? (
-                      <Text style={[styles.rowSub, { color: accentForeground }]}>{(member as any).title || (member as any).tag || (member as any).profile_title}</Text>
-                    ) : null}
-                  </View>
-
-                  {member.role === 'admin' || member.role === 'owner' ? (
-                    <View
-                      style={[
-                        styles.adminPill,
-                        {
-                          borderColor: accentForeground,
-                          backgroundColor:
-                            isBlackDark ? '#252525' : colors.card,
-                        },
-                      ]}
-                    >
-                      <Shield
-                        color={isBlackDark ? '#FFFFFF' : accentForeground}
-                        size={12}
-                      />
-
-                      <Text
-                        style={[
-                          styles.adminPillText,
-                          {
-                            color: isBlackDark
-                              ? '#FFFFFF'
-                              : accentForeground,
-                          },
-                        ]}
-                      >
-                        Admin
-                      </Text>
-                    </View>
-                  ) : null}
-
-                  {isAdmin && member.user_id !== myId && member.role !== 'owner' ? (
-                    <>
-                      <Pressable
-                        onPress={() => handlePromote(member.user_id)}
-                        style={[
-                          styles.makeAdminButton,
-                          {
-                            borderColor: accentForeground,
-                            backgroundColor:
-                              isBlackDark ? '#252525' : 'transparent',
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.makeAdminText,
-                            {
-                              color: isBlackDark
-                                ? '#FFFFFF'
-                                : accentForeground,
-                            },
-                          ]}
-                        >
-                          Make Admin
-                        </Text>
-                      </Pressable>
-
-                      <Pressable
-                        onPress={() =>
-                          handleRemoveMember(
-                            member.user_id,
-                            member.display_name,
-                          )
-                        }
-                        style={[
-                          styles.makeAdminButton,
-                          {
-                            borderColor: colors.danger,
-                            backgroundColor:
-                              isBlackDark ? '#252525' : 'transparent',
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.makeAdminText,
-                            {
-                              color: isBlackDark
-                                ? '#FFFFFF'
-                                : colors.danger,
-                            },
-                          ]}
-                        >
-                          Remove
-                        </Text>
-                      </Pressable>
-                    </>
-                  ) : null}
-                </View>
-              ))}
-            </View>
-          </ScrollView>
-        )}
-      </View>
-    );
-  };
-
-  // ── Friend row ────────────────────────────────────────────────────────────
-
-  function renderFriendRow(friend: Friend) {
-    const alreadyInvited = pendingInviteIds.has(friend.id);
-    const isInviting = invitingId === friend.id;
-
-    return (
-      <View
-        key={friend.id}
-        style={[
-          styles.friendRow,
-          {
-            backgroundColor: colors.card,
-            borderColor: colors.border,
-          },
-        ]}
-      >
-        <View
-          style={[
-            styles.friendAvatar,
-            {
-              backgroundColor:
-                accentForeground,
-            },
-          ]}
-        >
-          <Text
-            style={[
-              styles.friendAvatarText,
-              { color: onAccent },
-            ]}
-          >
-            {(friend.display_name || 'F')
-              .slice(0, 1)
-              .toUpperCase()}
-          </Text>
-        </View>
-
-        <View style={styles.friendDetails}>
-          <Text
-            style={[
-              styles.rowTitle,
-              { color: colors.text },
-            ]}
-            numberOfLines={1}
-          >
-            {friend.display_name}
-          </Text>
-
-          {!!friend.username && (
-            <Text
-              style={[
-                styles.rowSub,
-                { color: colors.muted },
-              ]}
-              numberOfLines={1}
-            >
-              @{friend.username}
-            </Text>
-          )}
-        </View>
-
-        {alreadyInvited ? (
-          <View
-            style={[
-              styles.invitedPill,
-              { borderColor: colors.border },
-            ]}
-          >
-            <Text
-              style={[
-                styles.invitedText,
-                { color: colors.muted },
-              ]}
-            >
-              Invited
-            </Text>
-          </View>
-        ) : (
-          <Pressable
-            onPress={() =>
-              handleInviteFriend(friend.id)
-            }
-            disabled={isInviting}
-            style={[
-              styles.inviteButton,
-              {
-                backgroundColor:
-                  accentForeground,
-              },
-              isInviting && {
-                opacity: 0.55,
-              },
-            ]}
-          >
-            {isInviting ? (
-              <ActivityIndicator
-                size="small"
-                color={onAccent}
-              />
-            ) : (
-              <>
-                <UserPlus
-                  color={onAccent}
-                  size={14}
-                />
+            {item.attachment_type ===
+              'audio' &&
+            item.attachment_url ? (
+              <Pressable
+                onPress={() =>
+                  togglePlayback(item)
+                }
+                style={[
+                  styles.audioBubble,
+                  {
+                    borderColor:
+                      outgoing
+                        ? 'rgba(255,255,255,0.4)'
+                        : colors.border,
+                  },
+                ]}
+              >
+                {playingMessageId ===
+                item.id ? (
+                  <Pause
+                    color={
+                      outgoing
+                        ? onAccent
+                        : colors.text
+                    }
+                    size={18}
+                  />
+                ) : (
+                  <Play
+                    color={
+                      outgoing
+                        ? onAccent
+                        : colors.text
+                    }
+                    size={18}
+                  />
+                )}
 
                 <Text
                   style={[
-                    styles.inviteButtonText,
-                    { color: onAccent },
+                    styles.audioBubbleText,
+                    {
+                      color:
+                        outgoing
+                          ? onAccent
+                          : colors.text,
+                    },
                   ]}
                 >
-                  Invite
+                  Voice message
                 </Text>
-              </>
-            )}
-          </Pressable>
-        )}
-      </View>
-    );
-  }
+              </Pressable>
+            ) : null}
 
-  // ── Chat ──────────────────────────────────────────────────────────────────
-
-  const renderChat = () => (
-    <KeyboardAvoidingView
-      style={styles.chatContainer}
-      behavior={
-        Platform.OS === 'ios'
-          ? 'padding'
-          : undefined
-      }
-    >
-      {messagesLoading ? (
-        <View style={styles.centerState}>
-          <ActivityIndicator
-            color={accentForeground}
-          />
-        </View>
-      ) : (
-        <FlatList
-          ref={listRef}
-          data={messages}
-          keyExtractor={(message) => message.id}
-          renderItem={renderMessage}
-          contentContainerStyle={[
-            styles.messageList,
-            messages.length === 0 &&
-              styles.messageListEmpty,
-          ]}
-          onContentSizeChange={() => {
-            listRef.current?.scrollToEnd({
-              animated: false,
-            });
-          }}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-          ListEmptyComponent={
-            <View style={styles.emptyChat}>
-              <Text
+            {item.attachment_type ===
+              'document' &&
+            item.attachment_url ? (
+              <Pressable
+                onPress={() =>
+                  Linking.openURL(
+                    item.attachment_url!,
+                  )
+                }
                 style={[
-                  styles.emptyChatTitle,
-                  { color: colors.text },
+                  styles.docBubble,
+                  {
+                    borderColor:
+                      outgoing
+                        ? 'rgba(255,255,255,0.4)'
+                        : colors.border,
+                  },
                 ]}
               >
-                No messages yet
-              </Text>
+                <FileText
+                  color={
+                    outgoing
+                      ? onAccent
+                      : colors.text
+                  }
+                  size={18}
+                />
 
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.docBubbleText,
+                    {
+                      color:
+                        outgoing
+                          ? onAccent
+                          : colors.text,
+                    },
+                  ]}
+                >
+                  {item.attachment_name ??
+                    'Document'}
+                </Text>
+              </Pressable>
+            ) : null}
+
+            {!item.attachment_type ? (
               <Text
                 style={[
-                  styles.emptyChatText,
-                  { color: colors.muted },
+                  styles.bubbleText,
+                  {
+                    color:
+                      contentColor,
+                  },
                 ]}
               >
-                Start the conversation.
+                {item.content}
               </Text>
-            </View>
-          }
-        />
-      )}
+            ) : null}
 
-      {selectedAttachment && (
-        <View style={[styles.attachmentPreview, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
-          {selectedAttachment.mimeType.startsWith('image/') ? (
-            <Image source={{ uri: selectedAttachment.uri }} style={styles.reviewImage} resizeMode="cover" />
-          ) : (
-            <View style={[styles.attachmentPreviewIcon, { backgroundColor: accentForeground }]}>
-              {selectedAttachment.mimeType.startsWith('audio/') ? <Mic size={18} color={onAccent} /> : <File size={18} color={onAccent} />}
-            </View>
-          )}
-          <View style={styles.attachmentPreviewDetails}>
-            <Text numberOfLines={1} style={[styles.attachmentPreviewName, { color: colors.text }]}>{selectedAttachment.name}</Text>
-            <Text style={[styles.reviewLabel, { color: colors.muted }]}>Review before sending</Text>
-            {selectedAttachment.size ? <Text style={[styles.attachmentPreviewSize, { color: colors.muted }]}>{formatFileSize(selectedAttachment.size)}</Text> : null}
-          </View>
-          <Pressable onPress={() => setSelectedAttachment(null)} hitSlop={10} style={styles.reviewCancel}>
-            <X color={colors.muted} size={20} />
-          </Pressable>
-          <Pressable onPress={sendSelectedAttachment} disabled={uploadingAttachment} style={[styles.reviewSend, { backgroundColor: accentForeground }, uploadingAttachment && { opacity: 0.5 }]}>
-            {uploadingAttachment ? <ActivityIndicator size="small" color={onAccent} /> : <Send color={onAccent} size={17} />}
-          </Pressable>
-        </View>
-      )}
-
-      <View
-        style={[styles.composer, { backgroundColor: colors.bg, borderTopColor: colors.border }]}
-      >
-        <Pressable onPress={handlePickAttachment} disabled={uploadingAttachment || sending} style={[styles.attachButton, { borderColor: colors.border, backgroundColor: colors.card }]}>
-          {uploadingAttachment ? <ActivityIndicator size="small" color={accentForeground} /> : <Paperclip color={colors.text} size={19} />}
-        </Pressable>
-
-        {isRecording ? (
-          <>
-            <View style={[styles.recordingRow, { borderColor: colors.border, backgroundColor: colors.card }]}>
-              <View style={styles.recordingDot} />
-              <Text style={[styles.recordingText, { color: colors.text }]}>Recording {recordingSeconds}s</Text>
-              <Pressable onPress={cancelRecording} style={styles.recordingCancelBtn}><X color={colors.muted} size={18} /></Pressable>
-            </View>
-            <Pressable onPress={stopRecordingAndSend} style={[styles.sendButton, { backgroundColor: accentForeground }]}><Send color={onAccent} size={18} /></Pressable>
-          </>
-        ) : (
-          <>
-            <TextInput value={draft} onChangeText={setDraft} placeholder="Message the group..." placeholderTextColor={colors.muted} style={[styles.composerInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.card }]} multiline maxLength={5000} />
-            <Pressable
-              onPress={draft.trim() ? handleSend : startRecording}
-              disabled={sending || uploadingAttachment}
-              style={[styles.sendButton, { backgroundColor: accentForeground }, (sending || uploadingAttachment) && { opacity: 0.45 }]}
+            <Text
+              style={[
+                styles.bubbleTime,
+                {
+                  color:
+                    outgoing
+                      ? 'rgba(255,255,255,0.75)'
+                      : colors.muted,
+                },
+              ]}
             >
-              {sending || uploadingAttachment ? <ActivityIndicator size="small" color={onAccent} /> : draft.trim() ? <Send color={onAccent} size={18} /> : <Mic color={onAccent} size={19} />}
-            </Pressable>
-          </>
-        )}
-      </View>
-    </KeyboardAvoidingView>
-  );
-
-  const tagModal = tagModalOpen ? (
-    <Modal visible transparent animationType="fade" onRequestClose={() => setTagModalOpen(false)}>
-      <View style={styles.subShade}>
-        <View style={[styles.subSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-            <Text style={[styles.infoTitle, { color: colors.text }]}>Add tag</Text>
-            <Pressable onPress={() => setTagModalOpen(false)}><X color={colors.muted} size={22} /></Pressable>
+              {time}
+            </Text>
           </View>
-          {chatTags.length ? chatTags.map(tag => (
-            <Pressable key={tag.id} onPress={async () => {
-              if (!myId) return;
-              const exists = chatTagAssignments.some(a => a.tag_id === tag.id);
-              if (!exists) await supabase.from('social_chat_tag_assignments').insert({ user_id: myId, chat_id: groupId, tag_id: tag.id });
-              setTagModalOpen(false);
-            }} style={[styles.tagOption, { borderColor: colors.border }]}>
-              <Tag size={16} color={accentForeground} />
-              <Text style={{ color: colors.text, fontFamily: FONT_MED }}>{tag.name}</Text>
-            </Pressable>
-          )) : <Text style={{ color: colors.muted, fontFamily: FONT }}>No tags created yet.</Text>}
+          </Pressable>
         </View>
-      </View>
-    </Modal>
-  ) : null;
+      </>
+    );
+  };
 
-  // ── Edit group modal ───────────────────────────────────────────────────────
-  const editGroupModal = editingGroup ? (
-    <Modal visible transparent animationType="fade" onRequestClose={() => setEditingGroup(false)}>
-      <View style={styles.subShade}>
-        <View style={[styles.subSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.infoTitle, { color: colors.text, marginBottom: 14 }]}>Edit group</Text>
-          <TextInput value={editName} onChangeText={setEditName} placeholder="Group name" placeholderTextColor={colors.muted} style={[styles.searchInput, { color: colors.text, borderColor: colors.border, borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 10 }]} />
-          <TextInput value={editDescription} onChangeText={setEditDescription} placeholder="Description" placeholderTextColor={colors.muted} multiline style={[styles.searchInput, { color: colors.text, borderColor: colors.border, borderWidth: 1, borderRadius: 12, padding: 12, minHeight: 90 }]} />
-          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 14 }}>
-            <Pressable onPress={() => setEditingGroup(false)}><Text style={[styles.menuText, { color: colors.muted }]}>Cancel</Text></Pressable>
-            <Pressable onPress={saveGroupEdits}><Text style={[styles.menuText, { color: accentForeground }]}>Save</Text></Pressable>
-          </View>
-        </View>
-      </View>
-    </Modal>
-  ) : null;
+  const headerName =
+    isSidekick
+      ? 'SIDEKICK'
+      : (
+          profile?.display_name ??
+          SYSTEM_CHAT_TITLES[
+            normalizedId
+          ] ??
+          'Chat'
+        ).toUpperCase();
 
-  useEffect(() => {
-    return () => {
-      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
-      soundRef.current?.unloadAsync();
-      recordingRef.current?.stopAndUnloadAsync().catch(() => {});
+  const showProfileButton =
+    !isSidekick &&
+    !SYSTEM_CHAT_TITLES[
+      normalizedId
+    ];
+
+  const closeMenu =
+    () => {
+      setMenuOpen(false);
     };
-  }, []);
-
-  // ── Main render ───────────────────────────────────────────────────────────
 
   return (
     <SafeAreaView
       style={[
         styles.safe,
-        { backgroundColor: colors.bg },
+        {
+          backgroundColor:
+            colors.bg,
+        },
       ]}
     >
-      {view === 'chat' ? (
-        <>
-          {renderHeader()}
-          {renderChat()}
-        </>
+      {/* HEADER */}
+
+      <View
+        style={[
+          styles.header,
+          {
+            borderBottomColor:
+              colors.border,
+          },
+        ]}
+      >
+        <Pressable
+          onPress={() =>
+            router.replace(
+              '/(tabs)' as never,
+            )
+          }
+          hitSlop={12}
+          style={styles.headerBtn}
+        >
+          <ChevronLeft
+            color={
+              colors.text
+            }
+            size={26}
+          />
+        </Pressable>
+
+        <View
+          style={
+            styles.headerTitleWrap
+          }
+        >
+          {profileLoading ? (
+            <ActivityIndicator
+              color={
+                colors.muted
+              }
+              size="small"
+            />
+          ) : (
+            <Pressable
+              disabled={
+                !showProfileButton
+              }
+              onPress={() =>
+                router.push({
+                  pathname:
+                    '/chat/profile/[id]',
+                  params: { id },
+                } as never)
+              }
+              style={
+                styles.headerTitleWrap
+              }
+            >
+              <Text
+                style={[
+                  styles.headerTitle,
+                  {
+                    color:
+                      isBlackDark
+                        ? '#FFFFFF'
+                        : accentForeground,
+                  },
+                ]}
+                numberOfLines={1}
+              >
+                {headerName}
+              </Text>
+
+            </Pressable>
+          )}
+        </View>
+
+        <Pressable
+          onPress={() =>
+            setMenuOpen(true)
+          }
+          hitSlop={12}
+          style={styles.headerBtn}
+        >
+          <MoreVertical
+            color={
+              colors.text
+            }
+            size={24}
+          />
+        </Pressable>
+      </View>
+
+      {/* MESSAGES */}
+
+      <View style={styles.body}>
+        {messagesLoading ? (
+          <View
+            style={
+              styles.centerState
+            }
+          >
+            <ActivityIndicator
+              color={
+                accentForeground
+              }
+              size="large"
+            />
+
+            <Text
+              style={[
+                styles.stateText,
+                {
+                  color:
+                    colors.muted,
+                },
+              ]}
+            >
+              Loading messages…
+            </Text>
+          </View>
+        ) : messagesError ? (
+          <View
+            style={
+              styles.centerState
+            }
+          >
+            <Text
+              style={[
+                styles.stateText,
+                {
+                  color:
+                    colors.text,
+                },
+              ]}
+            >
+              {messagesError}
+            </Text>
+
+            <Pressable
+              onPress={
+                loadMessages
+              }
+              style={[
+                styles.retryBtn,
+                {
+                  backgroundColor:
+                    accentForeground,
+                },
+              ]}
+            >
+              <Text
+                style={
+                  styles.retryBtnText
+                }
+              >
+                Retry
+              </Text>
+            </Pressable>
+          </View>
+        ) : messages.length ===
+          0 ? (
+          <View
+            style={
+              styles.centerState
+            }
+          >
+            {isSidekick ? (
+              <>
+                <Text
+                  style={[
+                    styles.sidekickGreeting,
+                    {
+                      color:
+                        colors.text,
+                    },
+                  ]}
+                >
+                  Hi! I’m your Sidekick 👣
+                </Text>
+
+                <Text
+                  style={[
+                    styles.sidekickGreetingSecond,
+                    {
+                      color:
+                        colors.text,
+                    },
+                  ]}
+                >
+                  I'm here to help you improve your life, one atomic habit at a time!
+                </Text>
+              </>
+            ) : (
+              <Text
+                style={[
+                  styles.stateText,
+                  {
+                    color:
+                      colors.muted,
+                  },
+                ]}
+              >
+                No messages yet. Say
+                hello 👋
+              </Text>
+            )}
+          </View>
+        ) : (
+          <FlatList
+            ref={listRef}
+            data={messages}
+            keyExtractor={item =>
+              item.id
+            }
+            renderItem={
+              renderMessage
+            }
+            contentContainerStyle={
+              styles.listContent
+            }
+            showsVerticalScrollIndicator={
+              false
+            }
+            onContentSizeChange={() =>
+              listRef.current?.scrollToEnd(
+                {
+                  animated:
+                    false,
+                },
+              )
+            }
+          />
+        )}
+      </View>
+
+      {/* COMPOSER */}
+
+      {isBlocked || isBlockedByOther ? (
+        <View
+          style={[
+            styles.blockedBar,
+            {
+              backgroundColor: colors.card,
+              borderTopColor: colors.border,
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.blockedBarText,
+              { color: colors.muted },
+            ]}
+          >
+            {isBlocked
+              ? `You blocked ${profile?.display_name ?? 'this user'}.`
+              : 'Cannot send messages.'}
+          </Text>
+
+          {isBlocked ? (
+            <Pressable
+              onPress={handleUnblock}
+              disabled={actionLoading === 'unblock'}
+              hitSlop={8}
+            >
+              <Text
+                style={[
+                  styles.blockedBarLink,
+                  { color: accentForeground },
+                ]}
+              >
+                {actionLoading === 'unblock'
+                  ? 'Unblocking…'
+                  : 'Tap here to unblock'}
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
       ) : (
-        renderInfo()
+      <KeyboardAvoidingView
+        behavior={
+          Platform.OS === 'ios'
+            ? 'padding'
+            : undefined
+        }
+        keyboardVerticalOffset={0}
+      >
+        <View
+          style={[
+            styles.composer,
+            {
+              backgroundColor:
+                colors.card,
+              borderTopColor:
+                colors.border,
+            },
+          ]}
+        >
+          {!isSidekick &&
+          !isRecording ? (
+            <Pressable
+              onPress={
+                handlePickAttachment
+              }
+              disabled={
+                uploadingAttachment ||
+                sending
+              }
+              hitSlop={8}
+              style={[
+                styles.attachBtn,
+                {
+                  backgroundColor:
+                    colors.card,
+                  borderColor:
+                    colors.border,
+                },
+              ]}
+            >
+              {uploadingAttachment ? (
+                <ActivityIndicator
+                  color={
+                    accentForeground
+                  }
+                  size="small"
+                />
+              ) : (
+                <Paperclip
+                  color={
+                    colors.muted
+                  }
+                  size={20}
+                />
+              )}
+            </Pressable>
+          ) : null}
+
+          {isRecording ? (
+            <View
+              style={[
+                styles.recordingRow,
+                {
+                  borderColor:
+                    colors.border,
+                  backgroundColor:
+                    colors.bg,
+                },
+              ]}
+            >
+              <View
+                style={
+                  styles.recordingDot
+                }
+              />
+
+              <Text
+                style={[
+                  styles.recordingText,
+                  {
+                    color:
+                      colors.text,
+                  },
+                ]}
+              >
+                Recording…{' '}
+                {Math.floor(
+                  recordingSeconds /
+                    60,
+                )}
+                :
+                {String(
+                  recordingSeconds %
+                    60,
+                ).padStart(2, '0')}
+              </Text>
+
+              <Pressable
+                onPress={
+                  cancelRecording
+                }
+                hitSlop={8}
+                style={
+                  styles.recordingCancelBtn
+                }
+              >
+                <X
+                  color={
+                    colors.muted
+                  }
+                  size={18}
+                />
+              </Pressable>
+            </View>
+          ) : (
+            <TextInput
+              value={draft}
+              onChangeText={
+                setDraft
+              }
+              placeholder={
+                isSidekick
+                  ? 'Message Sidekick…'
+                  : 'Type a message…'
+              }
+              placeholderTextColor={
+                colors.muted
+              }
+              style={[
+                styles.input,
+                {
+                  color:
+                    colors.text,
+                  backgroundColor:
+                    colors.bg,
+                  borderColor:
+                    colors.border,
+                },
+              ]}
+              multiline
+              maxLength={2000}
+              scrollEnabled={false}
+              editable={!sending}
+            />
+          )}
+
+          {isRecording ? (
+            <Pressable
+              onPress={
+                stopRecordingAndSend
+              }
+              disabled={
+                uploadingAttachment
+              }
+              hitSlop={8}
+              style={[
+                styles.sendBtn,
+                {
+                  backgroundColor:
+                    accentForeground,
+                },
+              ]}
+            >
+              {uploadingAttachment ? (
+                <ActivityIndicator
+                  color="#FFFFFF"
+                  size="small"
+                />
+              ) : (
+                <Square
+                  color="#FFFFFF"
+                  size={16}
+                />
+              )}
+            </Pressable>
+          ) : !isSidekick &&
+            !draft.trim() ? (
+            <Pressable
+              onPress={
+                startRecording
+              }
+              disabled={
+                uploadingAttachment
+              }
+              hitSlop={8}
+              style={[
+                styles.sendBtn,
+                {
+                  backgroundColor:
+                    accentForeground,
+                },
+                uploadingAttachment &&
+                  styles.sendBtnDisabled,
+              ]}
+            >
+              <Mic
+                color="#FFFFFF"
+                size={18}
+              />
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={
+                handleSend
+              }
+              disabled={
+                !draft.trim() ||
+                sending
+              }
+              hitSlop={8}
+              style={[
+                styles.sendBtn,
+                {
+                  backgroundColor:
+                    accentForeground,
+                },
+                (!draft.trim() ||
+                  sending) &&
+                  styles.sendBtnDisabled,
+              ]}
+            >
+              {sending ? (
+                <ActivityIndicator
+                  color="#FFFFFF"
+                  size="small"
+                />
+              ) : (
+                <Send
+                  color="#FFFFFF"
+                  size={18}
+                />
+              )}
+            </Pressable>
+          )}
+        </View>
+      </KeyboardAvoidingView>
       )}
-      {editGroupModal}
-      {tagModal}
-      {exitModalOpen && (
-        <Modal visible transparent animationType="fade" onRequestClose={() => setExitModalOpen(false)}>
-          <View style={styles.subShade}>
-            <View style={[styles.subSheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <Text style={[styles.infoTitle, { color: colors.text }]}>Exit group?</Text>
-              <Text style={[styles.modalBodyText, { color: colors.muted }]}>You will leave this group and will no longer receive its messages.</Text>
-              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 18, marginTop: 18 }}>
-                <Pressable onPress={() => setExitModalOpen(false)}><Text style={[styles.menuText, { color: colors.muted }]}>Cancel</Text></Pressable>
-                <Pressable onPress={confirmExitGroup}><Text style={[styles.menuText, { color: colors.danger }]}>Exit Group</Text></Pressable>
+
+      {/* TOAST */}
+
+      {toast ? (
+        <View
+          style={
+            styles.toastWrap
+          }
+        >
+          <View
+            style={[
+              styles.toast,
+              {
+                backgroundColor:
+                  colors.card,
+                borderColor:
+                  colors.border,
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.toastText,
+                {
+                  color:
+                    colors.text,
+                },
+              ]}
+            >
+              {toast}
+            </Text>
+          </View>
+        </View>
+      ) : null}
+
+      {/* CHAT OPTIONS */}
+
+      {menuOpen ? (
+        <Pressable
+          style={
+            styles.menuBackdrop
+          }
+          onPress={closeMenu}
+        >
+          <View
+            style={[
+              styles.dropdownMenu,
+              {
+                backgroundColor:
+                  colors.card,
+                borderColor:
+                  colors.border,
+              },
+            ]}
+          >
+            {!isSidekick ? (
+              <>
+                <Pressable
+                  style={
+                    styles.menuItem
+                  }
+                  onPress={
+                    isBlocked ? handleUnblock : handleBlock
+                  }
+                  disabled={
+                    actionLoading === 'block' ||
+                    actionLoading === 'unblock'
+                  }
+                >
+                  <Text
+                    style={[
+                      styles.menuItemText,
+                      {
+                        color:
+                          colors.text,
+                      },
+                    ]}
+                  >
+                    {actionLoading === 'block'
+                      ? 'Blocking…'
+                      : actionLoading === 'unblock'
+                        ? 'Unblocking…'
+                        : isBlocked
+                          ? 'Unblock'
+                          : 'Block'}
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  style={
+                    styles.menuItem
+                  }
+                  onPress={() => {
+                    closeMenu();
+                    setTagModalOpen(
+                      true,
+                    );
+                    void loadChatTags();
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.menuItemText,
+                      {
+                        color:
+                          colors.text,
+                      },
+                    ]}
+                  >
+                    Add Tag
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  style={
+                    styles.menuItem
+                  }
+                  onPress={() => {
+                    closeMenu();
+
+                    Alert.alert(
+                      'Delete chat?',
+                      'This removes the conversation from your chat list.',
+                      [
+                        {
+                          text: 'Cancel',
+                          style: 'cancel',
+                        },
+                        {
+                          text: 'Delete',
+                          style: 'destructive',
+                          onPress:
+                            handleDeleteChat,
+                        },
+                      ],
+                    );
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.menuItemText,
+                      {
+                        color:
+                          '#C84D4D',
+                      },
+                    ]}
+                  >
+                    Delete Chat
+                  </Text>
+                </Pressable>
+              </>
+            ) : null}
+
+            <Pressable
+              style={
+                styles.menuItem
+              }
+              onPress={
+                handleClearChat
+              }
+              disabled={
+                actionLoading ===
+                'clear'
+              }
+            >
+              <Text
+                style={[
+                  styles.menuItemText,
+                  {
+                    color:
+                      colors.text,
+                  },
+                ]}
+              >
+                {actionLoading ===
+                'clear'
+                  ? 'Clearing…'
+                  : 'Clear Chat'}
+              </Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      ) : null}
+
+      {/* TAG MODAL */}
+
+      <Modal
+        visible={
+          tagModalOpen
+        }
+        transparent
+        animationType="fade"
+        onRequestClose={() =>
+          setTagModalOpen(
+            false,
+          )
+        }
+      >
+        <View
+          style={
+            styles.subShade
+          }
+        >
+          <View
+            style={[
+              styles.subSheet,
+              {
+                backgroundColor:
+                  colors.card,
+                borderColor:
+                  colors.border,
+              },
+            ]}
+          >
+            <View
+              style={
+                styles.subHeader
+              }
+            >
+              <Text
+                style={[
+                  styles.subTitle,
+                  {
+                    color:
+                      colors.text,
+                  },
+                ]}
+              >
+                Add Tag
+              </Text>
+
+              <Pressable
+                onPress={() =>
+                  setTagModalOpen(
+                    false,
+                  )
+                }
+                hitSlop={12}
+              >
+                <X
+                  color={
+                    colors.muted
+                  }
+                  size={22}
+                />
+              </Pressable>
+            </View>
+
+            {chatTags.length ===
+            0 ? (
+              <Text
+                style={[
+                  styles.subHint,
+                  {
+                    color:
+                      colors.muted,
+                  },
+                ]}
+              >
+                You haven't created
+                any tags yet.
+              </Text>
+            ) : (
+              chatTags.map(tag => {
+                const selected =
+                  assignedTagIds.includes(
+                    tag.id,
+                  );
+
+                return (
+                  <Pressable
+                    key={tag.id}
+                    onPress={() =>
+                      toggleChatTag(
+                        tag.id,
+                      )
+                    }
+                    style={[
+                      styles.menuItem,
+                      {
+                        borderBottomColor:
+                          colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.menuItemText,
+                        {
+                          color:
+                            selected
+                              ? accentForeground
+                              : colors.text,
+                        },
+                      ]}
+                    >
+                      {selected
+                        ? '✓ '
+                        : ''}
+                      {tag.name}
+                    </Text>
+                  </Pressable>
+                );
+              })
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* ATTACHMENT REVIEW */}
+
+      <Modal
+        visible={
+          attachmentReviewOpen
+        }
+        transparent
+        animationType="fade"
+        onRequestClose={
+          closeAttachmentReview
+        }
+      >
+        <View
+          style={
+            styles.subShade
+          }
+        >
+          <View
+            style={[
+              styles.attachmentReviewSheet,
+              {
+                backgroundColor:
+                  colors.card,
+                borderColor:
+                  colors.border,
+              },
+            ]}
+          >
+            <View
+              style={
+                styles.subHeader
+              }
+            >
+              <Text
+                style={[
+                  styles.subTitle,
+                  {
+                    color:
+                      colors.text,
+                  },
+                ]}
+              >
+                Review attachment
+              </Text>
+
+              <Pressable
+                onPress={
+                  closeAttachmentReview
+                }
+                hitSlop={12}
+                disabled={
+                  attachmentSending
+                }
+              >
+                <X
+                  color={
+                    colors.muted
+                  }
+                  size={22}
+                />
+              </Pressable>
+            </View>
+
+            {pendingAttachment?.type ===
+            'image' ? (
+              <Image
+                source={{
+                  uri: pendingAttachment.uri,
+                }}
+                style={
+                  styles.attachmentReviewImage
+                }
+                resizeMode="contain"
+              />
+            ) : pendingAttachment?.type ===
+              'audio' ? (
+              <View
+                style={[
+                  styles.attachmentReviewAudio,
+                  {
+                    borderColor:
+                      colors.border,
+                  },
+                ]}
+              >
+                <Pressable
+                  onPress={
+                    toggleReviewAudio
+                  }
+                  style={[
+                    styles.reviewPlayButton,
+                    {
+                      backgroundColor:
+                        accentForeground,
+                    },
+                  ]}
+                >
+                  {reviewPlaying ? (
+                    <Pause
+                      color="#FFFFFF"
+                      size={20}
+                    />
+                  ) : (
+                    <Play
+                      color="#FFFFFF"
+                      size={20}
+                    />
+                  )}
+                </Pressable>
+
+                <View
+                  style={{
+                    flex: 1,
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.reviewFileName,
+                      {
+                        color:
+                          colors.text,
+                      },
+                    ]}
+                    numberOfLines={2}
+                  >
+                    {
+                      pendingAttachment.name
+                    }
+                  </Text>
+
+                  <Text
+                    style={[
+                      styles.subHint,
+                      {
+                        color:
+                          colors.muted,
+                      },
+                    ]}
+                  >
+                    Voice note ready
+                    to send
+                  </Text>
+                </View>
               </View>
+            ) : (
+              <View
+                style={[
+                  styles.attachmentReviewFile,
+                  {
+                    borderColor:
+                      colors.border,
+                  },
+                ]}
+              >
+                <FileText
+                  color={
+                    accentForeground
+                  }
+                  size={30}
+                />
+
+                <Text
+                  style={[
+                    styles.reviewFileName,
+                    {
+                      color:
+                        colors.text,
+                    },
+                  ]}
+                  numberOfLines={3}
+                >
+                  {pendingAttachment?.name ||
+                    'Attachment'}
+                </Text>
+
+                <Text
+                  style={[
+                    styles.subHint,
+                    {
+                      color:
+                        colors.muted,
+                    },
+                  ]}
+                >
+                  Ready to send
+                </Text>
+              </View>
+            )}
+
+            <View
+              style={
+                styles.reviewActions
+              }
+            >
+              <Pressable
+                onPress={
+                  closeAttachmentReview
+                }
+                disabled={
+                  attachmentSending
+                }
+                style={[
+                  styles.reviewCancelButton,
+                  {
+                    borderColor:
+                      colors.border,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.reviewCancelText,
+                    {
+                      color:
+                        colors.text,
+                    },
+                  ]}
+                >
+                  Cancel
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={
+                  sendPendingAttachment
+                }
+                disabled={
+                  !pendingAttachment ||
+                  attachmentSending
+                }
+                style={[
+                  styles.reviewSendButton,
+                  {
+                    backgroundColor:
+                      accentForeground,
+                  },
+                  attachmentSending &&
+                    styles.sendBtnDisabled,
+                ]}
+              >
+                {attachmentSending ? (
+                  <ActivityIndicator
+                    color="#FFFFFF"
+                    size="small"
+                  />
+                ) : (
+                  <Send
+                    color="#FFFFFF"
+                    size={17}
+                  />
+                )}
+
+                <Text
+                  style={
+                    styles.reviewSendText
+                  }
+                >
+                  {attachmentSending
+                    ? 'Sending…'
+                    : 'Send'}
+                </Text>
+              </Pressable>
             </View>
           </View>
-        </Modal>
-      )}
+        </View>
+      </Modal>
+
+      {/* REPORT */}
+
+      <Modal
+        visible={
+          reportOpen
+        }
+        transparent
+        animationType="fade"
+        onRequestClose={() =>
+          setReportOpen(false)
+        }
+      >
+        <View
+          style={
+            styles.subShade
+          }
+        >
+          <View
+            style={[
+              styles.subSheet,
+              {
+                backgroundColor:
+                  colors.card,
+                borderColor:
+                  colors.border,
+              },
+            ]}
+          >
+            <View
+              style={
+                styles.subHeader
+              }
+            >
+              <Text
+                style={[
+                  styles.subTitle,
+                  {
+                    color:
+                      colors.text,
+                  },
+                ]}
+              >
+                Report{' '}
+                {profile?.display_name ??
+                  'user'}
+              </Text>
+
+              <Pressable
+                onPress={() =>
+                  setReportOpen(
+                    false,
+                  )
+                }
+                hitSlop={12}
+              >
+                <X
+                  color={
+                    colors.muted
+                  }
+                  size={22}
+                />
+              </Pressable>
+            </View>
+
+            {reportSuccess ? (
+              <View
+                style={
+                  styles.successWrap
+                }
+              >
+                <Text
+                  style={[
+                    styles.successText,
+                    {
+                      color:
+                        accentForeground,
+                    },
+                  ]}
+                >
+                  Report submitted.
+                  Thank you.
+                </Text>
+              </View>
+            ) : (
+              <>
+                <TextInput
+                  value={
+                    reportReason
+                  }
+                  onChangeText={
+                    setReportReason
+                  }
+                  placeholder="Describe the reason for reporting…"
+                  placeholderTextColor={
+                    colors.muted
+                  }
+                  style={[
+                    styles.subInput,
+                    {
+                      color:
+                        colors.text,
+                      backgroundColor:
+                        colors.bg,
+                      borderColor:
+                        colors.border,
+                    },
+                  ]}
+                  multiline
+                  autoFocus
+                />
+
+                <Pressable
+                  onPress={
+                    handleReport
+                  }
+                  disabled={
+                    !reportReason.trim() ||
+                    reportSubmitting
+                  }
+                  style={[
+                    styles.subAction,
+                    {
+                      backgroundColor:
+                        accentForeground,
+                    },
+                    (!reportReason.trim() ||
+                      reportSubmitting) &&
+                      styles.sendBtnDisabled,
+                  ]}
+                >
+                  {reportSubmitting ? (
+                    <ActivityIndicator
+                      color="#FFFFFF"
+                      size="small"
+                    />
+                  ) : (
+                    <Text
+                      style={
+                        styles.subActionText
+                      }
+                    >
+                      Submit Report
+                    </Text>
+                  )}
+                </Pressable>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function formatTime(value: string) {
-  const date = new Date(value);
-
-  return date.toLocaleTimeString([], {
-    hour: 'numeric',
-    minute: '2-digit',
-  });
-}
-
-function formatFileSize(bytes: number) {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`;
-  }
-
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-// ─── Styles ──────────────────────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
+  /*
+   * Every text-bearing style below explicitly specifies
+   * a Poppins family. This prevents React Native/web from
+   * falling back to the platform default for this screen.
+   */
+
   safe: {
     flex: 1,
   },
 
-  // Header
-
   header: {
-    height: 70,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
     paddingTop: 50,
-    paddingBottom: 30,
+    paddingBottom: 12,
     borderBottomWidth: 1,
-    position: 'relative',
-    zIndex: 20,
   },
 
-  headerSide: {
-    width: 42,
-    height: 42,
+  headerBtn: {
+    width: 40,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
-  headerTitleButton: {
+  headerTitleWrap: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 10,
   },
 
   headerTitle: {
-    fontFamily: FONT_SEMI,
-    fontSize: 16,
-    lineHeight: 20,
-    textAlign: 'center',
+    fontFamily: FONT_BOLD,
+    fontSize: 15,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
   },
 
-  headerSubtitle: {
-    fontFamily: FONT,
-    fontSize: 10,
-    marginTop: 1,
-  },
-
-  // Three-dot menu
-
-  menu: {
-    position: 'absolute',
-    right: 12,
-    top: 60,
-    width: 190,
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingVertical: 6,
-    elevation: 10,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.18,
-    shadowRadius: 12,
-  },
-
-  menuItem: {
-    minHeight: 46,
-    paddingHorizontal: 16,
-    justifyContent: 'center',
-  },
-
-  menuText: {
-    fontFamily: FONT_MED,
-    fontSize: 14,
-  },
-
-  // Chat
-
-  chatContainer: {
+  body: {
     flex: 1,
   },
 
@@ -1975,544 +4349,470 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-
-  messageList: {
-    paddingHorizontal: 14,
-    paddingVertical: 16,
+    padding: 24,
     gap: 8,
   },
 
-  messageListEmpty: {
-    flexGrow: 1,
+  stateText: {
+    fontFamily: FONT,
+    fontSize: 14,
+    textAlign: 'center',
   },
 
-  emptyChat: {
-    flex: 1,
+  sidekickGreeting: {
+    fontFamily: FONT_SEMI,
+    fontSize: 20,
+    lineHeight: 28,
+    textAlign: 'center',
+    paddingHorizontal: 20,
+  },
+
+  sidekickGreetingSecond: {
+    fontFamily: FONT,
+    fontSize: 17,
+    lineHeight: 25,
+    textAlign: 'center',
+    paddingHorizontal: 20,
+  },
+
+  retryBtn: {
+    paddingHorizontal: 20,
+    height: 40,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 40,
+    marginTop: 8,
   },
 
-  emptyChatTitle: {
+  retryBtnText: {
+    color: '#FFFFFF',
     fontFamily: FONT_SEMI,
-    fontSize: 16,
+    fontSize: 14,
   },
 
-  emptyChatText: {
-    fontFamily: FONT,
-    fontSize: 13,
-    marginTop: 4,
+  listContent: {
+    padding: 16,
+    paddingBottom: 24,
+    gap: 10,
   },
 
-  bubbleRow: {
+  dateSeparator: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+  },
+
+  dateSeparatorText: {
+    fontFamily: FONT_MED,
+    fontSize: 11,
+    letterSpacing: 0.15,
+  },
+
+  msgRow: {
     flexDirection: 'row',
-    paddingVertical: 2,
+    marginVertical: 3,
   },
 
-  bubbleRowMine: {
+  msgRowMine: {
     justifyContent: 'flex-end',
+  },
+
+  msgRowTheirs: {
+    justifyContent: 'flex-start',
   },
 
   messagePressable: {
     maxWidth: '82%',
-    minWidth: 50,
-    alignSelf: 'flex-start',
+    flexShrink: 1,
   },
 
-  messagePressableMine: {
-    alignSelf: 'flex-end',
+  messagePressed: {
+    opacity: 0.82,
   },
 
   bubble: {
     width: '100%',
-    borderRadius: 16,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingTop: 9,
-    paddingBottom: 7,
-  },
-
-  bubbleAuthor: {
-    fontFamily: FONT_SEMI,
-    fontSize: 11,
-    marginBottom: 3,
+    maxWidth: '100%',
+    minWidth: 0,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
   },
 
   bubbleText: {
-    flexShrink: 1,
     fontFamily: FONT,
     fontSize: 15,
     lineHeight: 21,
+    flexShrink: 1,
   },
 
-  messageTime: {
-    fontFamily: FONT,
-    fontSize: 9,
-    marginTop: 5,
-    textAlign: 'right',
+  attachmentImage: {
+    width: 220,
+    height: 220,
+    borderRadius: 12,
+    marginBottom: 6,
   },
 
-  // Message attachment
-
-  attachmentMessage: {
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
+  audioBubble: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 4,
+    minWidth: 160,
   },
 
-  audioAttachment: {
+  audioBubbleText: {
+    fontFamily: FONT_MED,
+    fontSize: 14,
+  },
+
+  docBubble: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 9,
-    padding: 9,
+    gap: 8,
     borderWidth: 1,
-    borderRadius: 10,
-    minWidth: 150,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 4,
+    maxWidth: 220,
   },
 
-  attachmentName: {
-    flex: 1,
+  docBubbleText: {
+    fontFamily: FONT_MED,
+    fontSize: 13,
+    flexShrink: 1,
+  },
+
+  bubbleTime: {
+    fontFamily: FONT,
+    fontSize: 10,
+    marginTop: 4,
+    alignSelf: 'flex-end',
+  },
+
+  sidekickLabel: {
+    fontFamily: FONT_BOLD,
+    fontSize: 10,
+    letterSpacing: 1.2,
+    marginBottom: 5,
+  },
+
+  blockedBar: {
+    minHeight: 68,
+    borderTopWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+
+  blockedBarText: {
     fontFamily: FONT_MED,
     fontSize: 12,
-    lineHeight: 16,
   },
 
-  // Composer
+  blockedBarLink: {
+    fontFamily: FONT_SEMI,
+    fontSize: 12,
+    marginTop: 3,
+  },
 
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 8,
-    paddingHorizontal: 10,
+    paddingHorizontal: 9,
     paddingVertical: 9,
-    paddingBottom: 90,
+    paddingBottom: 10,
     paddingTop: 10,
     borderTopWidth: 1,
   },
 
-  attachButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  attachBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-
-  composerInput: {
-    flex: 1,
-    minHeight: 40,
-    maxHeight: 110,
-    borderWidth: 1,
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingTop: 9,
-    paddingBottom: 9,
-    fontFamily: FONT,
-    fontSize: 14,
-  },
-
-  sendButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  // Attachment preview
-  reviewImage: {
-    width: 54,
-    height: 54,
-    borderRadius: 10,
-  },
-
-  reviewLabel: {
-    fontFamily: FONT,
-    fontSize: 10,
-    marginTop: 2,
-  },
-
-  reviewCancel: {
-    padding: 5,
-  },
-
-  reviewSend: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-
-  attachmentPreview: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    gap: 10,
-    borderTopWidth: 1,
-  },
-
-  attachmentPreviewIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  attachmentPreviewDetails: {
-    flex: 1,
-  },
-
-  attachmentPreviewName: {
-    fontFamily: FONT_MED,
-    fontSize: 12,
-  },
-
-  attachmentPreviewSize: {
-    fontFamily: FONT,
-    fontSize: 10,
-    marginTop: 2,
-  },
-
-  modalBodyText: {
-    fontFamily: FONT,
-    fontSize: 13,
-    lineHeight: 20,
-    marginTop: 8,
-  },
-
-  tagOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    padding: 12,
-    borderWidth: 1,
-    borderRadius: 12,
-    marginBottom: 8,
-  },
-
-  // Info screen
-
-  infoContainer: {
-    flex: 1,
-  },
-
-  infoHeader: {
-    height: 70,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    borderBottomWidth: 1,
-  },
-
-  infoBack: {
-    width: 42,
-    height: 42,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  infoTitle: {
-    fontFamily: FONT_SEMI,
-    fontSize: 17,
-  },
-
-  infoScroll: {
-    flex: 1,
-  },
-
-  infoBody: {
-    padding: 16,
-    paddingBottom: 40,
-    gap: 26,
-  },
-
-  // Group intro
-
-  groupIntro: {
-    alignItems: 'center',
-    paddingTop: 8,
-  },
-
-  groupAvatar: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
-  },
-
-  groupAvatarText: {
-    fontFamily: FONT_BOLD,
-    fontSize: 30,
-  },
-
-  groupInfoName: {
-    fontFamily: FONT_BOLD,
-    fontSize: 22,
-    textAlign: 'center',
-  },
-
-  groupDescription: {
-    fontFamily: FONT,
-    fontSize: 13,
-    lineHeight: 19,
-    textAlign: 'center',
-    marginTop: 6,
-    maxWidth: 340,
-  },
-
-  groupDescriptionEmpty: {
-    fontFamily: FONT,
-    fontSize: 12,
-    fontStyle: 'italic',
-    textAlign: 'center',
-    marginTop: 6,
-  },
-
-  // Sections
-
-  section: {
-    gap: 8,
-  },
-
-  sectionLabel: {
-    fontFamily: FONT_SEMI,
-    fontSize: 10,
-    letterSpacing: 1.5,
-    marginBottom: 2,
-  },
-
-  // Search
-
-  searchBox: {
-    height: 46,
-    borderWidth: 1,
-    borderRadius: 13,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 13,
-    gap: 9,
-    marginBottom: 3,
-  },
-
-  searchInput: {
-    flex: 1,
-    fontFamily: FONT,
-    fontSize: 13,
-    paddingVertical: 0,
-  },
-
-  // Friends
-
-  friendRow: {
-    minHeight: 58,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    borderWidth: 1,
-    borderRadius: 13,
-    paddingHorizontal: 11,
-    paddingVertical: 8,
-  },
-
-  friendAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  friendAvatarText: {
-    fontFamily: FONT_SEMI,
-    fontSize: 14,
-  },
-
-  friendDetails: {
-    flex: 1,
-  },
-
-  rowTitle: {
-    fontFamily: FONT_MED,
-    fontSize: 13,
-  },
-
-  rowSub: {
-    fontFamily: FONT,
-    fontSize: 11,
-    marginTop: 1,
-  },
-
-  inviteButton: {
-    minWidth: 76,
-    height: 32,
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-  },
-
-  inviteButtonText: {
-    fontFamily: FONT_MED,
-    fontSize: 11,
-  },
-
-  invitedPill: {
-    height: 30,
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  invitedText: {
-    fontFamily: FONT_MED,
-    fontSize: 11,
-  },
-
-  friendOverflow: {
-    height: 260,
-    borderWidth: 1,
-    borderRadius: 13,
-    overflow: 'hidden',
-  },
-
-  friendOverflowScroll: {
-    flex: 1,
-  },
-
-  // Members
-
-  memberRow: {
-    minHeight: 62,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    borderWidth: 1,
-    borderRadius: 13,
-    paddingHorizontal: 11,
-    paddingVertical: 9,
-  },
-
-  memberAvatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  memberAvatarText: {
-    fontFamily: FONT_SEMI,
-    fontSize: 14,
-  },
-
-  memberDetails: {
-    flex: 1,
-    minWidth: 0,
-    marginRight: 6,
-  },
-
-  adminPill: {
-    height: 28,
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingHorizontal: 9,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-  },
-
-  adminPillText: {
-    fontFamily: FONT_MED,
-    fontSize: 10,
-  },
-
-  makeAdminButton: {
-    height: 30,
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingHorizontal: 9,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  makeAdminText: {
-    fontFamily: FONT_MED,
-    fontSize: 10,
-  },
-
-  // Recording
 
   recordingRow: {
-    minHeight: 44,
-    borderWidth: 1,
-    borderRadius: 20,
-    paddingHorizontal: 12,
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    minHeight: 44,
+    borderRadius: 20,
+    borderWidth: 1,
+    paddingHorizontal: 14,
   },
 
   recordingDot: {
-    width: 9,
-    height: 9,
-    borderRadius: 5,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor:
+      '#FF6B6B',
   },
 
   recordingText: {
     flex: 1,
     fontFamily: FONT_MED,
-    fontSize: 13,
+    fontSize: 14,
   },
 
   recordingCancelBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    padding: 4,
+  },
+
+  input: {
+    flex: 1,
+    minHeight: 44,
+    maxHeight: 120,
+    borderRadius: 20,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    fontFamily: FONT,
+    fontSize: 15,
+    fontWeight: '400',
+  },
+
+  sendBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
-  // Secondary bottom-sheet overlay
+  sendBtnDisabled: {
+    opacity: 0.45,
+  },
+
+  toastWrap: {
+    position: 'absolute',
+    bottom: 90,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+
+  toast: {
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+
+  toastText: {
+    fontFamily: FONT_MED,
+    fontSize: 13,
+    textAlign: 'center',
+  },
+
+  menuBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 50,
+  },
+
+  dropdownMenu: {
+    position: 'absolute',
+    top: 82,
+    right: 12,
+    width: 190,
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingVertical: 4,
+    shadowOpacity: 0.16,
+    shadowRadius: 12,
+    shadowOffset: {
+      width: 0,
+      height: 5,
+    },
+    elevation: 8,
+  },
+
+  menuItem: {
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+  },
+
+  menuItemText: {
+    fontFamily: FONT_MED,
+    fontSize: 16,
+  },
 
   subShade: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    justifyContent: 'flex-end',
+    flex: 1,
+    backgroundColor:
+      'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
   },
 
   subSheet: {
     width: '100%',
-    maxHeight: '82%',
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
+    borderRadius: 20,
     borderWidth: 1,
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 24,
+    padding: 20,
   },
 
-  // Empty states
+  subHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
 
-  emptyText: {
+  subTitle: {
+    fontFamily: FONT_BOLD,
+    fontSize: 17,
+  },
+
+  subHint: {
     fontFamily: FONT,
-    fontSize: 12,
-    paddingVertical: 5,
+    fontSize: 13,
+    marginBottom: 12,
+  },
+
+  subInput: {
+    minHeight: 48,
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontFamily: FONT,
+    fontSize: 14,
+    fontWeight: '400',
+    marginBottom: 14,
+  },
+
+  subAction: {
+    height: 48,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  subActionText: {
+    color: '#FFFFFF',
+    fontFamily: FONT_SEMI,
+    fontSize: 15,
+  },
+
+  successWrap: {
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+
+  successText: {
+    fontFamily: FONT_SEMI,
+    fontSize: 15,
+    textAlign: 'center',
+  },
+
+  attachmentReviewSheet: {
+    width: '92%',
+    maxWidth: 460,
+    borderRadius: 22,
+    borderWidth: 1,
+    padding: 18,
+  },
+
+  attachmentReviewImage: {
+    width: '100%',
+    height: 300,
+    borderRadius: 16,
+    marginVertical: 12,
+    backgroundColor:
+      '#111111',
+  },
+
+  attachmentReviewAudio: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 14,
+    marginVertical: 16,
+  },
+
+  attachmentReviewFile: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 150,
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 20,
+    marginVertical: 16,
+    gap: 8,
+  },
+
+  reviewPlayButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  reviewFileName: {
+    fontFamily: FONT_SEMI,
+    fontSize: 14,
+  },
+
+  reviewActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+
+  reviewCancelButton: {
+    flex: 1,
+    minHeight: 48,
+    borderWidth: 1,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  reviewCancelText: {
+    fontFamily: FONT_SEMI,
+    fontSize: 14,
+  },
+
+  reviewSendButton: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+
+  reviewSendText: {
+    color: '#FFFFFF',
+    fontFamily: FONT_SEMI,
+    fontSize: 14,
+  },
+
+  successTextAlt: {
+    fontFamily:
+      FONT_EXTRA_BOLD,
   },
 });

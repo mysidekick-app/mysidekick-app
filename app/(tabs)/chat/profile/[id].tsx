@@ -3,13 +3,13 @@ import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { ChevronLeft } from 'lucide-react-native';
 import { useApp } from '@/components/AppProvider';
@@ -26,7 +26,6 @@ type Profile = {
   display_name: string;
   username: string;
   title: string | null;
-  tag: string | null;
   bio: string | null;
   sidekick_id: string | null;
 };
@@ -74,7 +73,7 @@ export default function ChatProfileScreen() {
   useEffect(() => {
     let mounted = true;
 
-    const load = async () => {
+    const loadProfile = async () => {
       if (!id) {
         if (mounted) {
           setError('Profile not found.');
@@ -87,12 +86,11 @@ export default function ChatProfileScreen() {
       setError(null);
 
       try {
-        /**
-         * social_profiles is used as the reliable public-profile
-         * source for display name and username.
+        /*
+         * Load the friend's public social profile.
          *
-         * profiles provides the Sidekick selection and additional
-         * profile information.
+         * We keep this query limited to columns that already
+         * exist in the current social_profiles setup.
          */
         const {
           data: socialRow,
@@ -100,18 +98,26 @@ export default function ChatProfileScreen() {
         } = await supabase
           .from('social_profiles')
           .select(
-            'user_id, display_name, username'
+            'user_id, display_name, username, title, bio'
           )
           .eq('user_id', id)
           .maybeSingle();
 
         if (socialError) {
-          console.error(
+          console.warn(
             'SOCIAL PROFILE LOAD ERROR:',
             socialError
           );
         }
 
+        /*
+         * Also load the friend's main profile.
+         *
+         * This is important because Bio and Title are entered
+         * on the main profile screen.
+         *
+         * If the values are available here, they take priority.
+         */
         const {
           data: profileRow,
           error: profileError,
@@ -125,67 +131,78 @@ export default function ChatProfileScreen() {
 
         if (profileError) {
           console.warn(
-            'PROFILES TABLE LOAD ERROR:',
+            'MAIN PROFILE LOAD ERROR:',
             profileError
           );
         }
 
-        const row = profileRow || socialRow;
-
-        if (!row) {
-          console.error(
-            'PROFILE NOT FOUND:',
-            id,
-            {
-              socialError,
-              profileError,
-            }
-          );
-
+        /*
+         * Combine the two profile sources.
+         *
+         * Main profile values are preferred for:
+         * - display name
+         * - username
+         * - title
+         * - bio
+         * - sidekick
+         *
+         * social_profiles acts as the fallback.
+         */
+        if (!profileRow && !socialRow) {
           if (mounted) {
             setError(
               'Could not load this profile.'
             );
           }
 
+          console.error(
+            'PROFILE NOT FOUND:',
+            id
+          );
+
           return;
         }
 
+        const displayName =
+          profileRow?.display_name?.trim() ||
+          socialRow?.display_name?.trim() ||
+          'User';
+
+        const username =
+          profileRow?.username?.trim() ||
+          socialRow?.username?.trim() ||
+          '';
+
+        const title =
+          profileRow?.title?.trim() ||
+          socialRow?.title?.trim() ||
+          null;
+
+        const bio =
+          profileRow?.bio?.trim() ||
+          socialRow?.bio?.trim() ||
+          null;
+
+        const sidekickId =
+          profileRow?.sidekick_id ??
+          null;
+
         if (mounted) {
           setProfile({
-            user_id: row.user_id || id,
+            user_id:
+              profileRow?.user_id ||
+              socialRow?.user_id ||
+              id,
 
-            display_name:
-              row.display_name ||
-              socialRow?.display_name ||
-              'User',
+            display_name: displayName,
 
-            username:
-              row.username ||
-              socialRow?.username ||
-              '',
+            username,
 
-            title:
-              profileRow?.title ||
-              null,
+            title,
 
-            tag: null,
+            bio,
 
-            bio:
-              profileRow?.bio ||
-              null,
-
-            /**
-             * IMPORTANT:
-             * NULL means this person has never selected
-             * a Sidekick.
-             *
-             * We intentionally do NOT default this to
-             * sidekick-01.
-             */
-            sidekick_id:
-              profileRow?.sidekick_id ??
-              null,
+            sidekick_id: sidekickId,
           });
         }
       } catch (e) {
@@ -206,7 +223,7 @@ export default function ChatProfileScreen() {
       }
     };
 
-    void load();
+    void loadProfile();
 
     return () => {
       mounted = false;
@@ -224,7 +241,11 @@ export default function ChatProfileScreen() {
     .slice(0, 1)
     .toUpperCase();
 
-  const title = profile?.title || '';
+  const title =
+    profile?.title?.trim() || '';
+
+  const bio =
+    profile?.bio?.trim() || '';
 
   return (
     <SafeAreaView
@@ -235,6 +256,7 @@ export default function ChatProfileScreen() {
         },
       ]}
     >
+      {/* HEADER */}
       <View
         style={[
           styles.header,
@@ -259,7 +281,8 @@ export default function ChatProfileScreen() {
           style={[
             styles.headerTitle,
             {
-              color: accentForeground,
+              color:
+                isDark ? '#FFFFFF' : accentForeground,
             },
           ]}
         >
@@ -269,6 +292,7 @@ export default function ChatProfileScreen() {
         <View style={styles.headerBtn} />
       </View>
 
+      {/* LOADING */}
       {loading ? (
         <View style={styles.center}>
           <ActivityIndicator
@@ -288,6 +312,7 @@ export default function ChatProfileScreen() {
           </Text>
         </View>
       ) : error ? (
+        /* ERROR */
         <View style={styles.center}>
           <Text
             style={[
@@ -316,6 +341,7 @@ export default function ChatProfileScreen() {
           </Pressable>
         </View>
       ) : (
+        /* PROFILE */
         <ScrollView
           contentContainerStyle={
             styles.content
@@ -323,8 +349,13 @@ export default function ChatProfileScreen() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.profile}>
+            {/* SIDEKICK / AVATAR */}
             {profile?.sidekick_id ? (
-              <View style={styles.sidekickAvatarWrap}>
+              <View
+                style={
+                  styles.sidekickAvatarWrap
+                }
+              >
                 <SidekickAvatar
                   sidekickId={
                     profile.sidekick_id
@@ -350,6 +381,7 @@ export default function ChatProfileScreen() {
               </View>
             )}
 
+            {/* NAME */}
             <Text
               style={[
                 styles.name,
@@ -362,25 +394,29 @@ export default function ChatProfileScreen() {
                 'User'}
             </Text>
 
-            <Text
-              style={[
-                styles.username,
-                {
-                  color: colors.muted,
-                },
-              ]}
-            >
-              @{profile?.username ||
-                'username'}
-            </Text>
+            {/* USERNAME */}
+            {!!profile?.username && (
+              <Text
+                style={[
+                  styles.username,
+                  {
+                    color: colors.muted,
+                  },
+                ]}
+              >
+                @{profile.username}
+              </Text>
+            )}
 
+            {/* TITLE */}
             {!!title && (
               <Text
                 style={[
                   styles.title,
                   {
-                    color:
-                      accentForeground,
+                    color: isBlackDark
+                      ? '#B8B5AF'
+                      : accentForeground,
                   },
                 ]}
               >
@@ -388,6 +424,7 @@ export default function ChatProfileScreen() {
               </Text>
             )}
 
+            {/* BIO */}
             <Text
               style={[
                 styles.bio,
@@ -396,8 +433,7 @@ export default function ChatProfileScreen() {
                 },
               ]}
             >
-              {profile?.bio?.trim() ||
-                'No bio added yet.'}
+              {bio || 'No bio added yet.'}
             </Text>
           </View>
         </ScrollView>
@@ -449,9 +485,9 @@ const styles = StyleSheet.create({
   },
 
   sidekickAvatarWrap: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
+    width: 112,
+    height: 112,
+    borderRadius: 56,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#FFFFFF',

@@ -733,7 +733,10 @@ export default function RemindersScreen() {
         <Text
           style={[
             styles.headerTitle,
-            { color: accent },
+            {
+              color:
+                isDark ? '#FFFFFF' : accentForeground,
+            },
           ]}
         >
           REMINDERS
@@ -1675,7 +1678,7 @@ function makeStyles(C: Palette) {
 
     fab: {
       position: 'absolute',
-      bottom: 82,
+      bottom: 30,
       alignSelf: 'center',
       width: 56,
       height: 56,

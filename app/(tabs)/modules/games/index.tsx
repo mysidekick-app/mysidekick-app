@@ -764,7 +764,8 @@ export default function GamesScreen() {
           style={[
             styles.headerTitle,
             {
-              color: colors.accent,
+              color:
+                isDark ? '#FFFFFF' : accentForeground,
             },
           ]}
         >

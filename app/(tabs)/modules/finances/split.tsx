@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
+  KeyboardAvoidingView,
   Modal,
   Pressable,
   ScrollView,
@@ -9,9 +10,12 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Platform } from 'react-native';
 import {
   ArrowDownLeft,
   ArrowUpRight,
+  Check,
+  Pencil,
   Plus,
   Trash2,
   UsersRound,
@@ -23,16 +27,25 @@ import { useApp } from '@/components/AppProvider';
 import { supabase } from '@/lib/supabase';
 import { CurrencyPickerModal } from '@/components/CurrencyPickerModal';
 import { formatMoney } from '@/components/currencies';
+import {
+  ensureDirectConversation,
+  sendChatMessage,
+} from '@/app/(tabs)/chat/chatHelpers';
 
 type Split = {
   id: string;
   title: string;
   total_amount: number;
   owed_to: string;
+  user_id: string;
+  peer_user_ids?: string[] | null;
   owed_by: string;
   peer_names: string[];
   share_amount: number;
   created_at: string;
+  paid_names?: string[] | null;
+  split_method?: 'equal' | 'custom' | null;
+  custom_amounts?: { id: string; name: string; amount: number }[] | null;
 };
 
 type Friend = {
@@ -56,7 +69,16 @@ export default function SplitScreen() {
   } = useApp();
 
   const [splits, setSplits] = useState<Split[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [payerNames, setPayerNames] = useState<Record<string, string>>({});
   const [friends, setFriends] = useState<Friend[]>([]);
+  const [selectedSplit, setSelectedSplit] = useState<Split | null>(null);
+  const [paidNames, setPaidNames] = useState<string[]>([]);
+  const [savingPaidStatus, setSavingPaidStatus] = useState(false);
+  const [editingSplitId, setEditingSplitId] = useState<string | null>(null);
+  const [splitMethod, setSplitMethod] = useState<'equal' | 'custom'>('equal');
+  const [customAmounts, setCustomAmounts] = useState<Record<string, string>>({});
+  const [editingPaidNames, setEditingPaidNames] = useState<string[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -67,8 +89,6 @@ export default function SplitScreen() {
   // Form state
   const [title, setTitle] = useState('');
   const [totalAmount, setTotalAmount] = useState('');
-  const [paidBy, setPaidBy] = useState<'me' | 'someone'>('me');
-  const [paidByName, setPaidByName] = useState('');
 
   // Friend search / selection
   const [friendSearch, setFriendSearch] = useState('');
@@ -102,16 +122,18 @@ export default function SplitScreen() {
         return;
       }
 
-      // Load the user's splits.
+      setCurrentUserId(user.id);
+
+      // Load bills created by this user plus bills where this user is a participant.
       const {
         data: splitRows,
         error: splitErr,
       } = await supabase
         .from('finance_splits')
         .select(
-          'id, title, total_amount, owed_to, owed_by, peer_names, share_amount, created_at'
+          'id, user_id, title, total_amount, owed_to, owed_by, peer_names, peer_user_ids, share_amount, created_at, paid_names, split_method, custom_amounts'
         )
-        .eq('user_id', user.id)
+        .or(`user_id.eq.${user.id},peer_user_ids.cs.{${user.id}}`)
         .order('created_at', { ascending: false });
 
       if (splitErr) {
@@ -120,49 +142,99 @@ export default function SplitScreen() {
           `Your splits could not be loaded. ${splitErr.message || ''}`.trim()
         );
       } else {
-        setSplits((splitRows ?? []) as Split[]);
+        const loadedSplits = (splitRows ?? []) as Split[];
+        setSplits(loadedSplits);
+
+        const creatorIds = [...new Set(loadedSplits.map((split) => split.user_id).filter((id) => id && id !== user.id))];
+        if (creatorIds.length > 0) {
+          const { data: creatorProfiles } = await supabase
+            .from('social_profiles')
+            .select('user_id, display_name, username')
+            .in('user_id', creatorIds);
+
+          const names: Record<string, string> = {};
+          (creatorProfiles ?? []).forEach((profile: any) => {
+            names[profile.user_id] = profile.display_name || profile.username || 'Peer';
+          });
+          setPayerNames(names);
+        } else {
+          setPayerNames({});
+        }
       }
 
-      // Load accepted friendships.
+      // Use the same friendship system as Chat.
+      //
+      // Chat uses the `friendships` table with:
+      //   user_id
+      //   friend_user_id
+      //
+      // We check both sides because either person can be stored
+      // as the first user in the friendship row.
       const {
-        data: friendRows,
-        error: friendErr,
+        data: friendshipRows,
+        error: friendshipError,
       } = await supabase
-        .from('social_friends')
-        .select('id, friend_id')
-        .eq('status', 'accepted');
+        .from('friendships')
+        .select('user_id, friend_user_id')
+        .or(`user_id.eq.${user.id},friend_user_id.eq.${user.id}`);
 
-      if (friendErr) {
-        console.error('social_friends load error:', friendErr);
+      if (friendshipError) {
+        console.error(
+          'LOAD SPLIT FRIENDSHIPS ERROR:',
+          friendshipError
+        );
         setFriends([]);
         setLoading(false);
         return;
       }
 
-      const friendIds = (friendRows ?? [])
-        .map((friend) => friend.friend_id)
-        .filter(Boolean);
+      const friendIds: string[] = [
+        ...new Set<string>(
+          (friendshipRows ?? [])
+            .map(
+              (row: {
+                user_id: string;
+                friend_user_id: string;
+              }) =>
+                row.user_id === user.id
+                  ? row.friend_user_id
+                  : row.user_id
+            )
+            .filter(Boolean)
+        ),
+      ];
 
-      if (friendIds.length === 0) {
+      if (!friendIds.length) {
         setFriends([]);
         setLoading(false);
         return;
       }
 
+      // social_profiles stores the profile owner in `user_id`.
+      // This is also how Chat loads the user's connected friends.
       const {
         data: profiles,
         error: profileErr,
       } = await supabase
         .from('social_profiles')
-        .select('id, display_name, username')
-        .in('id', friendIds)
+        .select('user_id, display_name, username')
+        .in('user_id', friendIds)
         .order('username', { ascending: true });
 
       if (profileErr) {
-        console.error('social_profiles load error:', profileErr);
+        console.error(
+          'LOAD SPLIT FRIEND PROFILES ERROR:',
+          profileErr
+        );
         setFriends([]);
       } else {
-        setFriends((profiles ?? []) as Friend[]);
+        setFriends(
+          (profiles ?? []).map((profile: any) => ({
+            id: profile.user_id,
+            display_name: profile.display_name ?? '',
+            username: profile.username ?? '',
+          })) as Friend[]
+        );
       }
     } catch (err) {
       console.error('Split load error:', err);
@@ -177,12 +249,53 @@ export default function SplitScreen() {
   }, [load]);
 
   const openNew = () => {
+    setEditingSplitId(null);
     setTitle('');
     setTotalAmount('');
-    setPaidBy('me');
-    setPaidByName('');
     setFriendSearch('');
     setWhoOwes([]);
+    setSplitMethod('equal');
+    setCustomAmounts({});
+    setError(null);
+    setModalOpen(true);
+  };
+
+  const editSplit = (split: Split) => {
+    setEditingPaidNames(split.paid_names ?? []);
+    setSelectedSplit(null);
+    setEditingSplitId(split.id);
+    setTitle(split.title);
+    setTotalAmount(String(split.total_amount));
+    setFriendSearch('');
+
+    const selectedIds = split.peer_user_ids?.length
+      ? split.peer_user_ids.filter((id) => id !== split.user_id)
+      : friends
+          .filter((friend) => split.peer_names.includes(friend.display_name || friend.username))
+          .map((friend) => friend.id);
+    setWhoOwes(selectedIds);
+
+    const method = split.split_method === 'custom' ? 'custom' : 'equal';
+    setSplitMethod(method);
+
+    const amounts: Record<string, string> = {};
+    if (split.custom_amounts?.length) {
+      split.custom_amounts.forEach((item) => {
+        amounts[item.id] = String(item.amount);
+      });
+    } else {
+      const participantCount = split.owed_by
+        .split(',')
+        .map((name) => name.trim())
+        .filter(Boolean).length || 1;
+      const equal = Number(split.total_amount) / participantCount;
+      amounts[split.user_id] = String(equal);
+      split.peer_names.forEach((name) => {
+        const friend = friends.find((item) => (item.display_name || item.username) === name);
+        if (friend) amounts[friend.id] = String(equal);
+      });
+    }
+    setCustomAmounts(amounts);
     setError(null);
     setModalOpen(true);
   };
@@ -232,139 +345,187 @@ export default function SplitScreen() {
       return;
     }
 
-    if (paidBy === 'someone' && !paidByName.trim()) {
-      setError("Enter the person's name.");
-      return;
-    }
-
     if (whoOwes.length === 0) {
       setError('Search for and select at least one friend who owes.');
       return;
     }
 
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
-
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
     if (userError || !user) {
       setError('You must be signed in to save a split.');
       return;
     }
 
-    const owedTo = paidBy === 'me' ? 'Me' : paidByName.trim();
+    const owedTo = 'Me';
+    const peerNames = selectedFriends.map((friend) => friend.display_name || friend.username);
+    const participantNames = ['Me', ...peerNames];
+    const peerUserIds = selectedFriends.map((friend) => friend.id);
 
-    const peerNames = selectedFriends.map(
-      (friend) => friend.display_name || friend.username
-    );
+    const amountRows: { id: string; name: string; amount: number }[] = [];
+    if (splitMethod === 'equal') {
+      const equal = total / participantNames.length;
+      amountRows.push({ id: user.id, name: 'Me', amount: equal });
+      selectedFriends.forEach((friend) => {
+        amountRows.push({
+          id: friend.id,
+          name: friend.display_name || friend.username,
+          amount: equal,
+        });
+      });
+    } else {
+      amountRows.push({
+        id: user.id,
+        name: 'Me',
+        amount: Number(customAmounts[user.id] || customAmounts.me || 0),
+      });
+      selectedFriends.forEach((friend) => {
+        amountRows.push({
+          id: friend.id,
+          name: friend.display_name || friend.username,
+          amount: Number(customAmounts[friend.id] || 0),
+        });
+      });
 
-    /*
-     * The split is divided between you and everyone selected.
-     */
-    const share = total / (peerNames.length + 1);
+      if (amountRows.some((item) => !Number.isFinite(item.amount) || item.amount < 0)) {
+        setError('Enter a valid amount for everyone in the split.');
+        return;
+      }
+
+      const assigned = amountRows.reduce((sum, item) => sum + item.amount, 0);
+      if (Math.abs(assigned - total) > 0.01) {
+        setError(`Custom amounts must add up to ${fmt(total)}.`);
+        return;
+      }
+    }
+
+    const myAmount = amountRows.find((item) => item.id === user.id)?.amount ?? 0;
+    const owedByNames = participantNames;
 
     setSaving(true);
-
     try {
-      /*
-       * IMPORTANT:
-       * user_id is required by the finance_splits table and its
-       * INSERT RLS policy requires auth.uid() = user_id.
-       */
-      const {
-        data,
-        error: saveErr,
-      } = await supabase
-        .from('finance_splits')
-        .insert({
-          user_id: user.id,
-          title: title.trim(),
-          total_amount: total,
-          owed_to: owedTo,
-          owed_by: peerNames.join(', '),
-          peer_names: peerNames,
-          share_amount: share,
-        })
-        .select(
-          'id, title, total_amount, owed_to, owed_by, peer_names, share_amount, created_at'
-        )
-        .single();
+      const payload = {
+        user_id: user.id,
+        peer_user_ids: peerUserIds,
+        title: title.trim(),
+        total_amount: total,
+        owed_to: owedTo,
+        owed_by: owedByNames.join(', '),
+        peer_names: peerNames,
+        share_amount: myAmount,
+        paid_names: editingSplitId ? editingPaidNames : [],
+        split_method: splitMethod,
+        custom_amounts: amountRows,
+      };
+
+      let data: any = null;
+      let saveErr: any = null;
+
+      if (editingSplitId) {
+        const result = await supabase
+          .from('finance_splits')
+          .update(payload)
+          .eq('id', editingSplitId)
+          .select('id, user_id, title, total_amount, owed_to, owed_by, peer_names, peer_user_ids, share_amount, created_at, paid_names, split_method, custom_amounts')
+          .single();
+        data = result.data;
+        saveErr = result.error;
+      } else {
+        const result = await supabase
+          .from('finance_splits')
+          .insert(payload)
+          .select('id, user_id, title, total_amount, owed_to, owed_by, peer_names, peer_user_ids, share_amount, created_at, paid_names, split_method, custom_amounts')
+          .single();
+        data = result.data;
+        saveErr = result.error;
+      }
 
       if (saveErr || !data) {
         console.error('finance_splits save error:', saveErr);
-
-        setError(
-          `The split could not be saved. ${
-            saveErr?.message || ''
-          }`.trim()
-        );
-
-        setSaving(false);
+        setError(`The split could not be saved. ${saveErr?.message || ''}`.trim());
         return;
       }
 
       const saved = data as Split;
+      setSplits((current) =>
+        editingSplitId
+          ? current.map((split) => (split.id === saved.id ? saved : split))
+          : [saved, ...current]
+      );
 
-      setSplits((current) => [saved, ...current]);
-
-      /*
-       * Send split pings.
-       *
-       * These are intentionally non-blocking. If the notification
-       * tables have their own RLS restrictions, the split itself
-       * has already been saved successfully.
-       */
-      const message = `Split reminder: ${saved.title} - ${fmt(
-        saved.share_amount
-      )} owed to ${saved.owed_to}`;
-
-      if (peerNames.length > 0) {
-        const { error: pingError } = await supabase
-          .from('finance_split_pings')
-          .insert(
-            peerNames.map((name) => ({
-              split_id: saved.id,
-              peer_name: name,
-              message,
-            }))
-          );
-
-        if (pingError) {
-          console.warn('Split ping error:', pingError);
+      // Only a new split sends chat messages. Editing should not spam peers.
+      if (!editingSplitId) {
+        for (const friend of selectedFriends) {
+          const peerAmount = amountRows.find((item) => item.id === friend.id)?.amount ?? 0;
+          const message = `You owe ${owedTo} ${fmt(peerAmount)} for ${saved.title}`;
+          try {
+            const conversation = await ensureDirectConversation(user.id, friend.id);
+            if (conversation.error || !conversation.id) continue;
+            const messageResult = await sendChatMessage(conversation.id, user.id, message);
+            if (messageResult?.error) console.warn('Split peer message error:', messageResult.error);
+          } catch (messageError) {
+            console.warn(`Could not message ${friend.display_name || friend.username} about split:`, messageError);
+          }
         }
       }
 
-      /*
-       * Also send a social message to each selected friend.
-       * Again, failure here should not undo the saved split.
-       */
-      if (selectedFriends.length > 0) {
-        const results = await Promise.all(
-          selectedFriends.map((friend) =>
-            supabase.from('social_messages').insert({
-              conversation_id: `direct:${friend.id}`,
-              sender_id: user.id,
-              content: message,
-            })
-          )
-        );
-
-        results.forEach((result) => {
-          if (result.error) {
-            console.warn('Social message error:', result.error);
-          }
-        });
-      }
-
       setModalOpen(false);
+      setEditingSplitId(null);
       setFriendSearch('');
       setWhoOwes([]);
+      setCustomAmounts({});
+      setEditingPaidNames([]);
     } catch (err) {
       console.error('Save split error:', err);
       setError('The split could not be saved.');
     } finally {
       setSaving(false);
     }
+  };
+
+  const openSplit = (split: Split) => {
+    setSelectedSplit(split);
+    setPaidNames(split.paid_names ?? []);
+  };
+
+  const closeSplit = () => {
+    setSelectedSplit(null);
+    setPaidNames([]);
+    setSavingPaidStatus(false);
+  };
+
+  const togglePaid = async (name: string) => {
+    if (!selectedSplit || savingPaidStatus) return;
+
+    const nextPaid = paidNames.includes(name)
+      ? paidNames.filter((item) => item !== name)
+      : [...paidNames, name];
+
+    setPaidNames(nextPaid);
+    setSavingPaidStatus(true);
+
+    const { data, error } = await supabase.rpc(
+      'mark_finance_split_paid',
+      {
+        p_split_id: selectedSplit.id,
+        p_paid_names: nextPaid,
+      }
+    );
+
+    if (error || !data) {
+      console.error('Update split paid status error:', error);
+      setPaidNames(paidNames);
+      setError('Could not update payment status.');
+    } else {
+      const updated = data as Split;
+      setSelectedSplit(updated);
+      setSplits((current) =>
+        current.map((split) =>
+          split.id === updated.id ? updated : split
+        )
+      );
+    }
+
+    setSavingPaidStatus(false);
   };
 
   const remove = async (id: string) => {
@@ -384,21 +545,109 @@ export default function SplitScreen() {
     }
   };
 
+  const getParticipantAmounts = (split: Split) => {
+    if (split.custom_amounts?.length) {
+      return split.custom_amounts.reduce<Record<string, number>>((map, item) => {
+        map[item.name] = Number(item.amount);
+        return map;
+      }, {});
+    }
+
+    const names = split.owed_by.split(',').map((name) => name.trim()).filter(Boolean);
+    const equal = names.length ? Number(split.total_amount) / names.length : 0;
+    return names.reduce<Record<string, number>>((map, name) => {
+      map[name] = equal;
+      return map;
+    }, {});
+  };
+
+  const getAmountForUser = (split: Split, userId: string) => {
+    const row = split.custom_amounts?.find((item) => item.id === userId);
+    if (row) return Number(row.amount);
+
+    const participantIds = [split.user_id, ...(split.peer_user_ids ?? [])];
+    if (participantIds.includes(userId)) {
+      return Number(split.total_amount) / Math.max(participantIds.length, 1);
+    }
+
+    // Backward compatibility for older bills that did not store user IDs.
+    if (userId === currentUserId && split.user_id === currentUserId) {
+      return Number(split.share_amount);
+    }
+
+    return 0;
+  };
+
+  const outstandingForName = (split: Split, name: string) => {
+    const amount = getParticipantAmounts(split)[name] ?? 0;
+    return (split.paid_names ?? []).includes(name) ? 0 : amount;
+  };
+
+  const getDisplayParticipants = (split: Split) => {
+    const incoming = isIncoming(split);
+
+    if (!incoming) {
+      return [
+        { displayName: 'Me', sourceName: 'Me' },
+        ...split.peer_names.map((name) => ({ displayName: name, sourceName: name })),
+      ];
+    }
+
+    if (split.custom_amounts?.length) {
+      return split.custom_amounts.map((item) => ({
+        displayName: item.id === currentUserId
+          ? 'Me'
+          : item.id === split.user_id
+            ? getPayerName(split)
+            : item.name,
+        sourceName: item.name,
+      }));
+    }
+
+    return split.owed_by
+      .split(',')
+      .map((name) => name.trim())
+      .filter(Boolean)
+      .map((name) => ({
+        displayName: name === 'Me' ? getPayerName(split) : name,
+        sourceName: name,
+      }));
+  };
+
+  const isIncoming = (split: Split) => split.user_id !== currentUserId;
+
+  const getPayerName = (split: Split) => {
+    if (!isIncoming(split)) return 'Me';
+    return payerNames[split.user_id] || split.owed_to || 'Peer';
+  };
+
+  const getMyOutstanding = (split: Split) => {
+    if (!currentUserId) return 0;
+
+    const amountRow = split.custom_amounts?.find((item) => item.id === currentUserId);
+    const amount = amountRow
+      ? Number(amountRow.amount)
+      : getAmountForUser(split, currentUserId);
+
+    const myName = amountRow?.name || 'Me';
+    const paid = (split.paid_names ?? []).includes(myName) ||
+      (myName !== 'Me' && (split.paid_names ?? []).includes('Me'));
+
+    return paid ? 0 : amount;
+  };
+
   const youOwe = splits
-    .filter(
-      (split) =>
-        split.owed_by.toLowerCase().includes('me') ||
-        split.owed_by.toLowerCase().includes('you')
-    )
-    .reduce((sum, split) => sum + Number(split.share_amount), 0);
+    .filter((split) => isIncoming(split))
+    .reduce((sum, split) => sum + getMyOutstanding(split), 0);
 
   const owedToYou = splits
-    .filter(
-      (split) =>
-        split.owed_to.toLowerCase() === 'me' ||
-        split.owed_to.toLowerCase() === 'you'
-    )
-    .reduce((sum, split) => sum + Number(split.share_amount), 0);
+    .filter((split) => !isIncoming(split))
+    .reduce((sum, split) => {
+      return sum + split.peer_names.reduce((peerSum, name) => peerSum + outstandingForName(split, name), 0);
+    }, 0);
+
+  const billsYouOwe = splits.filter((split) => isIncoming(split));
+  const billsOwedToYou = splits.filter((split) => !isIncoming(split));
 
   return (
     <SafeAreaView
@@ -509,140 +758,171 @@ export default function SplitScreen() {
             </Text>
           </View>
         ) : (
-          <View style={styles.splitList}>
-            {splits.map((split) => {
-              const youAreOwer =
-                split.owed_by.toLowerCase().includes('me') ||
-                split.owed_by.toLowerCase().includes('you');
-
-              return (
-                <View
-                  key={split.id}
+          <View style={styles.splitSections}>
+            {([
+              ['Bills you owe', billsYouOwe],
+              ['Bills owed to you', billsOwedToYou],
+            ] as const).map(([sectionTitle, sectionSplits]) => (
+              <View key={sectionTitle} style={styles.splitSection}>
+                <Text
                   style={[
-                    styles.splitCard,
-                    isDark && styles.cardDark,
+                    styles.sectionTitle,
+                    isDark && styles.darkText,
                   ]}
                 >
-                  <View style={styles.splitTop}>
-                    <View
-                      style={[
-                        styles.splitIcon,
-                        {
-                          backgroundColor: accentForeground,
-                        },
-                      ]}
-                    >
-                      <UsersRound
-                        color={onAccent}
-                        size={18}
-                      />
-                    </View>
+                  {sectionTitle}
+                </Text>
 
-                    <View style={styles.splitCopy}>
-                      <Text
-                        style={[
-                          styles.splitTitle,
-                          isDark && styles.darkText,
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {split.title}
-                      </Text>
+                {sectionSplits.length === 0 ? (
+                  <Text
+                    style={[
+                      styles.emptySectionText,
+                      isDark && styles.darkMuted,
+                    ]}
+                  >
+                    {sectionTitle === 'Bills you owe'
+                      ? 'You have no outstanding bills.'
+                      : 'No one owes you right now.'}
+                  </Text>
+                ) : (
+                  <View style={styles.splitList}>
+                    {sectionSplits.map((split) => {
+                      const incoming = isIncoming(split);
+                      const yourOutstanding = getMyOutstanding(split);
+                      const payerName = getPayerName(split);
 
-                      <Text
-                        style={[
-                          styles.splitMeta,
-                          isDark && styles.darkMuted,
-                        ]}
-                      >
-                        {split.owed_by} owes {split.owed_to}
-                      </Text>
-                    </View>
+                      return (
+                        <Pressable
+                          key={split.id}
+                          onPress={() => openSplit(split)}
+                          style={[
+                            styles.splitCard,
+                            isDark && styles.cardDark,
+                          ]}
+                        >
+                          <View style={styles.splitTop}>
+                            <View
+                              style={[
+                                styles.splitIcon,
+                                { backgroundColor: accentForeground },
+                              ]}
+                            >
+                              <UsersRound
+                                color={onAccent}
+                                size={18}
+                              />
+                            </View>
 
-                    <Pressable
-                      onPress={() => remove(split.id)}
-                      hitSlop={8}
-                    >
-                      <Trash2
-                        color={
-                          isDark
-                            ? '#5A5751'
-                            : '#C8C5BE'
-                        }
-                        size={16}
-                      />
-                    </Pressable>
+                            <View style={styles.splitCopy}>
+                              <Text
+                                style={[
+                                  styles.splitTitle,
+                                  isDark && styles.darkText,
+                                ]}
+                                numberOfLines={1}
+                              >
+                                {split.title}
+                              </Text>
+
+                              <Text
+                                style={[
+                                  styles.splitMeta,
+                                  isDark && styles.darkMuted,
+                                ]}
+                              >
+                                {incoming
+                                  ? `You owe ${payerName}`
+                                  : `${split.peer_names.join(', ')} owe you`}
+                              </Text>
+                            </View>
+
+                            {!incoming && (
+                              <Pressable
+                                onPress={() => remove(split.id)}
+                                hitSlop={8}
+                              >
+                                <Trash2
+                                  color={isDark ? '#5A5751' : '#C8C5BE'}
+                                  size={16}
+                                />
+                              </Pressable>
+                            )}
+                          </View>
+
+                          <View style={styles.splitDetails}>
+                            <View style={styles.detailBlock}>
+                              <Text
+                                style={[
+                                  styles.detailLabel,
+                                  isDark && styles.darkMuted,
+                                ]}
+                              >
+                                Total
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.detailValue,
+                                  isDark && styles.darkText,
+                                ]}
+                              >
+                                {fmt(Number(split.total_amount))}
+                              </Text>
+                            </View>
+
+                            <View style={styles.detailBlock}>
+                              <Text
+                                style={[
+                                  styles.detailLabel,
+                                  isDark && styles.darkMuted,
+                                ]}
+                              >
+                                {incoming ? 'You owe' : 'Owed to you'}
+                              </Text>
+                              <Text
+                                style={[
+                                  styles.detailValue,
+                                  { color: incoming ? '#E05252' : '#3E9D66' },
+                                ]}
+                              >
+                                {fmt(incoming ? yourOutstanding : split.peer_names.reduce((sum, name) => sum + outstandingForName(split, name), 0))}
+                              </Text>
+                            </View>
+
+                            <View style={styles.detailBlock}>
+                              <Text
+                                style={[
+                                  styles.detailLabel,
+                                  isDark && styles.darkMuted,
+                                ]}
+                              >
+                                Split with
+                              </Text>
+                              <View style={styles.peerNamesWrap}>
+                                {getDisplayParticipants(split).map(({ displayName, sourceName }) => {
+                                  const paid = (split.paid_names ?? []).includes(sourceName);
+                                  return (
+                                    <Text
+                                      key={`${split.id}-${sourceName}`}
+                                      style={[
+                                        styles.detailValue,
+                                        isDark && styles.darkText,
+                                        paid && styles.paidNameCrossed,
+                                      ]}
+                                    >
+                                      {displayName}
+                                    </Text>
+                                  );
+                                })}
+                              </View>
+                            </View>
+                          </View>
+                        </Pressable>
+                      );
+                    })}
                   </View>
-
-                  <View style={styles.splitDetails}>
-                    <View style={styles.detailBlock}>
-                      <Text
-                        style={[
-                          styles.detailLabel,
-                          isDark && styles.darkMuted,
-                        ]}
-                      >
-                        Total
-                      </Text>
-
-                      <Text
-                        style={[
-                          styles.detailValue,
-                          isDark && styles.darkText,
-                        ]}
-                      >
-                        {fmt(Number(split.total_amount))}
-                      </Text>
-                    </View>
-
-                    <View style={styles.detailBlock}>
-                      <Text
-                        style={[
-                          styles.detailLabel,
-                          isDark && styles.darkMuted,
-                        ]}
-                      >
-                        Your share
-                      </Text>
-
-                      <Text
-                        style={[
-                          styles.detailValue,
-                          {
-                            color: youAreOwer
-                              ? '#E05252'
-                              : '#3E9D66',
-                          },
-                        ]}
-                      >
-                        {fmt(Number(split.share_amount))}
-                      </Text>
-                    </View>
-
-                    <View style={styles.detailBlock}>
-                      <Text
-                        style={[
-                          styles.detailLabel,
-                          isDark && styles.darkMuted,
-                        ]}
-                      >
-                        Split with
-                      </Text>
-
-                      <Text
-                        style={[
-                          styles.detailValue,
-                          isDark && styles.darkText,
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {split.peer_names.join(', ')}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              );
-            })}
+                )}
+              </View>
+            ))}
           </View>
         )}
       </ScrollView>
@@ -669,6 +949,10 @@ export default function SplitScreen() {
         onRequestClose={() => setModalOpen(false)}
       >
         <View style={styles.modalShade}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.keyboardModal}
+          >
           <View
             style={[
               styles.modalCard,
@@ -682,7 +966,7 @@ export default function SplitScreen() {
                   isDark && styles.darkText,
                 ]}
               >
-                New split
+                {editingSplitId ? 'Edit split' : 'New split'}
               </Text>
 
               <Pressable
@@ -752,86 +1036,37 @@ export default function SplitScreen() {
                   isDark && styles.darkMuted,
                 ]}
               >
-                Who is owed?
+                Split method
               </Text>
 
               <View style={styles.chipRow}>
-                <Pressable
-                  onPress={() => setPaidBy('me')}
-                  style={[
-                    styles.chip,
-                    paidBy === 'me' && {
-                      backgroundColor:
-                        accentForeground,
-                      borderColor:
-                        accentForeground,
-                    },
-                  ]}
-                >
-                  <Text
+                {(['equal', 'custom'] as const).map((method) => (
+                  <Pressable
+                    key={method}
+                    onPress={() => setSplitMethod(method)}
                     style={[
-                      styles.chipText,
-                      isDark && styles.darkMuted,
-                      paidBy === 'me' && {
-                        color: onAccent,
-                        fontFamily: FONT_SEMI,
+                      styles.chip,
+                      splitMethod === method && {
+                        backgroundColor: accentForeground,
+                        borderColor: accentForeground,
                       },
                     ]}
                   >
-                    I paid the bill
-                  </Text>
-                </Pressable>
-
-                <Pressable
-                  onPress={() => setPaidBy('someone')}
-                  style={[
-                    styles.chip,
-                    paidBy === 'someone' && {
-                      backgroundColor:
-                        accentForeground,
-                      borderColor:
-                        accentForeground,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.chipText,
-                      isDark && styles.darkMuted,
-                      paidBy === 'someone' && {
-                        color: onAccent,
-                        fontFamily: FONT_SEMI,
-                      },
-                    ]}
-                  >
-                    Someone else paid
-                  </Text>
-                </Pressable>
+                    <Text
+                      style={[
+                        styles.chipText,
+                        isDark && styles.darkMuted,
+                        splitMethod === method && {
+                          color: onAccent,
+                          fontFamily: FONT_SEMI,
+                        },
+                      ]}
+                    >
+                      {method === 'equal' ? 'Equal' : 'Custom'}
+                    </Text>
+                  </Pressable>
+                ))}
               </View>
-
-              {paidBy === 'someone' && (
-                <>
-                  <Text
-                    style={[
-                      styles.label,
-                      isDark && styles.darkMuted,
-                    ]}
-                  >
-                    Person's name
-                  </Text>
-
-                  <TextInput
-                    value={paidByName}
-                    onChangeText={setPaidByName}
-                    placeholder="Who paid the bill?"
-                    placeholderTextColor="#9B978F"
-                    style={[
-                      styles.input,
-                      isDark && styles.inputDark,
-                    ]}
-                  />
-                </>
-              )}
 
               {/* WHO OWES */}
               <Text
@@ -899,6 +1134,58 @@ export default function SplitScreen() {
                       </Pressable>
                     ))}
                   </View>
+                </View>
+              )}
+
+              {splitMethod === 'custom' && (
+                <View style={styles.customAmountsSection}>
+                  <Text
+                    style={[
+                      styles.selectedLabel,
+                      isDark && styles.darkMuted,
+                    ]}
+                  >
+                    Amount each person owes
+                  </Text>
+
+                  <View style={[styles.amountRow, isDark && styles.friendRowDark]}>
+                    <Text style={[styles.amountPerson, isDark && styles.darkText]}>Me</Text>
+                    <TextInput
+                      value={customAmounts[currentUserId ?? ''] ?? customAmounts.me ?? ''}
+                      onChangeText={(value) =>
+                        setCustomAmounts((current) => ({ ...current, [currentUserId ?? 'me']: value }))
+                      }
+                      placeholder="0"
+                      placeholderTextColor="#9B978F"
+                      keyboardType="decimal-pad"
+                      style={[styles.amountInput, isDark && styles.inputDark]}
+                    />
+                  </View>
+
+                  {selectedFriends.map((friend) => (
+                    <View
+                      key={friend.id}
+                      style={[styles.amountRow, isDark && styles.friendRowDark]}
+                    >
+                      <Text style={[styles.amountPerson, isDark && styles.darkText]}>
+                        {friend.display_name || friend.username}
+                      </Text>
+                      <TextInput
+                        value={customAmounts[friend.id] ?? ''}
+                        onChangeText={(value) =>
+                          setCustomAmounts((current) => ({ ...current, [friend.id]: value }))
+                        }
+                        placeholder="0"
+                        placeholderTextColor="#9B978F"
+                        keyboardType="decimal-pad"
+                        style={[styles.amountInput, isDark && styles.inputDark]}
+                      />
+                    </View>
+                  ))}
+
+                  <Text style={[styles.paymentHint, isDark && styles.darkMuted]}>
+                    The amounts must add up to {fmt(parseFloat(totalAmount) || 0)}.
+                  </Text>
                 </View>
               )}
 
@@ -1016,9 +1303,183 @@ export default function SplitScreen() {
               >
                 {saving
                   ? 'Saving...'
-                  : 'Save & ping peers'}
+                  : editingSplitId
+                    ? 'Save changes'
+                    : 'Save & ping peers'}
               </Text>
             </Pressable>
+          </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={!!selectedSplit}
+        transparent
+        animationType="slide"
+        onRequestClose={closeSplit}
+      >
+        <View style={styles.modalShade}>
+          <View
+            style={[
+              styles.detailModalCard,
+              isDark && styles.modalDark,
+            ]}
+          >
+            {selectedSplit && (
+              <>
+                <View style={styles.modalTitleRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[
+                        styles.modalTitle,
+                        isDark && styles.darkText,
+                      ]}
+                    >
+                      {selectedSplit.title}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.detailModalSubtitle,
+                        isDark && styles.darkMuted,
+                      ]}
+                    >
+                      {fmt(Number(selectedSplit.total_amount))} · {isIncoming(selectedSplit)
+                        ? `${getPayerName(selectedSplit)} paid`
+                        : 'You paid'}
+                    </Text>
+                  </View>
+
+                  <Pressable onPress={closeSplit} hitSlop={10}>
+                    <X
+                      color={isDark ? '#F4F2EE' : '#5A5751'}
+                      size={21}
+                    />
+                  </Pressable>
+                </View>
+
+                <Text
+                  style={[
+                    styles.detailModalLabel,
+                    isDark && styles.darkMuted,
+                  ]}
+                >
+                  Who has paid?
+                </Text>
+
+                <View style={styles.paidList}>
+                  {getDisplayParticipants(selectedSplit).map(({ displayName, sourceName }) => {
+                      const paid = paidNames.includes(sourceName);
+
+                      return (
+                        <Pressable
+                          key={`${selectedSplit.id}-${sourceName}`}
+                          onPress={() => {
+                            if (!selectedSplit || !isIncoming(selectedSplit)) {
+                              togglePaid(sourceName);
+                              return;
+                            }
+
+                            if (sourceName === (selectedSplit.custom_amounts?.find((item) => item.id === currentUserId)?.name || '')) {
+                              togglePaid(sourceName);
+                            }
+                          }}
+                          style={[
+                            styles.paidRow,
+                            isDark && styles.friendRowDark,
+                          ]}
+                        >
+                          <View
+                            style={[
+                              styles.checkbox,
+                              paid && {
+                                backgroundColor: accentForeground,
+                                borderColor: accentForeground,
+                              },
+                            ]}
+                          >
+                            {paid && (
+                              <Check color={onAccent} size={15} strokeWidth={3} />
+                            )}
+                          </View>
+
+                          <Text
+                            style={[
+                              styles.paidName,
+                              isDark && styles.darkText,
+                              paid && styles.paidNameCrossed,
+                            ]}
+                          >
+                            {displayName}
+                          </Text>
+
+                          <Text
+                            style={[
+                              styles.paidAmount,
+                              isDark && styles.darkMuted,
+                              paid && styles.paidNameCrossed,
+                            ]}
+                          >
+                            {fmt(
+                              getParticipantAmounts(selectedSplit)[sourceName] ??
+                                Number(selectedSplit.share_amount)
+                            )}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                </View>
+
+                <Text
+                  style={[
+                    styles.paymentHint,
+                    isDark && styles.darkMuted,
+                  ]}
+                >
+                  {isIncoming(selectedSplit) ? 'Tick your share when you have paid it.' : 'Tick someone when their share has been paid. Their name will be crossed out on the split dashboard.'}
+                </Text>
+
+                <View style={styles.detailActionRow}>
+                  {!isIncoming(selectedSplit) && (
+                    <Pressable
+                      onPress={() => editSplit(selectedSplit)}
+                    style={[
+                      styles.detailActionButton,
+                      styles.editActionButton,
+                      isDark && styles.editActionButtonDark,
+                    ]}
+                  >
+                    <Pencil
+                      color={isDark ? '#F4F2EE' : '#5A5751'}
+                      size={16}
+                    />
+                    <Text
+                      style={[
+                        styles.saveText,
+                        { color: isDark ? '#F4F2EE' : '#5A5751' },
+                      ]}
+                    >
+                      Edit
+                    </Text>
+                    </Pressable>
+                  )}
+
+                  <Pressable
+                    onPress={closeSplit}
+                    style={[
+                      styles.detailActionButton,
+                      { backgroundColor: accentForeground },
+                    ]}
+                  >
+                    <Text
+                      style={[styles.saveText, { color: onAccent }]}
+                    >
+                      Done
+                    </Text>
+                  </Pressable>
+                </View>
+              </>
+            )}
           </View>
         </View>
       </Modal>
@@ -1105,6 +1566,26 @@ const styles = StyleSheet.create({
   summaryValue: {
     fontFamily: FONT_BOLD,
     fontSize: 18,
+  },
+
+  splitSections: {
+    gap: 24,
+  },
+
+  splitSection: {
+    gap: 10,
+  },
+
+  sectionTitle: {
+    fontFamily: FONT_SEMI,
+    fontSize: 14,
+    color: '#27241F',
+  },
+
+  emptySectionText: {
+    fontFamily: FONT,
+    fontSize: 12,
+    color: '#908B83',
   },
 
   splitList: {
@@ -1208,12 +1689,20 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.45)',
   },
 
+  keyboardModal: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
+
   modalCard: {
     backgroundColor: '#FFF',
+    width: '100%',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 22,
-    paddingBottom: 34,
+    paddingBottom: 18,
+    height: '88%',
     maxHeight: '92%',
   },
 
@@ -1368,6 +1857,152 @@ const styles = StyleSheet.create({
     color: '#908B83',
     textAlign: 'center',
     paddingVertical: 12,
+  },
+
+  detailModalCard: {
+    backgroundColor: '#FFF',
+    width: '100%',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 22,
+    paddingBottom: 18,
+    maxHeight: '78%',
+  },
+
+  detailModalSubtitle: {
+    fontFamily: FONT,
+    fontSize: 12,
+    marginTop: 3,
+    color: '#908B83',
+  },
+
+  detailModalLabel: {
+    fontFamily: FONT_MED,
+    fontSize: 13,
+    color: '#77746E',
+    marginTop: 8,
+    marginBottom: 8,
+  },
+
+  paidList: {
+    gap: 8,
+  },
+
+  paidRow: {
+    minHeight: 54,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#ECE9E4',
+    backgroundColor: '#FFF',
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: '#C8C5BE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 11,
+  },
+
+  paidName: {
+    flex: 1,
+    fontFamily: FONT_MED,
+    fontSize: 14,
+    color: '#27241F',
+  },
+
+  paidAmount: {
+    fontFamily: FONT_SEMI,
+    fontSize: 13,
+    color: '#77746E',
+  },
+
+  paidNameCrossed: {
+    textDecorationLine: 'line-through',
+    opacity: 0.55,
+  },
+
+  paymentHint: {
+    fontFamily: FONT,
+    fontSize: 11,
+    lineHeight: 16,
+    color: '#908B83',
+    marginTop: 12,
+  },
+
+  peerNamesWrap: {
+    gap: 2,
+  },
+
+  customAmountsSection: {
+    marginTop: 12,
+    gap: 8,
+  },
+
+  amountRow: {
+    minHeight: 52,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#ECE9E4',
+    backgroundColor: '#FFF',
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+
+  amountPerson: {
+    flex: 1,
+    fontFamily: FONT_MED,
+    fontSize: 13,
+    color: '#27241F',
+  },
+
+  amountInput: {
+    width: 105,
+    borderWidth: 1,
+    borderColor: '#E1DED8',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontFamily: FONT,
+    fontSize: 14,
+    color: '#282724',
+    backgroundColor: '#FFF',
+    textAlign: 'right',
+  },
+
+  detailActionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 22,
+  },
+
+  detailActionButton: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 7,
+  },
+
+  editActionButton: {
+    backgroundColor: '#F3F1ED',
+    borderWidth: 1,
+    borderColor: '#E1DED8',
+  },
+
+  editActionButtonDark: {
+    backgroundColor: '#222',
+    borderColor: '#363636',
   },
 
   saveButton: {
