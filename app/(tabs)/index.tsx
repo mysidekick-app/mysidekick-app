@@ -5,6 +5,8 @@ import {
   useState,
 } from 'react';
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 import {
   ActivityIndicator,
   Alert,
@@ -52,6 +54,7 @@ import {
   ensureGroupConversation,
   getChatClearedAt,
   getConversationReadMap,
+  getDeletedMessageIds,
   markConversationRead,
   sendChatMessage,
 } from './chat/chatHelpers';
@@ -260,6 +263,9 @@ export default function ChatScreen() {
       time: string;
     } | null>(null);
 
+  const [sidekickUnreadCount, setSidekickUnreadCount] =
+    useState(0);
+
   /* =======================================================
      FLEX RECIPIENT SELECTION
   ======================================================= */
@@ -444,6 +450,8 @@ export default function ChatScreen() {
     );
 
     const conversationByFriend = new Map<string, string>();
+    const friendHasAnyConversation = new Set<string>();
+
     const { data: myMembershipRows, error: membershipLoadError } = await supabase
       .from('chat_conversation_members')
       .select('conversation_id')
@@ -459,16 +467,144 @@ export default function ChatScreen() {
           .select('id')
           .eq('type', 'direct')
           .in('id', conversationIds);
+
         const directIds = (directRows ?? []).map((r: any) => r.id);
+
         if (directIds.length) {
           const { data: pairedRows } = await supabase
             .from('chat_conversation_members')
             .select('conversation_id, user_id')
             .in('conversation_id', directIds)
             .in('user_id', friendIds);
+
           (pairedRows ?? []).forEach((row: any) => {
-            if (!conversationByFriend.has(row.user_id)) conversationByFriend.set(row.user_id, row.conversation_id);
+            if (row.user_id) friendHasAnyConversation.add(row.user_id);
+            if (row.user_id && !conversationByFriend.has(row.user_id)) {
+              conversationByFriend.set(row.user_id, row.conversation_id);
+            }
           });
+        }
+      }
+    }
+
+    /*
+     * A deleted direct chat removes only the current user's membership.
+     * The other participant still has membership, so look for old direct
+     * conversations belonging to our friends as well. We only restore one
+     * when there is a message newer than this user's local chat-clear time.
+     *
+     * This gives us:
+     *   - new friend with no chat -> visible
+     *   - deleted chat with no new message -> hidden
+     *   - deleted chat with a new incoming message -> restored and visible
+     */
+    const { data: friendMembershipRows, error: friendMembershipError } = await supabase
+      .from('chat_conversation_members')
+      .select('conversation_id, user_id')
+      .in('user_id', friendIds);
+
+    if (friendMembershipError) {
+      console.warn('LOAD FRIEND CHAT MEMBERSHIPS ERROR:', friendMembershipError);
+    }
+
+    const historicalFriendMemberships = (friendMembershipRows ?? []).filter(
+      (row: any) => row.conversation_id && row.user_id && friendIds.includes(row.user_id),
+    );
+
+    historicalFriendMemberships.forEach((row: any) => {
+      friendHasAnyConversation.add(row.user_id);
+    });
+
+    const historicalConversationIds = [
+      ...new Set(
+        historicalFriendMemberships
+          .map((row: any) => row.conversation_id)
+          .filter(Boolean),
+      ),
+    ];
+
+    const activeConversationIds = new Set(conversationByFriend.values());
+    const historicalOnlyIds = historicalConversationIds.filter(
+      (conversationId) => !activeConversationIds.has(conversationId),
+    );
+
+    const historicalDirectIds = historicalOnlyIds.length
+      ? (
+          await supabase
+            .from('chat_conversations')
+            .select('id')
+            .eq('type', 'direct')
+            .in('id', historicalOnlyIds)
+        ).data?.map((row: any) => row.id) ?? []
+      : [];
+
+    const historicalClearRows = await Promise.all(
+      historicalDirectIds.map(async (conversationId) => [
+        conversationId,
+        await getChatClearedAt(user.id, conversationId),
+      ] as const),
+    );
+
+    const historicalClearAtByConversation = new Map<string, string>(
+      historicalClearRows.filter(
+        (row): row is readonly [string, string] => Boolean(row[1]),
+      ),
+    );
+
+    const candidateHistoricalIds = historicalDirectIds.filter(
+      (conversationId) => historicalClearAtByConversation.has(conversationId),
+    );
+
+    if (candidateHistoricalIds.length) {
+      const { data: historicalMessages, error: historicalMessageError } = await supabase
+        .from('chat_messages')
+        .select('id, conversation_id, sender_id, body, created_at')
+        .in('conversation_id', candidateHistoricalIds)
+        .is('deleted_at', null)
+        .order('created_at', { ascending: false });
+
+      if (historicalMessageError) {
+        console.warn('LOAD DELETED CHAT MESSAGES ERROR:', historicalMessageError);
+      } else {
+        const friendByConversation = new Map<string, string>();
+        historicalFriendMemberships.forEach((row: any) => {
+          if (!friendByConversation.has(row.conversation_id)) {
+            friendByConversation.set(row.conversation_id, row.user_id);
+          }
+        });
+
+        const restoredFriendIds = new Set<string>();
+
+        for (const message of historicalMessages ?? []) {
+          const friendId = friendByConversation.get(message.conversation_id);
+          const clearedAt = historicalClearAtByConversation.get(message.conversation_id);
+
+          if (
+            !friendId ||
+            restoredFriendIds.has(friendId) ||
+            !clearedAt ||
+            new Date(message.created_at).getTime() <= new Date(clearedAt).getTime()
+          ) {
+            continue;
+          }
+
+          const { error: restoreMembershipError } = await supabase
+            .from('chat_conversation_members')
+            .insert({
+              conversation_id: message.conversation_id,
+              user_id: user.id,
+            });
+
+          if (restoreMembershipError && restoreMembershipError.code !== '23505') {
+            console.warn(
+              'RESTORE DELETED CHAT MEMBERSHIP ERROR:',
+              restoreMembershipError,
+            );
+            continue;
+          }
+
+          conversationByFriend.set(friendId, message.conversation_id);
+          restoredFriendIds.add(friendId);
         }
       }
     }
@@ -521,11 +657,21 @@ export default function ChatScreen() {
     const { data: messageRows } = directConversationIds.length
       ? await supabase
           .from('chat_messages')
-          .select('conversation_id, sender_id, body, created_at')
+          .select('id, conversation_id, sender_id, body, created_at')
           .in('conversation_id', directConversationIds)
           .is('deleted_at', null)
           .order('created_at', { ascending: false })
       : { data: [] as any[] };
+
+    const directMessageIds = (messageRows ?? [])
+      .map((row: any) => row.id)
+      .filter(Boolean);
+
+    const { ids: deletedDirectMessageIds } =
+      await getDeletedMessageIds(
+        directMessageIds,
+        user.id,
+      );
 
     const clearRows = await Promise.all(
       directConversationIds.map(async (conversationId) => [
@@ -537,6 +683,10 @@ export default function ChatScreen() {
 
     const messagesByConversation = new Map<string, any[]>();
     (messageRows ?? []).forEach((row: any) => {
+      if (deletedDirectMessageIds.has(row.id)) {
+        return;
+      }
+
       const clearAt = clearAtByConversation.get(row.conversation_id);
       if (clearAt && new Date(row.created_at).getTime() <= new Date(clearAt).getTime()) {
         return;
@@ -552,7 +702,11 @@ export default function ChatScreen() {
     };
 
     const friendsList: ChatItem[] =
-      (profiles ?? []).filter((profile: SocialProfile) => conversationByFriend.has(profile.user_id)).map(
+      (profiles ?? []).filter(
+        (profile: SocialProfile) =>
+          conversationByFriend.has(profile.user_id) ||
+          !friendHasAnyConversation.has(profile.user_id),
+      ).map(
         (profile: SocialProfile) => ({
           id: profile.user_id,
           name: profile.display_name,
@@ -734,14 +888,28 @@ export default function ChatScreen() {
     const { data: groupMessageRows } = groupConversationIds.length
       ? await supabase
           .from('chat_messages')
-          .select('conversation_id, sender_id, body, created_at')
+          .select('id, conversation_id, sender_id, body, created_at')
           .in('conversation_id', groupConversationIds)
           .is('deleted_at', null)
           .order('created_at', { ascending: false })
       : { data: [] as any[] };
 
+    const groupMessageIds = (groupMessageRows ?? [])
+      .map((row: any) => row.id)
+      .filter(Boolean);
+
+    const { ids: deletedGroupMessageIds } =
+      await getDeletedMessageIds(
+        groupMessageIds,
+        user.id,
+      );
+
     const groupMessagesByConversation = new Map<string, any[]>();
     (groupMessageRows ?? []).forEach((row: any) => {
+      if (deletedGroupMessageIds.has(row.id)) {
+        return;
+      }
+
       const list = groupMessagesByConversation.get(row.conversation_id) ?? [];
       list.push(row);
       groupMessagesByConversation.set(row.conversation_id, list);
@@ -808,47 +976,57 @@ export default function ChatScreen() {
       if (!user) return;
 
       const {
-        data,
+        data: messages,
         error,
       } = await supabase
         .from('system_messages')
-        .select(
-          'content, created_at',
-        )
-        .eq(
-          'user_id',
-          user.id,
-        )
-        .eq(
-          'module_key',
-          'sidekick',
-        )
-        .order(
-          'created_at',
-          {
-            ascending: false,
-          },
-        )
-        .limit(1)
-        .maybeSingle();
+        .select('content, created_at, sender')
+        .eq('user_id', user.id)
+        .eq('module_key', 'sidekick')
+        .order('created_at', { ascending: false });
 
-      if (error || !data) return;
+      if (error) {
+        console.error('LOAD SIDEKICK PREVIEW ERROR:', error);
+        return;
+      }
 
-      const time =
-        new Date(
-          data.created_at,
-        ).toLocaleTimeString(
-          [],
-          {
-            hour: 'numeric',
-            minute: '2-digit',
-          },
-        );
+      const rows = messages ?? [];
+      const latest = rows[0];
 
-      setSidekickPreview({
-        content: data.content,
-        time,
-      });
+      if (latest) {
+        const time = new Date(latest.created_at).toLocaleTimeString([], {
+          hour: 'numeric',
+          minute: '2-digit',
+        });
+
+        setSidekickPreview({
+          content: latest.content,
+          time,
+        });
+      } else {
+        setSidekickPreview(null);
+      }
+
+      const sidekickRows = rows.filter(
+        (row: any) => row.sender === 'sidekick',
+      );
+
+      const readKey = `mysidekick:sidekick-read-at:${user.id}`;
+      let readAt = await AsyncStorage.getItem(readKey);
+
+      // On first use, don't mark existing Sidekick history as new.
+      if (!readAt && sidekickRows.length > 0) {
+        readAt = sidekickRows[0].created_at;
+        if (readAt) {
+          await AsyncStorage.setItem(readKey, readAt);
+        }
+      }
+
+      const unreadCount = sidekickRows.filter((row: any) =>
+        !readAt || new Date(row.created_at).getTime() > new Date(readAt).getTime(),
+      ).length;
+
+      setSidekickUnreadCount(unreadCount);
     }, []);
 
   /* =========================================================
@@ -1782,14 +1960,16 @@ export default function ChatScreen() {
       ...SYSTEM_CHATS.map(
         (chat) =>
           chat.id ===
-            'sys-sidekick' &&
-          sidekickPreview
+            'sys-sidekick'
             ? {
                 ...chat,
-                detail:
-                  sidekickPreview.content,
-                time:
-                  sidekickPreview.time,
+                ...(sidekickPreview
+                  ? {
+                      detail: sidekickPreview.content,
+                      time: sidekickPreview.time,
+                    }
+                  : {}),
+                unread: sidekickUnreadCount || undefined,
               }
             : chat,
       ),
@@ -1798,6 +1978,7 @@ export default function ChatScreen() {
     [
       userFriends,
       sidekickPreview,
+      sidekickUnreadCount,
     ],
   );
 
@@ -2573,6 +2754,43 @@ export default function ChatScreen() {
     }
 
     const sourceFilter = filter ?? 'All';
+
+    if (chat.id === 'sys-sidekick') {
+      if (myUserId) {
+        try {
+          const readKey = `mysidekick:sidekick-read-at:${myUserId}`;
+          const { data: latestSidekickMessage } = await supabase
+            .from('system_messages')
+            .select('created_at')
+            .eq('user_id', myUserId)
+            .eq('module_key', 'sidekick')
+            .eq('sender', 'sidekick')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          const readAt =
+            latestSidekickMessage?.created_at ??
+            new Date().toISOString();
+
+          await AsyncStorage.setItem(readKey, readAt);
+          setSidekickUnreadCount(0);
+        } catch (error) {
+          console.error('MARK SIDEKICK CHAT READ ERROR:', error);
+        }
+      }
+
+      router.push(
+        {
+          pathname: '/chat/sidekick',
+          params: {
+            from: sourceFilter,
+          },
+        } as never,
+      );
+
+      return;
+    }
 
     /*
      * Direct chats must be marked as read before navigating away.
@@ -4729,7 +4947,7 @@ const styles =
 
     frozenHeader: {
       paddingHorizontal: 16,
-      paddingTop: 50,
+      paddingTop: 30,
       paddingVertical: 12,
     },
 

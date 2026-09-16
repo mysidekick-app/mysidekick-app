@@ -1,13 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 
 import {
-  Alert,
   Animated,
   Easing,
-  Platform,
   StyleSheet,
-  Text,
-  TouchableOpacity,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -17,9 +13,6 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import * as SystemUI from 'expo-system-ui';
-import * as Device from 'expo-device';
-import * as Notifications from 'expo-notifications';
-import Constants from 'expo-constants';
 
 import { useFonts } from '@expo-google-fonts/poppins';
 
@@ -32,6 +25,7 @@ import {
 } from '@expo-google-fonts/poppins';
 
 import { AppProvider, useApp } from '@/components/AppProvider';
+
 import {
   AuthProvider,
   useAuth,
@@ -46,94 +40,10 @@ SplashScreen.preventAutoHideAsync();
 const loadingAnimation = require('../assets/loading.json');
 
 /* -------------------------------------------------------------------------- */
-/* PUSH NOTIFICATIONS                                                         */
-/* -------------------------------------------------------------------------- */
-
-async function registerForPushNotificationsAsync(): Promise<
-  string | null
-> {
-  if (!Device.isDevice) {
-    console.log(
-      'Push notifications require a physical device.'
-    );
-    return null;
-  }
-
-  if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync(
-      'default',
-      {
-        name: 'My Sidekick',
-        importance:
-          Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 250, 250, 250],
-        sound: 'default',
-        lockscreenVisibility:
-          Notifications.AndroidNotificationVisibility.PUBLIC,
-      }
-    );
-  }
-
-  const {
-    status: existingStatus,
-  } = await Notifications.getPermissionsAsync();
-
-  let finalStatus = existingStatus;
-
-  if (existingStatus !== 'granted') {
-    const { status } =
-      await Notifications.requestPermissionsAsync();
-
-    finalStatus = status;
-  }
-
-  if (finalStatus !== 'granted') {
-    console.log(
-      'Notification permission was not granted.'
-    );
-
-    return null;
-  }
-
-  const projectId =
-    Constants.expoConfig?.extra?.eas?.projectId ??
-    Constants.easConfig?.projectId;
-
-  if (!projectId) {
-    console.log(
-      'Expo EAS project ID could not be found.'
-    );
-
-    return null;
-  }
-
-  try {
-    const token =
-      (
-        await Notifications.getExpoPushTokenAsync({
-          projectId,
-        })
-      ).data;
-
-    console.log(
-      'EXPO PUSH TOKEN:',
-      token
-    );
-
-    return token;
-  } catch (error) {
-    console.error(
-      'Could not get Expo push token:',
-      error
-    );
-
-    return null;
-  }
-}
-
-/* -------------------------------------------------------------------------- */
 /* NOTIFICATION HANDLER                                                       */
 /* -------------------------------------------------------------------------- */
+
+import * as Notifications from 'expo-notifications';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -156,6 +66,7 @@ function LoadingScreen({
   const { width } = useWindowDimensions();
 
   const animationWidth = width;
+
   const animationHeight =
     width * (1920 / 1200);
 
@@ -192,9 +103,6 @@ function RootNavigator() {
 
   const [showLoadingScreen, setShowLoadingScreen] =
     useState(true);
-
-  const notificationRegistered =
-    useRef(false);
 
   const fadeAnim = useRef(
     new Animated.Value(1)
@@ -305,56 +213,6 @@ function RootNavigator() {
   ]);
 
   /* ------------------------------------------------------------------------ */
-  /* PUSH NOTIFICATION REGISTRATION                                           */
-  /* ------------------------------------------------------------------------ */
-
-  useEffect(() => {
-    if (
-      loading ||
-      showLoadingScreen ||
-      !session ||
-      notificationRegistered.current
-    ) {
-      return;
-    }
-
-    notificationRegistered.current = true;
-
-    const register = async () => {
-      const token =
-        await registerForPushNotificationsAsync();
-
-      if (token) {
-        /*
-         * TEMPORARY TEST:
-         * Show the Expo push token directly on the
-         * friend's iPhone so we don't need the console.
-         */
-        Alert.alert(
-          'Push Notifications Ready',
-          `My Sidekick successfully registered this device for push notifications.\n\nExpo Push Token:\n\n${token}`,
-          [
-            {
-              text: 'OK',
-            },
-          ]
-        );
-      } else {
-        Alert.alert(
-          'Push Notifications',
-          'My Sidekick could not register this device for push notifications. We need to check the notification permission or EAS configuration.'
-        );
-      }
-    };
-
-    register();
-  }, [
-    loading,
-    showLoadingScreen,
-    session,
-  ]);
-
-  /* ------------------------------------------------------------------------ */
   /* NAVIGATION UI                                                            */
   /* ------------------------------------------------------------------------ */
 
@@ -410,12 +268,16 @@ export default function RootLayout() {
   ] = useFonts({
     'Poppins-Regular':
       Poppins_400Regular,
+
     'Poppins-Medium':
       Poppins_500Medium,
+
     'Poppins-SemiBold':
       Poppins_600SemiBold,
+
     'Poppins-Bold':
       Poppins_700Bold,
+
     'Poppins-ExtraBold':
       Poppins_800ExtraBold,
   });

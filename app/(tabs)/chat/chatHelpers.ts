@@ -26,6 +26,85 @@ type ConversationResult = {
 type ReadMap = Map<string, string>;
 
 /**
+ * Delete one message only for the current user.
+ *
+ * The original chat_messages row is kept intact so the other participant(s)
+ * can still see the message. The deletion is stored in
+ * chat_message_deletions for this specific user.
+ */
+export async function deleteMessageForUser(
+  messageId: string,
+  userId: string,
+): Promise<{ error: any }> {
+  if (!messageId || !userId) {
+    return {
+      error: new Error('Missing message or user ID.'),
+    };
+  }
+
+  const { error } = await supabase
+    .from('chat_message_deletions')
+    .upsert(
+      {
+        message_id: messageId,
+        user_id: userId,
+      },
+      {
+        onConflict: 'message_id,user_id',
+      },
+    );
+
+  // Keep the full Supabase error visible in the browser/dev console.
+  // This makes RLS, schema, foreign-key, or permission problems diagnosable
+  // instead of showing only "Object".
+  if (error) {
+    console.error('DELETE MESSAGE SUPABASE ERROR:', {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code,
+    });
+  }
+
+  return {
+    error: error ?? null,
+  };
+}
+
+/**
+ * Get the message IDs that the current user has deleted for themselves.
+ *
+ * This is used when loading a conversation so "Delete for me" remains
+ * effective after refreshing or reopening the chat.
+ */
+export async function getDeletedMessageIds(
+  messageIds: string[],
+  userId: string,
+): Promise<{ ids: Set<string>; error: any }> {
+  if (!messageIds.length || !userId) {
+    return {
+      ids: new Set<string>(),
+      error: null,
+    };
+  }
+
+  const { data, error } = await supabase
+    .from('chat_message_deletions')
+    .select('message_id')
+    .eq('user_id', userId)
+    .in('message_id', messageIds);
+
+  return {
+    ids: new Set(
+      (data ?? [])
+        .map((row: any) => row.message_id)
+        .filter(Boolean),
+    ),
+    error: error ?? null,
+  };
+}
+
+/**
  * Find or create a direct conversation between two users.
  *
  * Direct conversations MUST use:
@@ -808,6 +887,36 @@ export async function sendChatMessage(
     }
 
     attachmentData = createdAttachment;
+  }
+
+  /*
+   * Send a push notification after the message has been successfully saved.
+   *
+   * IMPORTANT: notification failures must never make a successfully-sent chat
+   * message fail. The Edge Function is responsible for finding every other
+   * member of the conversation and sending to their Expo push token(s).
+   */
+  try {
+    const { data: pushResult, error: pushError } =
+      await supabase.functions.invoke('send-push-notification', {
+        body: {
+          type: 'chat_message',
+          conversation_id: data.conversation_id,
+          message_id: data.id,
+          sender_id: data.sender_id,
+        },
+      });
+
+    if (pushError) {
+      console.error('CHAT PUSH NOTIFICATION ERROR:', pushError);
+    } else if (pushResult?.error) {
+      console.error(
+        'CHAT PUSH NOTIFICATION SERVER ERROR:',
+        pushResult.error,
+      );
+    }
+  } catch (pushError) {
+    console.error('CHAT PUSH NOTIFICATION ERROR:', pushError);
   }
 
   return {

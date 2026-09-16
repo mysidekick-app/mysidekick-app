@@ -15,7 +15,7 @@ import {
 import {
   ActivityIndicator,
   Pressable,
-  SafeAreaView,
+
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -24,6 +24,7 @@ import {
 } from 'react-native';
 
 import { router } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useApp } from '@/components/AppProvider';
 import SidekickAvatar from '@/components/SidekickAvatar';
@@ -114,6 +115,22 @@ function getTodayKey(): string {
   ).padStart(2, '0')}-${String(
     now.getDate(),
   ).padStart(2, '0')}`;
+}
+
+function formatSidekickTime(value: string | null | undefined): string {
+  if (!value) return '';
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  return date.toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
 }
 
 function parseDate(value: string): Date {
@@ -653,8 +670,20 @@ export default function ModulesScreen() {
         return;
       }
 
-      const updates =
-        (data ?? []) as SidekickUpdate[];
+      // NO_UPDATE is an internal backend value and must never be
+      // displayed, even if an old malformed row exists in the database.
+      const updates = (data ?? [])
+        .filter((item: any) => {
+          const content =
+            typeof item?.content === 'string'
+              ? item.content.trim()
+              : '';
+
+          return (
+            content.length > 0 &&
+            !/\bNO_UPDATE\b/i.test(content)
+          );
+        }) as SidekickUpdate[];
 
       setSidekickUpdates(updates);
       setSidekickUpdateIndex((current) =>
@@ -822,12 +851,14 @@ export default function ModulesScreen() {
         }
 
         if (data?.update) {
+          // A genuinely new update was created. Refresh the history so
+          // the newest update appears immediately.
           setSidekickNoActionableUpdate(false);
           await loadSidekickUpdates();
         } else if (data?.reason === 'no_update') {
-          // Only this explicit response means there are genuinely
-          // no actionable Sidekick updates right now.
-          setSidekickNoActionableUpdate(true);
+          // "no_update" means there is nothing NEW to add.
+          // Keep the most recent real update already on the card.
+          // Do not replace it with an empty-state message.
         }
       } catch (error) {
         console.log(
@@ -855,7 +886,7 @@ export default function ModulesScreen() {
     loadSidekickUpdates();
     requestSidekickBriefing();
 
-    // The Edge Function enforces the 20-update daily limit.
+    // The Edge Function enforces the daily Sidekick update limit.
     // Check for a new Sidekick update every 20 minutes.
     const interval = setInterval(
       requestSidekickBriefing,
@@ -1894,28 +1925,39 @@ export default function ModulesScreen() {
                   styles.sidekickContent
                 }
               >
-                <Text
-                  style={
-                    styles.sidekickGreeting
-                  }
-                >
-                  {sidekickUpdates.length > 0
-                    ? 'Sidekick'
-                    : sidekickNoActionableUpdate
-                      ? 'You\'re on top of things...'
-                      : 'Sidekick'}
-                </Text>
+                <View style={styles.sidekickTitleRow}>
+                  <Text
+                    style={
+                      styles.sidekickGreeting
+                    }
+                  >
+                    Sidekick
+                  </Text>
+
+                  {sidekickUpdates.length > 0 &&
+                    formatSidekickTime(
+                      sidekickUpdates[
+                        sidekickUpdateIndex
+                      ]?.created_at,
+                    ) ? (
+                    <Text style={styles.sidekickTime}>
+                      {formatSidekickTime(
+                        sidekickUpdates[
+                          sidekickUpdateIndex
+                        ]?.created_at,
+                      )}
+                    </Text>
+                  ) : null}
+                </View>
 
                 <Text style={styles.sidekickBody}>
                   {sidekickUpdates.length > 0
                     ? sidekickUpdates[
                         sidekickUpdateIndex
                       ]?.content
-                    : sidekickNoActionableUpdate
-                      ? 'You\'re all caught up. Keep going, there\'s nothing that needs your attention right now.'
-                      : sidekickBriefingLoading
-                        ? 'Sidekick is checking what needs your attention...'
-                        : 'Sidekick is checking what matters right now...'}
+                    : sidekickBriefingLoading
+                      ? 'Sidekick is checking what matters right now...'
+                      : 'Sidekick is ready when you are.'}
                 </Text>
               </View>
 
@@ -2185,7 +2227,7 @@ const styles =
 
     fixedSidekickArea: {
       paddingHorizontal: 16,
-      paddingTop: 100,
+      paddingTop: 30,
       paddingBottom: 10,
     },
 
@@ -2194,7 +2236,7 @@ const styles =
       minHeight: 220,
       borderRadius: 24,
       paddingHorizontal: 32,
-      paddingTop: 58,
+      paddingTop: 30,
       paddingBottom: 48,
       position: 'relative',
       overflow: 'visible',
@@ -2243,12 +2285,27 @@ const styles =
       opacity: 0.35,
     },
 
+    sidekickTitleRow: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      gap: 7,
+      marginBottom: 2,
+    },
+
     sidekickGreeting: {
       color: '#FFFFFF',
       fontFamily: FONT,
       fontSize: 15,
       lineHeight: 23,
-      marginBottom: 2,
+      marginBottom: 0,
+    },
+
+    sidekickTime: {
+      color: '#FFFFFF',
+      fontFamily: FONT,
+      fontSize: 10,
+      lineHeight: 16,
+      opacity: 0.72,
     },
 
     sidekickBody: {

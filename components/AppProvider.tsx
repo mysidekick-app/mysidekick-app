@@ -308,9 +308,9 @@ export function AppProvider({
    * Register the signed-in user's device for push notifications.
    *
    * This runs only after authentication is ready and only on
-   * native iOS/Android. The Expo push token is saved to
-   * public.push_tokens so the backend can send notifications
-   * to this specific user's device.
+   * native iOS/Android. The Expo push token is cached locally
+   * per user/device and saved to public.push_tokens so the
+   * backend can send notifications to this specific device.
    */
   useEffect(() => {
     if (authLoading || !user?.id) {
@@ -329,7 +329,7 @@ export function AppProvider({
         }
 
         const expoPushToken =
-          await registerForPushNotificationsAsync();
+  await registerForPushNotificationsAsync(userId);
 
         if (!active || !expoPushToken) {
           return;

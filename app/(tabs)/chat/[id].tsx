@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Clipboard from 'expo-clipboard';
 
 import {
   ActivityIndicator,
   Alert,
   FlatList,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -49,6 +52,8 @@ import {
   ensureDirectConversation,
   clearChatForUser,
   deleteConversationForUser,
+  deleteMessageForUser,
+  getDeletedMessageIds,
   getChatClearedAt,
   loadChatMessages,
   markConversationRead,
@@ -97,6 +102,17 @@ type Message = {
 
 const SYSTEM_CHAT_TITLES: Record<string, string> = {
   sidekick: 'Sidekick',
+};
+
+const getSidekickReadKey = (userId: string) =>
+  `mysidekick:sidekick-read-at:${userId}`;
+
+const markSidekickRead = async (userId: string, readAt: string) => {
+  try {
+    await AsyncStorage.setItem(getSidekickReadKey(userId), readAt);
+  } catch (error) {
+    console.error('MARK SIDEKICK READ ERROR:', error);
+  }
 };
 
 function renderSidekickFormattedText(
@@ -458,6 +474,9 @@ export default function ChatDetailScreen() {
   const [draft, setDraft] =
     useState('');
 
+  const [keyboardVisible, setKeyboardVisible] =
+    useState(false);
+
   const [sending, setSending] =
     useState(false);
 
@@ -568,6 +587,12 @@ export default function ChatDetailScreen() {
 
   const [actionLoading, setActionLoading] =
     useState<string | null>(null);
+
+  const [messageAction, setMessageAction] =
+    useState<Message | null>(null);
+
+  const [messageActionLoading, setMessageActionLoading] =
+    useState(false);
 
   const listRef =
     useRef<FlatList<Message>>(null);
@@ -849,6 +874,17 @@ export default function ChatDetailScreen() {
           }
 
           setMessages(loadedMessages);
+
+          const newestSidekickMessage = [...loadedMessages]
+            .reverse()
+            .find(message => message.sender_id === 'sidekick');
+
+          if (myId && newestSidekickMessage) {
+            await markSidekickRead(
+              myId,
+              newestSidekickMessage.created_at,
+            );
+          }
         }
 
         setMessagesLoading(false);
@@ -882,10 +918,26 @@ export default function ChatDetailScreen() {
           ? await getChatClearedAt(myId, conversationId)
           : null;
 
-        const loadedMessages = (result.messages as Message[]).filter((message) => {
+        let loadedMessages = (result.messages as Message[]).filter((message) => {
           if (!clearedAt) return true;
           return new Date(message.created_at).getTime() > new Date(clearedAt).getTime();
         });
+
+        // Delete-for-me is persistent: remove only messages this user has hidden.
+        if (myId && loadedMessages.length > 0) {
+          const deletedResult = await getDeletedMessageIds(
+            loadedMessages.map(message => message.id),
+            myId,
+          );
+
+          if (deletedResult.error) {
+            console.error('DELETED MESSAGE IDS LOAD ERROR:', deletedResult.error);
+          } else {
+            loadedMessages = loadedMessages.filter(
+              message => !deletedResult.ids.has(message.id),
+            );
+          }
+        }
 
         setMessages(loadedMessages);
 
@@ -928,6 +980,34 @@ export default function ChatDetailScreen() {
 
     return () => {
       mounted = false;
+    };
+  }, []);
+
+  /*
+   * KEYBOARD VISIBILITY
+   *
+   * Keep the floating navigation clearance only when the keyboard
+   * is closed. When the keyboard opens, the composer can move
+   * directly above it.
+   */
+  useEffect(() => {
+    const showSubscription = Keyboard.addListener(
+      'keyboardDidShow',
+      () => {
+        setKeyboardVisible(true);
+      },
+    );
+
+    const hideSubscription = Keyboard.addListener(
+      'keyboardDidHide',
+      () => {
+        setKeyboardVisible(false);
+      },
+    );
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
     };
   }, []);
 
@@ -1531,6 +1611,11 @@ export default function ChatDetailScreen() {
           'SIDEKICK REPLY SAVED SUCCESSFULLY',
         );
 
+        await markSidekickRead(
+          myId,
+          localSidekickMessage.created_at,
+        );
+
       } catch (error) {
         console.error(
           'SIDEKICK REQUEST FAILED:',
@@ -1705,14 +1790,46 @@ export default function ChatDetailScreen() {
       }
 
       try {
+        /*
+         * React Native / Expo file URIs should be converted to an
+         * ArrayBuffer before uploading to Supabase Storage.
+         *
+         * Using response.blob() here can result in:
+         * "StorageUnknownError: Network request failed"
+         * on Android even though the file picker itself works.
+         */
         const response =
           await fetch(uri);
 
-        const blob =
-          await response.blob();
+        if (!response.ok) {
+          console.error(
+            'ATTACHMENT FILE READ ERROR:',
+            response.status,
+            response.statusText,
+          );
+
+          return null;
+        }
+
+        const arrayBuffer =
+          await response.arrayBuffer();
+
+        if (!arrayBuffer.byteLength) {
+          console.error(
+            'ATTACHMENT FILE IS EMPTY.',
+          );
+
+          return null;
+        }
+
+        const safeFileName =
+          fileName.replace(
+            /[^a-zA-Z0-9._-]/g,
+            '_',
+          );
 
         const path =
-          `${myId}/${Date.now()}-${fileName}`;
+          `${myId}/${Date.now()}-${safeFileName}`;
 
         const {
           error: uploadError,
@@ -1723,10 +1840,11 @@ export default function ChatDetailScreen() {
             )
             .upload(
               path,
-              blob,
+              arrayBuffer,
               {
                 contentType:
-                  mimeType,
+                  mimeType ||
+                  'application/octet-stream',
                 upsert: false,
               },
             );
@@ -2812,98 +2930,6 @@ export default function ChatDetailScreen() {
     };
 
   /*
-   * UNSEND
-   */
-  const handleUnsendMessage =
-    async (
-      message: Message,
-    ) => {
-      if (
-        !myId ||
-        message.sender_id !==
-          myId ||
-        message.id.startsWith(
-          'local-',
-        )
-      ) {
-        return;
-      }
-
-      const age =
-        Date.now() -
-        new Date(
-          message.created_at,
-        ).getTime();
-
-      const fiveMinutes =
-        5 * 60 * 1000;
-
-      if (
-        age >
-        fiveMinutes
-      ) {
-        Alert.alert(
-          'Unsend unavailable',
-          'Messages can only be unsent within 5 minutes of sending.',
-        );
-
-        return;
-      }
-
-      Alert.alert(
-        'Message options',
-        'What would you like to do with this message?',
-        [
-          {
-            text: 'Cancel',
-            style: 'cancel',
-          },
-          {
-            text: 'Unsend',
-            style: 'destructive',
-            onPress:
-              async () => {
-                const {
-                  error,
-                } =
-                  await supabase.rpc(
-                    'chat_unsend_direct_message',
-                    {
-                      p_message_id:
-                        message.id,
-                    },
-                  );
-
-                if (error) {
-                  console.error(
-                    'UNSEND DIRECT MESSAGE ERROR:',
-                    error,
-                  );
-
-                  Alert.alert(
-                    'Could not unsend message',
-                    error.message ||
-                      'Please try again.',
-                  );
-
-                  return;
-                }
-
-                setMessages(
-                  previous =>
-                    previous.filter(
-                      item =>
-                        item.id !==
-                        message.id,
-                    ),
-                );
-              },
-          },
-        ],
-      );
-    };
-
-  /*
    * CLEAR CHAT
    */
   const handleClearChat =
@@ -2950,6 +2976,7 @@ export default function ChatDetailScreen() {
         }
 
         setMessages([]);
+        await markSidekickRead(myId, new Date().toISOString());
 
         showToast(
           'Sidekick chat cleared.',
@@ -2993,210 +3020,43 @@ export default function ChatDetailScreen() {
       );
     };
 
-  /*
-   * CREATE GROUP
-   */
-  const handleCreateGroup =
-    async () => {
-      const name =
-        groupName.trim();
+  const handleCopyMessage = async () => {
+    if (!messageAction) return;
 
-      if (
-        !name ||
-        groupSubmitting ||
-        !myId ||
-        !id ||
-        isSidekick
-      ) {
-        return;
-      }
+    try {
+      await Clipboard.setStringAsync(messageAction.content ?? '');
+      setMessageAction(null);
+      showToast('Message copied.');
+    } catch (error) {
+      console.error('COPY MESSAGE ERROR:', error);
+      showToast('Could not copy message.');
+    }
+  };
 
-      setGroupSubmitting(
-        true,
-      );
+  const handleDeleteMessageForMe = async () => {
+    if (!messageAction || !myId) return;
 
-      try {
-        const {
-          data: groupData,
-          error: groupError,
-        } =
-          await supabase
-            .from('chat_groups')
-            .insert({
-              name,
-              description: '',
-              visibility:
-                'private',
-              owner_id: myId,
-            })
-            .select('id')
-            .single();
+    setMessageActionLoading(true);
 
-        if (
-          groupError ||
-          !groupData
-        ) {
-          throw (
-            groupError ??
-            new Error(
-              'Could not create group.',
-            )
-          );
-        }
+    const { error } = await deleteMessageForUser(
+      messageAction.id,
+      myId,
+    );
 
-        const groupId =
-          groupData.id;
+    setMessageActionLoading(false);
 
-        const {
-          error: memberError,
-        } =
-          await supabase
-            .from(
-              'chat_group_members',
-            )
-            .insert({
-              group_id: groupId,
-              user_id: myId,
-              role: 'owner',
-            });
+    if (error) {
+      console.error('DELETE MESSAGE FOR ME ERROR:', error);
+      showToast('Could not delete message.');
+      return;
+    }
 
-        if (memberError) {
-          throw memberError;
-        }
-
-        const {
-          data: channelData,
-          error: channelError,
-        } =
-          await supabase
-            .from(
-              'chat_channels',
-            )
-            .insert({
-              group_id: groupId,
-              name,
-              description: '',
-              position: 0,
-              is_default: true,
-              created_by: myId,
-            })
-            .select('id')
-            .single();
-
-        if (
-          channelError ||
-          !channelData
-        ) {
-          throw (
-            channelError ??
-            new Error(
-              'Could not create group channel.',
-            )
-          );
-        }
-
-        const {
-          data: conversationData,
-          error:
-            conversationError,
-        } =
-          await supabase
-            .from(
-              'chat_conversations',
-            )
-            .insert({
-              type: 'channel',
-              group_id:
-                groupId,
-              channel_id:
-                channelData.id,
-              created_by: myId,
-            })
-            .select('id')
-            .single();
-
-        if (
-          conversationError ||
-          !conversationData
-        ) {
-          throw (
-            conversationError ??
-            new Error(
-              'Could not create group conversation.',
-            )
-          );
-        }
-
-        const {
-          error:
-            conversationMemberError,
-        } =
-          await supabase
-            .from(
-              'chat_conversation_members',
-            )
-            .insert({
-              conversation_id:
-                conversationData.id,
-              user_id: myId,
-            });
-
-        if (
-          conversationMemberError
-        ) {
-          throw conversationMemberError;
-        }
-
-        const {
-          data: inviteData,
-          error: inviteError,
-        } =
-          await supabase
-            .from(
-              'chat_group_invitations',
-            )
-            .insert({
-              group_id: groupId,
-              inviter_id: myId,
-              invitee_id: id,
-              status:
-                'pending',
-            })
-            .select('id')
-            .single();
-
-        if (inviteError) {
-          throw inviteError;
-        }
-
-        setGroupSuccess(
-          `Group created${
-            inviteData
-              ? ` and invite sent to ${
-                  profile?.display_name ??
-                  'user'
-                }`
-              : ''
-          }`,
-        );
-
-        setGroupName('');
-      } catch (error: any) {
-        console.error(
-          'CREATE GROUP ERROR:',
-          error,
-        );
-
-        showToast(
-          error?.message ||
-            'Could not create group.',
-        );
-      } finally {
-        setGroupSubmitting(
-          false,
-        );
-      }
-    };
+    setMessages(previous =>
+      previous.filter(message => message.id !== messageAction.id),
+    );
+    setMessageAction(null);
+    showToast('Message deleted for you.');
+  };
 
   /*
    * MESSAGE RENDERING
@@ -3269,28 +3129,12 @@ export default function ChatDetailScreen() {
         ]}
       >
         <Pressable
-          onLongPress={() => {
-            if (
-              isMine &&
-              !isSidekickReply
-            ) {
-              void handleUnsendMessage(
-                item,
-              );
-            }
-          }}
-          delayLongPress={350}
-          disabled={
-            !isMine ||
-            isSidekickReply
-          }
           style={({ pressed }) => [
             styles.messagePressable,
-            pressed &&
-              isMine &&
-              !isSidekickReply &&
-              styles.messagePressed,
+            pressed && styles.messagePressed,
           ]}
+          onLongPress={() => setMessageAction(item)}
+          delayLongPress={350}
         >
           <View
             style={[
@@ -3591,15 +3435,20 @@ export default function ChatDetailScreen() {
     };
 
   return (
-    <SafeAreaView
-      style={[
-        styles.safe,
-        {
-          backgroundColor:
-            colors.bg,
-        },
-      ]}
+    <KeyboardAvoidingView
+      style={styles.keyboardScreen}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={0}
     >
+      <SafeAreaView
+        style={[
+          styles.safe,
+          {
+            backgroundColor:
+              colors.bg,
+          },
+        ]}
+      >
       {/* HEADER */}
 
       <View
@@ -3832,15 +3681,7 @@ export default function ChatDetailScreen() {
           ) : null}
         </View>
       ) : (
-      <KeyboardAvoidingView
-        behavior={
-          Platform.OS === 'ios'
-            ? 'padding'
-            : undefined
-        }
-        keyboardVerticalOffset={0}
-      >
-        <View
+      <View
           style={[
             styles.composer,
             {
@@ -3848,6 +3689,7 @@ export default function ChatDetailScreen() {
                 colors.card,
               borderTopColor:
                 colors.border,
+              paddingBottom: 20,
             },
           ]}
         >
@@ -4067,7 +3909,7 @@ export default function ChatDetailScreen() {
             </Pressable>
           )}
         </View>
-      </KeyboardAvoidingView>
+
       )}
 
       {/* TOAST */}
@@ -4252,6 +4094,82 @@ export default function ChatDetailScreen() {
           </View>
         </Pressable>
       ) : null}
+
+      {/* MESSAGE ACTIONS */}
+      <Modal
+        visible={!!messageAction}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMessageAction(null)}
+      >
+        <Pressable
+          style={styles.subShade}
+          onPress={() => setMessageAction(null)}
+        >
+          <View
+            style={[
+              styles.subSheet,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.subTitle,
+                { color: colors.text, marginBottom: 8 },
+              ]}
+            >
+              Message
+            </Text>
+
+            {messageAction?.content ? (
+              <Text
+                style={[
+                  styles.subHint,
+                  { color: colors.muted, marginBottom: 8 },
+                ]}
+                numberOfLines={3}
+              >
+                {messageAction.content}
+              </Text>
+            ) : null}
+
+            <Pressable
+              style={styles.menuItem}
+              onPress={handleCopyMessage}
+              disabled={messageActionLoading}
+            >
+              <Text style={[styles.menuItemText, { color: colors.text }]}>
+                Copy
+              </Text>
+            </Pressable>
+
+            {!isSidekick ? (
+              <Pressable
+                style={styles.menuItem}
+                onPress={handleDeleteMessageForMe}
+                disabled={messageActionLoading}
+              >
+                <Text style={[styles.menuItemText, { color: '#C84D4D' }]}>
+                  {messageActionLoading ? 'Deleting…' : 'Delete for me'}
+                </Text>
+              </Pressable>
+            ) : null}
+
+            <Pressable
+              style={styles.menuItem}
+              onPress={() => setMessageAction(null)}
+              disabled={messageActionLoading}
+            >
+              <Text style={[styles.menuItemText, { color: colors.muted }]}>
+                Cancel
+              </Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
 
       {/* TAG MODAL */}
 
@@ -4795,7 +4713,8 @@ export default function ChatDetailScreen() {
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+      </SafeAreaView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -5054,13 +4973,17 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
 
+  keyboardScreen: {
+    flex: 1,
+  },
+
   composer: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 8,
     paddingHorizontal: 9,
     paddingVertical: 9,
-    paddingBottom: 70,
+    paddingBottom: 10,
     paddingTop: 10,
     borderTopWidth: 1,
   },
