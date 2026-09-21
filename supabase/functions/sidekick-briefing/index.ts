@@ -395,7 +395,7 @@ Deno.serve(async (req: Request) => {
 
     /*
      * Hard daily cap:
-     * never create more than 20 updates
+     * never create more than 5 updates
      * for one user on one local calendar day.
      */
     const {
@@ -777,6 +777,56 @@ Return only the update text or NO_UPDATE.
             'Could not save the Sidekick update.',
         },
         500,
+      );
+    }
+
+    /*
+     * Send a simple push notification after the update has been
+     * successfully saved.
+     *
+     * Push failure must never make the successful Sidekick update
+     * fail, so this is intentionally best-effort.
+     */
+    try {
+      const pushResponse = await fetch(
+        `${supabaseUrl}/functions/v1/send-push-notification`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: authHeader,
+            apikey: serviceRoleKey,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            type: 'sidekick_update',
+            user_id: user.id,
+            update_id: inserted.id,
+          }),
+        },
+      );
+
+      const pushResult =
+        await pushResponse
+          .json()
+          .catch(() => null);
+
+      if (!pushResponse.ok) {
+        console.error(
+          'SIDEKICK PUSH NOTIFICATION ERROR:',
+          pushResult,
+        );
+      } else if (
+        pushResult?.error
+      ) {
+        console.error(
+          'SIDEKICK PUSH NOTIFICATION SERVER ERROR:',
+          pushResult.error,
+        );
+      }
+    } catch (pushError) {
+      console.error(
+        'SIDEKICK PUSH NOTIFICATION EXCEPTION:',
+        pushError,
       );
     }
 

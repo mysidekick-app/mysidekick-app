@@ -209,7 +209,7 @@ const styles = StyleSheet.create({
   empty: { paddingVertical: 40, alignItems: 'center' }, emptyText: { fontFamily: FONT, fontSize: 14, color: '#908B83', textAlign: 'center' },
   fab: {
     position: 'absolute',
-    bottom: 82,
+    bottom: 30,
     alignSelf: 'center',
     width: 56,
     height: 56,

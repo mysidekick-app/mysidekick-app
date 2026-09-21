@@ -12,6 +12,12 @@ type ChatPushRequest = {
   sender_id: string;
 };
 
+type SidekickPushRequest = {
+  type: 'sidekick_update';
+  user_id: string;
+  update_id?: string;
+};
+
 type PushTokenRow = {
   expo_push_token: string;
 };
@@ -154,11 +160,179 @@ Deno.serve(async (req: Request) => {
     // -------------------------------------------------------
     // REQUEST DATA
     // -------------------------------------------------------
-    const payload = (await req.json()) as ChatPushRequest;
+    const payload = await req.json();
 
-    const conversationId = payload?.conversation_id;
-    const messageId = payload?.message_id;
-    const senderId = payload?.sender_id;
+    /*
+     * SIDEKICK UPDATE PUSH
+     *
+     * This uses the same notification function as chat, but keeps
+     * the existing chat notification path completely unchanged.
+     */
+    if (payload?.type === 'sidekick_update') {
+      const sidekickPayload =
+        payload as SidekickPushRequest;
+
+      const userId = sidekickPayload?.user_id;
+
+      if (!userId) {
+        return jsonResponse(
+          {
+            error: 'user_id is required for a Sidekick update.',
+          },
+          400,
+        );
+      }
+
+      if (requestingUser.id !== userId) {
+        return jsonResponse(
+          {
+            error:
+              'The Sidekick notification user does not match the authenticated user.',
+          },
+          403,
+        );
+      }
+
+      const restHeaders = {
+        Authorization: `Bearer ${serviceRoleKey}`,
+        apikey: serviceRoleKey,
+        'Content-Type': 'application/json',
+      };
+
+      const tokensResponse = await fetch(
+        `${supabaseUrl}/rest/v1/push_tokens?user_id=eq.${encodeURIComponent(
+          userId,
+        )}&select=expo_push_token`,
+        {
+          headers: restHeaders,
+        },
+      );
+
+      if (!tokensResponse.ok) {
+        const errorText = await tokensResponse.text();
+
+        console.error(
+          'Failed to retrieve Sidekick push tokens:',
+          errorText,
+        );
+
+        return jsonResponse(
+          {
+            error:
+              'Could not retrieve Sidekick push tokens.',
+          },
+          500,
+        );
+      }
+
+      const rows =
+        (await tokensResponse.json()) as PushTokenRow[];
+
+      const uniqueTokens = [
+        ...new Set(
+          rows
+            .map((row) => row.expo_push_token)
+            .filter(Boolean),
+        ),
+      ];
+
+      if (!uniqueTokens.length) {
+        return jsonResponse({
+          success: true,
+          sent: 0,
+          message:
+            'No push tokens found for the user.',
+        });
+      }
+
+      const expoMessages = uniqueTokens.map(
+        (expoPushToken) => ({
+          to: expoPushToken,
+          sound: 'default',
+          title: 'Sidekick',
+          body: 'You have an update',
+          data: {
+            type: 'sidekick_update',
+            update_id:
+              sidekickPayload.update_id ?? null,
+          },
+        }),
+      );
+
+      let sent = 0;
+      const tickets: unknown[] = [];
+
+      for (const batch of chunk(
+        expoMessages,
+        100,
+      )) {
+        const expoResponse = await fetch(
+          'https://exp.host/--/api/v2/push/send',
+          {
+            method: 'POST',
+            headers: {
+              Accept: 'application/json',
+              'Accept-encoding':
+                'gzip, deflate',
+              'Content-Type':
+                'application/json',
+            },
+            body: JSON.stringify(batch),
+          },
+        );
+
+        const expoResult =
+          await expoResponse.json();
+
+        if (!expoResponse.ok) {
+          console.error(
+            'Expo Sidekick push notification failed:',
+            expoResult,
+          );
+          continue;
+        }
+
+        sent += batch.length;
+
+        if (
+          Array.isArray(
+            expoResult?.data,
+          )
+        ) {
+          tickets.push(
+            ...expoResult.data,
+          );
+        } else {
+          tickets.push(expoResult);
+        }
+      }
+
+      console.log(
+        `Sidekick push notification processed: ${sent}/${uniqueTokens.length} device(s).`,
+      );
+
+      return jsonResponse({
+        success: true,
+        sent,
+        tickets,
+      });
+    }
+
+    /*
+     * EXISTING CHAT PUSH
+     *
+     * Everything below this point is the existing chat notification
+     * flow. It remains unchanged.
+     */
+    const chatPayload =
+      payload as ChatPushRequest;
+
+    const conversationId =
+      chatPayload?.conversation_id;
+    const messageId =
+      chatPayload?.message_id;
+    const senderId =
+      chatPayload?.sender_id;
 
     if (!conversationId || !messageId || !senderId) {
       return jsonResponse(
@@ -351,6 +525,44 @@ Deno.serve(async (req: Request) => {
     // -------------------------------------------------------
     // GET RECIPIENT PUSH TOKENS
     // -------------------------------------------------------
+    /*
+     * A physical device can sometimes have the same Expo Push Token
+     * saved against more than one account (for example after testing
+     * with different accounts on the same device).
+     *
+     * Keep the existing recipient logic exactly as it is, but make sure
+     * none of the sender's own device tokens are ever included in the
+     * notification batch. This prevents the sender from receiving their
+     * own chat notification.
+     */
+    const senderPushTokens = new Set<string>();
+
+    const senderTokensResponse = await fetch(
+      `${supabaseUrl}/rest/v1/push_tokens?user_id=eq.${encodeURIComponent(
+        senderId,
+      )}&select=expo_push_token`,
+      {
+        headers: restHeaders,
+      },
+    );
+
+    if (senderTokensResponse.ok) {
+      const senderRows =
+        (await senderTokensResponse.json()) as PushTokenRow[];
+
+      for (const row of senderRows) {
+        if (row.expo_push_token) {
+          senderPushTokens.add(row.expo_push_token);
+        }
+      }
+    } else {
+      const errorText = await senderTokensResponse.text();
+      console.error(
+        'Failed to retrieve sender push tokens:',
+        errorText,
+      );
+    }
+
     const pushTokens: string[] = [];
 
     for (const recipientId of recipientIds) {
@@ -381,7 +593,11 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const uniqueTokens = [...new Set(pushTokens)];
+    const uniqueTokens = [
+      ...new Set(pushTokens),
+    ].filter(
+      (token) => !senderPushTokens.has(token),
+    );
 
     if (!uniqueTokens.length) {
       return jsonResponse({

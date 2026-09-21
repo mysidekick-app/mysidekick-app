@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 
 import {
@@ -100,55 +99,6 @@ type Message = {
   attachment_name?: string | null;
 };
 
-const SYSTEM_CHAT_TITLES: Record<string, string> = {
-  sidekick: 'Sidekick',
-};
-
-const getSidekickReadKey = (userId: string) =>
-  `mysidekick:sidekick-read-at:${userId}`;
-
-const markSidekickRead = async (userId: string, readAt: string) => {
-  try {
-    await AsyncStorage.setItem(getSidekickReadKey(userId), readAt);
-  } catch (error) {
-    console.error('MARK SIDEKICK READ ERROR:', error);
-  }
-};
-
-function renderSidekickFormattedText(
-  content: string,
-  color: string,
-) {
-  const parts = content.split(/(\*\*[\s\S]*?\*\*)/g);
-
-  return parts.map((part, index) => {
-    const isBold =
-      part.startsWith('**') &&
-      part.endsWith('**') &&
-      part.length >= 4;
-
-    return (
-      <Text
-        key={`sidekick-text-${index}`}
-        style={isBold ? { fontFamily: FONT_BOLD, color } : { color }}
-      >
-        {isBold ? part.slice(2, -2) : part}
-      </Text>
-    );
-  });
-}
-
-const SIDEKICK_MODULE_CHOICES = [
-  { label: 'Planner', route: '/planner' },
-  { label: 'Habits', route: '/habits' },
-  { label: 'Finance', route: '/modules/finances' },
-  { label: 'Lists', route: '/modules/lists' },
-  { label: 'Reminders', route: '/reminders' },
-  { label: 'Bookmarks', route: '/bookmarks' },
-  { label: 'Plants', route: '/plants' },
-  { label: 'Well-being', route: '/modules/wellbeing' },
-  { label: 'Games', route: '/modules/games' },
-] as const;
 
 function getLocalDateKey(value: string): string {
   const date = new Date(value);
@@ -422,11 +372,6 @@ export default function ChatDetailScreen() {
     isDark &&
     appContext.accent_family === 'black';
 
-  const normalizedId =
-    (id ?? '').toLowerCase();
-
-  const isSidekick =
-    normalizedId === 'sidekick';
 
   const colors = isDark
     ? {
@@ -448,7 +393,7 @@ export default function ChatDetailScreen() {
     useState<Profile>(null);
 
   const [profileLoading, setProfileLoading] =
-    useState(!isSidekick);
+    useState(true);
 
   const [profileError, setProfileError] =
     useState<string | null>(null);
@@ -466,7 +411,7 @@ export default function ChatDetailScreen() {
     useState<Message[]>([]);
 
   const [messagesLoading, setMessagesLoading] =
-    useState(!isSidekick);
+    useState(true);
 
   const [messagesError, setMessagesError] =
     useState<string | null>(null);
@@ -731,17 +676,6 @@ export default function ChatDetailScreen() {
    */
   const loadProfile =
     useCallback(async () => {
-      if (
-        isSidekick ||
-        SYSTEM_CHAT_TITLES[
-          normalizedId
-        ]
-      ) {
-        setProfile(null);
-        setProfileLoading(false);
-        return;
-      }
-
       if (!id) {
         setProfileLoading(false);
         return;
@@ -776,121 +710,14 @@ export default function ChatDetailScreen() {
       setProfileLoading(false);
     }, [
       id,
-      isSidekick,
-      normalizedId,
     ]);
 
-  const handleSidekickModulePress = useCallback(
-    (route: string) => {
-      router.push(route as never);
-    },
-    [],
-  );
 
   /*
    * MESSAGES
    */
   const loadMessages =
     useCallback(async () => {
-      if (isSidekick) {
-        if (!myId) {
-          setMessages([]);
-          setMessagesLoading(false);
-          setMessagesError(null);
-          return;
-        }
-
-        setMessagesLoading(true);
-        setMessagesError(null);
-
-        const { data, error } = await supabase
-          .from('system_messages')
-          .select('id, user_id, module_key, sender, content, created_at')
-          .eq('user_id', myId)
-          .eq('module_key', 'sidekick')
-          .order('created_at', { ascending: true });
-
-        if (error) {
-          console.error(
-            'Sidekick messages load error:',
-            error,
-          );
-
-          setMessagesError(
-            'Could not load Sidekick messages.',
-          );
-          setMessages([]);
-        } else {
-          let loadedMessages: Message[] = (data ?? []).map((row: any) => ({
-            id: row.id,
-            conversation_id: 'sidekick',
-            sender_id: row.sender === 'sidekick' ? 'sidekick' : myId,
-            content: row.content,
-            created_at: row.created_at,
-          }));
-
-          // The first Sidekick greeting is a real persisted message, not
-          // an empty-state placeholder. This keeps it in chat history.
-          if (loadedMessages.length === 0) {
-            const starterText =
-              'Welcome to Sidekick. Where would you like to start?';
-
-            const { data: starterMessage, error: starterError } =
-              await supabase
-                .from('system_messages')
-                .insert({
-                  user_id: myId,
-                  module_key: 'sidekick',
-                  sender: 'sidekick',
-                  content: starterText,
-                })
-                .select('id, user_id, module_key, sender, content, created_at')
-                .single();
-
-            if (starterError || !starterMessage) {
-              console.error(
-                'CREATE SIDEKICK STARTER MESSAGE ERROR:',
-                starterError,
-              );
-
-              // Still show the starter locally if the insert temporarily
-              // fails, without blocking the rest of the Sidekick screen.
-              loadedMessages = [{
-                id: `sidekick-starter-${Date.now()}`,
-                conversation_id: 'sidekick',
-                sender_id: 'sidekick',
-                content: starterText,
-                created_at: new Date().toISOString(),
-              }];
-            } else {
-              loadedMessages = [{
-                id: starterMessage.id,
-                conversation_id: 'sidekick',
-                sender_id: 'sidekick',
-                content: starterMessage.content,
-                created_at: starterMessage.created_at,
-              }];
-            }
-          }
-
-          setMessages(loadedMessages);
-
-          const newestSidekickMessage = [...loadedMessages]
-            .reverse()
-            .find(message => message.sender_id === 'sidekick');
-
-          if (myId && newestSidekickMessage) {
-            await markSidekickRead(
-              myId,
-              newestSidekickMessage.created_at,
-            );
-          }
-        }
-
-        setMessagesLoading(false);
-        return;
-      }
-
       if (!conversationId) {
         setMessagesLoading(false);
         return;
@@ -954,7 +781,6 @@ export default function ChatDetailScreen() {
       setMessagesLoading(false);
     }, [
       conversationId,
-      isSidekick,
       myId,
     ]);
 
@@ -1015,7 +841,7 @@ export default function ChatDetailScreen() {
    * BLOCK STATE
    */
   useEffect(() => {
-    if (!myId || !id || isSidekick) {
+    if (!myId || !id) {
       setIsBlocked(false);
       setIsBlockedByOther(false);
       return;
@@ -1059,7 +885,7 @@ export default function ChatDetailScreen() {
     return () => {
       cancelled = true;
     };
-  }, [myId, id, isSidekick]);
+  }, [myId, id]);
 
   /*
    * DIRECT CONVERSATION
@@ -1068,7 +894,7 @@ export default function ChatDetailScreen() {
    * user actually sends a new message.
    */
   useEffect(() => {
-    if (!myId || !id || isSidekick) {
+    if (!myId || !id) {
       return;
     }
 
@@ -1112,7 +938,6 @@ export default function ChatDetailScreen() {
   }, [
     myId,
     id,
-    isSidekick,
   ]);
 
   useEffect(() => {
@@ -1124,15 +949,11 @@ export default function ChatDetailScreen() {
   ]);
 
   useEffect(() => {
-    if (
-      myId &&
-      !isSidekick
-    ) {
+    if (myId) {
       void loadChatTags();
     }
   }, [
     myId,
-    isSidekick,
     loadChatTags,
   ]);
 
@@ -1144,491 +965,6 @@ export default function ChatDetailScreen() {
     messages.length,
     scrollToBottom,
   ]);
-
-  /*
-   * SIDEKICK APP DATA
-   *
-   * Collect the user's real current module data before asking Claude for a
-   * reply. The Edge Function is intentionally kept read-only; this client
-   * sends only data the authenticated user can already read.
-   */
-  const loadSidekickAppData = async () => {
-    if (!myId) {
-      return {};
-    }
-
-    const today = new Date();
-    const todayKey = `${today.getFullYear()}-${String(
-      today.getMonth() + 1,
-    ).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-
-    const safeQuery = async (
-      label: string,
-      query: PromiseLike<{ data: unknown; error: unknown }>,
-    ) => {
-      try {
-        const result = await query;
-
-        if (result.error) {
-          console.error(`SIDEKICK ${label} DATA ERROR:`, result.error);
-          return [];
-        }
-
-        return Array.isArray(result.data) ? result.data : [];
-      } catch (error) {
-        console.error(`SIDEKICK ${label} DATA EXCEPTION:`, error);
-        return [];
-      }
-    };
-
-    const [
-      plannerRows,
-      habitsRows,
-      habitCompletionRows,
-      reminderRows,
-      listRows,
-      financeRows,
-      bookmarkRows,
-      plantRows,
-      wellbeingRows,
-      gameRows,
-    ] = await Promise.all([
-      safeQuery(
-        'PLANNER',
-        supabase
-          .from('planner_tasks')
-          .select('*')
-          .eq('user_id', myId),
-      ),
-      safeQuery(
-        'HABITS',
-        supabase
-          .from('habits')
-          .select('*')
-          .eq('user_id', myId),
-      ),
-      safeQuery(
-        'HABIT COMPLETIONS',
-        supabase
-          .from('habit_completions')
-          .select('*')
-          .eq('user_id', myId)
-          .eq('completed_on', todayKey),
-      ),
-      safeQuery(
-        'REMINDERS',
-        supabase
-          .from('reminders')
-          .select('*')
-          .eq('user_id', myId),
-      ),
-      safeQuery(
-        'LISTS',
-        supabase
-          .from('list_items')
-          .select('*')
-          .eq('user_id', myId)
-          .eq('completed', false),
-      ),
-      safeQuery(
-        'FINANCE',
-        supabase
-          .from('finance_transactions')
-          .select('*')
-          .eq('user_id', myId)
-          .order('transaction_date', { ascending: false })
-          .limit(100),
-      ),
-      safeQuery(
-        'BOOKMARKS',
-        supabase
-          .from('bookmarks')
-          .select('*')
-          .eq('user_id', myId)
-          .order('created_at', { ascending: false })
-          .limit(100),
-      ),
-      safeQuery(
-        'PLANTS',
-        supabase
-          .from('plants')
-          .select('*')
-          .eq('user_id', myId),
-      ),
-      safeQuery(
-        'WELL-BEING',
-        supabase
-          .from('wellbeing_entries')
-          .select('*')
-          .eq('user_id', myId)
-          .order('entry_date', { ascending: false })
-          .limit(100),
-      ),
-      safeQuery(
-        'GAMES',
-        supabase
-          .from('game_scores')
-          .select('*')
-          .eq('player_id', myId)
-          .order('created_at', { ascending: false })
-          .limit(100),
-      ),
-    ]);
-
-    const completedHabitIds = new Set(
-      habitCompletionRows
-        .map((row: any) => row?.habit_id)
-        .filter(Boolean),
-    );
-
-    const activeHabits = habitsRows.filter((habit: any) => {
-      const startsTodayOrEarlier =
-        !habit?.start_date || habit.start_date <= todayKey;
-      const hasNotEnded =
-        !habit?.end_date || habit.end_date >= todayKey;
-
-      return (
-        startsTodayOrEarlier &&
-        hasNotEnded &&
-        !completedHabitIds.has(habit?.id)
-      );
-    });
-
-    const plannerToday = plannerRows.filter((task: any) => {
-      if (!task || task.completed) {
-        return false;
-      }
-
-      const startDate = task.start_date;
-      const endDate = task.end_date || startDate;
-
-      if (!startDate) {
-        return false;
-      }
-
-      const repeat = task.repeat ?? 'none';
-
-      if (repeat === 'none') {
-        return todayKey >= startDate && todayKey <= endDate;
-      }
-
-      if (todayKey < startDate) {
-        return false;
-      }
-
-      const start = new Date(`${startDate}T00:00:00`);
-      const current = new Date(`${todayKey}T00:00:00`);
-      const diff = Math.round(
-        (current.getTime() - start.getTime()) / 86400000,
-      );
-      const interval = Math.max(1, Number(task.repeat_interval) || 1);
-
-      if (repeat === 'daily' || repeat === 'custom') {
-        return diff % interval === 0;
-      }
-
-      if (repeat === 'weekly') {
-        return diff % (7 * interval) === 0;
-      }
-
-      if (repeat === 'monthly') {
-        const monthDiff =
-          (current.getFullYear() - start.getFullYear()) * 12 +
-          (current.getMonth() - start.getMonth());
-
-        return (
-          monthDiff >= 0 &&
-          monthDiff % interval === 0 &&
-          current.getDate() === start.getDate()
-        );
-      }
-
-      if (repeat === 'yearly') {
-        const yearDiff = current.getFullYear() - start.getFullYear();
-
-        return (
-          yearDiff >= 0 &&
-          yearDiff % interval === 0 &&
-          current.getMonth() === start.getMonth() &&
-          current.getDate() === start.getDate()
-        );
-      }
-
-      return false;
-    });
-
-    const remindersToday = reminderRows.filter(
-      (reminder: any) =>
-        reminder?.due_date === todayKey &&
-        reminder?.completed === false,
-    );
-
-    return {
-      today: todayKey,
-      planner: {
-        today: plannerToday,
-        all: plannerRows,
-      },
-      habits: {
-        today_incomplete: activeHabits,
-        completions_today: habitCompletionRows,
-        all: habitsRows,
-      },
-      reminders: {
-        today: remindersToday,
-        all_incomplete: reminderRows.filter(
-          (reminder: any) => reminder?.completed === false,
-        ),
-      },
-      lists: {
-        incomplete: listRows,
-      },
-      finance: financeRows,
-      bookmarks: bookmarkRows,
-      plants: plantRows,
-      wellbeing: {
-        recent: wellbeingRows,
-        today: wellbeingRows.filter(
-          (entry: any) => entry?.entry_date === todayKey,
-        ),
-      },
-      games: {
-        recent: gameRows,
-        today: gameRows.filter((game: any) => {
-          const createdAt = game?.created_at;
-          if (!createdAt) return false;
-          return new Date(createdAt).toLocaleDateString() === today.toLocaleDateString();
-        }),
-      },
-    };
-  };
-
-  /*
-   * SIDEKICK
-   */
-  const handleSendSidekick =
-    async (text: string) => {
-      if (!text || sending || !myId) {
-        return;
-      }
-
-      setSending(true);
-      setMessagesError(null);
-
-      const optimisticUserMessage: Message = {
-        id: `local-user-${Date.now()}`,
-        conversation_id: 'sidekick',
-        sender_id: myId,
-        content: text,
-        created_at: new Date().toISOString(),
-      };
-
-      setMessages(previous => [...previous, optimisticUserMessage]);
-      setDraft('');
-      scrollToBottom();
-
-      try {
-        // -------------------------------------------------------
-        // 1. SAVE THE USER'S MESSAGE FIRST
-        // -------------------------------------------------------
-        const {
-          data: savedUserMessage,
-          error: saveUserError,
-        } = await supabase
-          .from('system_messages')
-          .insert({
-            user_id: myId,
-            module_key: 'sidekick',
-            sender: 'user',
-            content: text,
-          })
-          .select('id, user_id, module_key, sender, content, created_at')
-          .single();
-
-        if (saveUserError || !savedUserMessage) {
-          console.error(
-            'SAVE SIDEKICK USER MESSAGE ERROR:',
-            saveUserError,
-          );
-
-          setMessages(previous =>
-            previous.filter(
-              message => message.id !== optimisticUserMessage.id,
-            ),
-          );
-
-          showToast(
-            'Could not save your Sidekick message. Please try again.',
-          );
-          return;
-        }
-
-        const savedUserAsMessage: Message = {
-          id: savedUserMessage.id,
-          conversation_id: 'sidekick',
-          sender_id: myId,
-          content: savedUserMessage.content,
-          created_at: savedUserMessage.created_at,
-        };
-
-        setMessages(previous =>
-          previous.map(message =>
-            message.id === optimisticUserMessage.id
-              ? savedUserAsMessage
-              : message,
-          ),
-        );
-
-        // -------------------------------------------------------
-        // 2. ASK SIDEKICK FOR A REPLY
-        // -------------------------------------------------------
-        // Load the actual current app data and send it with the user's message.
-        // Without this, Claude receives empty arrays and can incorrectly say
-        // that the user's day is clear.
-        const sidekickAppData = await loadSidekickAppData();
-
-        console.log(
-          'SIDEKICK APP DATA SUMMARY:',
-          {
-            plannerToday: sidekickAppData?.planner?.today?.length ?? 0,
-            habitsToday: sidekickAppData?.habits?.today_incomplete?.length ?? 0,
-            remindersToday: sidekickAppData?.reminders?.today?.length ?? 0,
-            listsIncomplete: sidekickAppData?.lists?.incomplete?.length ?? 0,
-          },
-        );
-
-        const { data, error } = await supabase.functions.invoke(
-          'sidekick-chat',
-          {
-            body: {
-              message: text,
-              appData: sidekickAppData,
-            },
-          },
-        );
-
-        if (error) {
-          console.error(
-            'SIDEKICK EDGE FUNCTION ERROR:',
-            error,
-          );
-
-          showToast(
-            'Sidekick could not reply right now. Your message was saved.',
-          );
-          return;
-        }
-
-        console.log('SIDEKICK RESPONSE:', data);
-
-        const reply =
-          typeof data?.reply === 'string'
-            ? data.reply.trim()
-            : '';
-
-        if (!reply) {
-          const diagnostic =
-            typeof data?.error === 'string'
-              ? data.error
-              : typeof data?.message === 'string'
-                ? data.message
-                : '';
-
-          console.error(
-            'SIDEKICK RETURNED NO REPLY:',
-            data,
-          );
-
-          showToast(
-            diagnostic
-              ? diagnostic.slice(0, 180)
-              : 'Sidekick did not return a reply. Your message was saved.',
-          );
-          return;
-        }
-
-        // -------------------------------------------------------
-        // 3. SHOW SIDEKICK'S REPLY IMMEDIATELY
-        // -------------------------------------------------------
-        const localSidekickMessage: Message = {
-          id: `sidekick-${Date.now()}`,
-          conversation_id: 'sidekick',
-          sender_id: 'sidekick',
-          content: reply,
-          created_at: new Date().toISOString(),
-        };
-
-        setMessages(previous => [
-          ...previous,
-          localSidekickMessage,
-        ]);
-
-        scrollToBottom();
-
-        // -------------------------------------------------------
-        // -------------------------------------------------------
-        // 4. SAVE SIDEKICK REPLY DIRECTLY FROM THE APP
-        // -------------------------------------------------------
-        // The Edge Function only generates the Claude response.
-        // The authenticated app client saves the Sidekick reply.
-        // This uses the same authenticated Supabase client that
-        // successfully saves the user's Sidekick messages.
-        //
-        // We intentionally do not depend on data.saved from the
-        // Edge Function and do not reload messages immediately.
-        // -------------------------------------------------------
-        const { error: saveSidekickError } = await supabase
-          .from('system_messages')
-          .insert({
-            user_id: myId,
-            module_key: 'sidekick',
-            sender: 'sidekick',
-            content: reply,
-          });
-
-        if (saveSidekickError) {
-          console.error(
-            'SAVE SIDEKICK REPLY ERROR:',
-            JSON.stringify({
-              message: saveSidekickError.message,
-              details: saveSidekickError.details,
-              hint: saveSidekickError.hint,
-              code: saveSidekickError.code,
-            }),
-          );
-
-          showToast(
-            'Sidekick replied, but the reply could not be saved.',
-          );
-          return;
-        }
-
-        // The database INSERT has succeeded. Keep the local message
-        // exactly as displayed; there is no SELECT/read-back here.
-        // This prevents a SELECT/RLS issue from making a successfully
-        // inserted Sidekick reply disappear from the screen.
-        console.log(
-          'SIDEKICK REPLY SAVED SUCCESSFULLY',
-        );
-
-        await markSidekickRead(
-          myId,
-          localSidekickMessage.created_at,
-        );
-
-      } catch (error) {
-        console.error(
-          'SIDEKICK REQUEST FAILED:',
-          error,
-        );
-
-        showToast(
-          'Sidekick could not reply right now. Your message was saved.',
-        );
-      } finally {
-        setSending(false);
-      }
-    };
 
   /*
    * NORMAL CHAT
@@ -1764,15 +1100,9 @@ export default function ChatDetailScreen() {
         return;
       }
 
-      if (isSidekick) {
-        await handleSendSidekick(
-          text,
-        );
-      } else {
-        await handleSendNormalChat(
-          text,
-        );
-      }
+      await handleSendNormalChat(
+        text,
+      );
     };
 
   /*
@@ -2763,8 +2093,7 @@ export default function ChatDetailScreen() {
         !reason ||
         reportSubmitting ||
         !myId ||
-        !id ||
-        isSidekick
+        !id
       ) {
         return;
       }
@@ -2813,7 +2142,7 @@ export default function ChatDetailScreen() {
    */
   const handleBlock =
     async () => {
-      if (!myId || !id || isSidekick) return;
+      if (!myId || !id) return;
 
       setActionLoading('block');
 
@@ -2837,7 +2166,7 @@ export default function ChatDetailScreen() {
     };
 
   const handleUnblock = async () => {
-    if (!myId || !id || isSidekick) return;
+    if (!myId || !id) return;
 
     setActionLoading('unblock');
 
@@ -2866,8 +2195,7 @@ export default function ChatDetailScreen() {
     async () => {
       if (
         !myId ||
-        !id ||
-        isSidekick
+        !id
       ) {
         return;
       }
@@ -2945,45 +2273,6 @@ export default function ChatDetailScreen() {
       setActionLoading(
         'clear',
       );
-
-      if (isSidekick) {
-        const { error } =
-          await supabase
-            .from('system_messages')
-            .delete()
-            .eq(
-              'user_id',
-              myId,
-            )
-            .eq(
-              'module_key',
-              'sidekick',
-            );
-
-        setActionLoading(null);
-
-        if (error) {
-          console.error(
-            'CLEAR SIDEKICK ERROR:',
-            error,
-          );
-
-          showToast(
-            'Could not clear Sidekick chat.',
-          );
-
-          return;
-        }
-
-        setMessages([]);
-        await markSidekickRead(myId, new Date().toISOString());
-
-        showToast(
-          'Sidekick chat cleared.',
-        );
-
-        return;
-      }
 
       const clearedAt = new Date().toISOString();
       const { error } = await clearChatForUser(
@@ -3072,11 +2361,6 @@ export default function ChatDetailScreen() {
       item.sender_id ===
       myId;
 
-    const isSidekickReply =
-      isSidekick &&
-      item.sender_id ===
-        'sidekick';
-
     const time =
       new Date(
         item.created_at,
@@ -3097,8 +2381,7 @@ export default function ChatDetailScreen() {
         getLocalDateKey(item.created_at);
 
     const outgoing =
-      isMine &&
-      !isSidekickReply;
+      isMine;
 
     const contentColor =
       outgoing
@@ -3139,17 +2422,8 @@ export default function ChatDetailScreen() {
           <View
             style={[
               styles.bubble,
-              isSidekickReply
+              outgoing
                 ? {
-                    backgroundColor:
-                      colors.card,
-                    borderColor:
-                      colors.border,
-                    borderWidth: 1,
-                    borderBottomLeftRadius: 6,
-                  }
-                : outgoing
-                  ? {
                       backgroundColor:
                         accentForeground,
                       borderBottomRightRadius: 6,
@@ -3164,20 +2438,6 @@ export default function ChatDetailScreen() {
                     },
             ]}
           >
-            {isSidekickReply ? (
-              <Text
-                style={[
-                  styles.sidekickLabel,
-                  {
-                    color:
-                      accentForeground,
-                  },
-                ]}
-              >
-                SIDEKICK
-              </Text>
-            ) : null}
-
             {item.attachment_type ===
               'image' &&
             item.attachment_url ? (
@@ -3336,12 +2596,7 @@ export default function ChatDetailScreen() {
                   },
                 ]}
               >
-                {isSidekickReply
-                  ? renderSidekickFormattedText(
-                      item.content,
-                      contentColor,
-                    )
-                  : item.content}
+                {item.content}
               </Text>
             ) : null}
 
@@ -3366,68 +2621,12 @@ export default function ChatDetailScreen() {
   };
 
   const headerName =
-    isSidekick
-      ? 'SIDEKICK'
-      : (
-          profile?.display_name ??
-          SYSTEM_CHAT_TITLES[
-            normalizedId
-          ] ??
-          'Chat'
-        ).toUpperCase();
+    (
+      profile?.display_name ??
+      'Chat'
+    ).toUpperCase();
 
-  const showProfileButton =
-    !isSidekick &&
-    !SYSTEM_CHAT_TITLES[
-      normalizedId
-    ];
-
-  const isSidekickStarterMessage =
-    isSidekick &&
-    messages.length === 1 &&
-    messages[0].sender_id === 'sidekick' &&
-    messages[0].content ===
-      'Welcome to Sidekick. Where would you like to start?';
-
-  const sidekickChoicesFooter = isSidekickStarterMessage ? (
-    <View style={styles.sidekickChoicesFooter}>
-      <Text
-        style={[
-          styles.sidekickChoicesPrompt,
-          { color: colors.muted },
-        ]}
-      >
-        Choose a place to start.
-      </Text>
-
-      <View style={styles.sidekickModuleChoices}>
-        {SIDEKICK_MODULE_CHOICES.map(module => (
-          <Pressable
-            key={module.label}
-            onPress={() =>
-              handleSidekickModulePress(module.route)
-            }
-            style={[
-              styles.sidekickModuleChoice,
-              {
-                backgroundColor: colors.card,
-                borderColor: colors.border,
-              },
-            ]}
-          >
-            <Text
-              style={[
-                styles.sidekickModuleChoiceText,
-                { color: colors.text },
-              ]}
-            >
-              {module.label}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-    </View>
-  ) : null;
+  const showProfileButton = true;
 
   const closeMenu =
     () => {
@@ -3617,9 +2816,6 @@ export default function ChatDetailScreen() {
             renderItem={
               renderMessage
             }
-            ListFooterComponent={
-              sidekickChoicesFooter
-            }
             contentContainerStyle={
               styles.listContent
             }
@@ -3693,8 +2889,7 @@ export default function ChatDetailScreen() {
             },
           ]}
         >
-          {!isSidekick &&
-          !isRecording ? (
+          {!isRecording ? (
             <Pressable
               onPress={
                 handlePickAttachment
@@ -3794,11 +2989,8 @@ export default function ChatDetailScreen() {
               onChangeText={
                 setDraft
               }
-              placeholder={
-                isSidekick
-                  ? 'Message Sidekick…'
-                  : 'Type a message…'
-              }
+              placeholder="Type a message…"
+
               placeholderTextColor={
                 colors.muted
               }
@@ -3849,8 +3041,7 @@ export default function ChatDetailScreen() {
                 />
               )}
             </Pressable>
-          ) : !isSidekick &&
-            !draft.trim() ? (
+          ) : !draft.trim() ? (
             <Pressable
               onPress={
                 startRecording
@@ -3966,9 +3157,7 @@ export default function ChatDetailScreen() {
               },
             ]}
           >
-            {!isSidekick ? (
-              <>
-                <Pressable
+            <Pressable
                   style={
                     styles.menuItem
                   }
@@ -4033,7 +3222,7 @@ export default function ChatDetailScreen() {
 
                     Alert.alert(
                       'Delete chat?',
-                      'This removes the conversation from your chat list.',
+                      'This deletes the conversation from your chat list and clears its existing messages.',
                       [
                         {
                           text: 'Cancel',
@@ -4061,8 +3250,6 @@ export default function ChatDetailScreen() {
                     Delete Chat
                   </Text>
                 </Pressable>
-              </>
-            ) : null}
 
             <Pressable
               style={
@@ -4146,17 +3333,15 @@ export default function ChatDetailScreen() {
               </Text>
             </Pressable>
 
-            {!isSidekick ? (
-              <Pressable
-                style={styles.menuItem}
-                onPress={handleDeleteMessageForMe}
-                disabled={messageActionLoading}
-              >
-                <Text style={[styles.menuItemText, { color: '#C84D4D' }]}>
-                  {messageActionLoading ? 'Deleting…' : 'Delete for me'}
-                </Text>
-              </Pressable>
-            ) : null}
+            <Pressable
+              style={styles.menuItem}
+              onPress={handleDeleteMessageForMe}
+              disabled={messageActionLoading}
+            >
+              <Text style={[styles.menuItemText, { color: '#C84D4D' }]}>
+                {messageActionLoading ? 'Deleting…' : 'Delete for me'}
+              </Text>
+            </Pressable>
 
             <Pressable
               style={styles.menuItem}
@@ -4776,55 +3961,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  sidekickGreeting: {
-    fontFamily: FONT_SEMI,
-    fontSize: 20,
-    lineHeight: 28,
-    textAlign: 'center',
-    paddingHorizontal: 20,
-  },
-
-  sidekickGreetingSecond: {
-    fontFamily: FONT,
-    fontSize: 17,
-    lineHeight: 25,
-    textAlign: 'center',
-    paddingHorizontal: 20,
-  },
-
-  sidekickChoicesFooter: {
-    width: '100%',
-    alignItems: 'center',
-    paddingTop: 12,
-    paddingBottom: 20,
-  },
-
-  sidekickChoicesPrompt: {
-    fontFamily: FONT,
-    fontSize: 13,
-    marginBottom: 10,
-  },
-
-  sidekickModuleChoices: {
-    width: '100%',
-    maxWidth: 420,
-    gap: 8,
-  },
-
-  sidekickModuleChoice: {
-    minHeight: 44,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  sidekickModuleChoiceText: {
-    fontFamily: FONT_MED,
-    fontSize: 14,
-    textAlign: 'center',
-  },
 
   retryBtn: {
     paddingHorizontal: 20,
@@ -4946,12 +4082,6 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
   },
 
-  sidekickLabel: {
-    fontFamily: FONT_BOLD,
-    fontSize: 10,
-    letterSpacing: 1.2,
-    marginBottom: 5,
-  },
 
   blockedBar: {
     minHeight: 68,
@@ -4959,7 +4089,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 16,
-    bottom: 70,
+    bottom: 20,
   },
 
   blockedBarText: {

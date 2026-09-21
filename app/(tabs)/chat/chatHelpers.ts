@@ -945,9 +945,13 @@ export async function sendChatMessage(
 }
 
 /**
- * Remove only the current user's membership from a direct conversation.
- * The conversation and the other participant remain intact so the chat
- * can be restored only when the user intentionally sends a new message.
+ * Delete a direct chat for the current user.
+ *
+ * Existing messages are marked deleted-for-me, then the current user's
+ * conversation membership is removed. The other participant keeps their
+ * copy of the messages. If a new message is sent later, the conversation
+ * can be restored and only messages sent after this deletion are visible
+ * to the current user.
  */
 export async function deleteConversationForUser(
   conversationId: string,
@@ -960,10 +964,8 @@ export async function deleteConversationForUser(
     };
   }
 
-  // Normally remove only the current user's membership from this chat.
-  // When the other participant is provided, also remove any duplicate direct
-  // conversation memberships for the same pair so an older duplicate cannot
-  // keep the person visible in the chat list.
+  // Include duplicate direct conversations for the same pair so an older
+  // duplicate cannot keep the chat or its messages visible.
   let conversationIds = [conversationId];
 
   if (otherUserId && otherUserId !== userId) {
@@ -1008,9 +1010,45 @@ export async function deleteConversationForUser(
 
         conversationIds = [...new Set([
           conversationId,
-          ...(pairedRows ?? []).map((row: any) => row.conversation_id).filter(Boolean),
+          ...(pairedRows ?? [])
+            .map((row: any) => row.conversation_id)
+            .filter(Boolean),
         ])];
       }
+    }
+  }
+
+  // Clear every existing message for this user. We use the existing
+  // chat_message_deletions mechanism so RLS does not require deleting
+  // another person's message row from chat_messages.
+  const { data: messageRows, error: messageLoadError } = await supabase
+    .from('chat_messages')
+    .select('id')
+    .in('conversation_id', conversationIds)
+    .is('deleted_at', null);
+
+  if (messageLoadError) {
+    return { error: messageLoadError };
+  }
+
+  const messageIds = (messageRows ?? [])
+    .map((row: any) => row.id)
+    .filter(Boolean);
+
+  if (messageIds.length) {
+    const deletionRows = messageIds.map((messageId) => ({
+      message_id: messageId,
+      user_id: userId,
+    }));
+
+    const { error: deletionError } = await supabase
+      .from('chat_message_deletions')
+      .upsert(deletionRows, {
+        onConflict: 'message_id,user_id',
+      });
+
+    if (deletionError) {
+      return { error: deletionError };
     }
   }
 
@@ -1020,7 +1058,29 @@ export async function deleteConversationForUser(
     .in('conversation_id', conversationIds)
     .eq('user_id', userId);
 
-  return { error: error ?? null };
+  if (error) {
+    return { error };
+  }
+
+  const removedAt = new Date().toISOString();
+
+  // Keep the existing local deletion timestamp as a secondary safeguard.
+  for (const id of conversationIds) {
+    const clearResult = await clearChatForUser(
+      userId,
+      id,
+      removedAt,
+    );
+
+    if (clearResult.error) {
+      console.warn(
+        'SAVE DELETED CHAT TIMESTAMP ERROR:',
+        clearResult.error,
+      );
+    }
+  }
+
+  return { error: null };
 }
 
 /**

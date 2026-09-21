@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
   Bookmark,
@@ -506,11 +507,6 @@ export default function ModulesScreen() {
         '**Games** will give you a little space to have fun, challenge yourself and friends, and take a break from everything else.',
     },
     {
-      title: 'Talk to Your Sidekick...',
-      body:
-        'Your Sidekick is here to help you make sense of what\'s happening across your life. It can give you important updates, guidance, reminders, and instructions when they matter.\n\nYou can simply talk to it whenever you need help thinking something through.',
-    },
-    {
       title: "You're Ready",
       body:
         'Everything is in one place! Your Sidekick will help you pay attention to what matters. \n\nClick let\'s go to get started.',
@@ -637,7 +633,7 @@ export default function ModulesScreen() {
   ======================================================= */
 
   const loadSidekickUpdates = useCallback(
-    async () => {
+    async (forceRefresh = false) => {
       const {
         data: { user },
         error: userError,
@@ -645,6 +641,39 @@ export default function ModulesScreen() {
 
       if (userError || !user) {
         return;
+      }
+
+      const cacheKey = `sidekick-briefing-cache:${user.id}:${todayKey}`;
+      const cacheTtl = 60 * 60 * 1000;
+
+      if (!forceRefresh) {
+        try {
+          const cachedRaw = await AsyncStorage.getItem(cacheKey);
+
+          if (cachedRaw) {
+            const cached = JSON.parse(cachedRaw);
+            const cachedAt = Number(cached?.cachedAt);
+            const cachedUpdates = Array.isArray(cached?.updates)
+              ? cached.updates as SidekickUpdate[]
+              : [];
+
+            if (
+              Number.isFinite(cachedAt) &&
+              Date.now() - cachedAt < cacheTtl
+            ) {
+              setSidekickUpdates(cachedUpdates);
+              setSidekickUpdateIndex((current) =>
+                Math.min(
+                  current,
+                  Math.max(0, cachedUpdates.length - 1),
+                ),
+              );
+              return;
+            }
+          }
+        } catch (cacheError) {
+          console.log('SIDEKICK CACHE READ ERROR:', cacheError);
+        }
       }
 
       const { data, error } = await supabase
@@ -692,6 +721,19 @@ export default function ModulesScreen() {
           Math.max(0, updates.length - 1),
         ),
       );
+
+      try {
+        await AsyncStorage.setItem(
+          cacheKey,
+          JSON.stringify({
+            cachedAt: Date.now(),
+            dayKey: todayKey,
+            updates,
+          }),
+        );
+      } catch (cacheError) {
+        console.log('SIDEKICK CACHE WRITE ERROR:', cacheError);
+      }
     },
     [todayKey],
   );
@@ -828,6 +870,26 @@ export default function ModulesScreen() {
           return;
         }
 
+        const cacheKey = `sidekick-briefing-cache:${user.id}:${todayKey}`;
+        const cacheTtl = 60 * 60 * 1000;
+
+        try {
+          const cachedRaw = await AsyncStorage.getItem(cacheKey);
+          if (cachedRaw) {
+            const cached = JSON.parse(cachedRaw);
+            const cachedAt = Number(cached?.cachedAt);
+
+            if (
+              Number.isFinite(cachedAt) &&
+              Date.now() - cachedAt < cacheTtl
+            ) {
+              return;
+            }
+          }
+        } catch (cacheError) {
+          console.log('SIDEKICK CACHE CHECK ERROR:', cacheError);
+        }
+
         const appData =
           await buildSidekickAppData(user.id);
 
@@ -850,11 +912,36 @@ export default function ModulesScreen() {
           return;
         }
 
+        // Cache the successful check even when there is no new update.
+        // This prevents repeated Edge Function and Claude calls when the
+        // user's data has not produced anything new.
+        if (!data?.update) {
+          try {
+            const existingCache = await AsyncStorage.getItem(cacheKey);
+            const cached = existingCache
+              ? JSON.parse(existingCache)
+              : { updates: [] };
+
+            await AsyncStorage.setItem(
+              cacheKey,
+              JSON.stringify({
+                cachedAt: Date.now(),
+                dayKey: todayKey,
+                updates: Array.isArray(cached?.updates)
+                  ? cached.updates
+                  : [],
+              }),
+            );
+          } catch (cacheError) {
+            console.log('SIDEKICK CACHE WRITE ERROR:', cacheError);
+          }
+        }
+
         if (data?.update) {
           // A genuinely new update was created. Refresh the history so
           // the newest update appears immediately.
           setSidekickNoActionableUpdate(false);
-          await loadSidekickUpdates();
+          await loadSidekickUpdates(true);
         } else if (data?.reason === 'no_update') {
           // "no_update" means there is nothing NEW to add.
           // Keep the most recent real update already on the card.
@@ -1168,47 +1255,65 @@ export default function ModulesScreen() {
             );
           }
 
-          /* ===============================================
-             4. LISTS
-          =============================================== */
+/* ===============================================
+   4. LISTS
+   Only incomplete items from CHECKLIST lists
+   are counted on the Modules dashboard.
+=============================================== */
 
-          try {
-            const {
-              data: listRows,
-              error: listError,
-            } =
-              await supabase
-                .from(
-                  'list_items',
-                )
-                .select('id')
-                .eq(
-                  'user_id',
-                  user.id,
-                )
-                .eq(
-                  'completed',
-                  false,
-                );
+try {
+  // First find this user's checklist lists.
+  const {
+    data: checklistLists,
+    error: checklistError,
+  } = await supabase
+    .from('lists')
+    .select('id')
+    .eq('user_id', user.id)
+    .eq('list_type', 'checklist');
 
-            if (listError) {
-              console.log(
-                'DASHBOARD LISTS ERROR:',
-                listError,
-              );
-            } else {
-              next.lists =
-                (
-                  listRows ??
-                  []
-                ).length;
-            }
-          } catch (error) {
-            console.log(
-              'DASHBOARD LISTS EXCEPTION:',
-              error,
-            );
-          }
+  if (checklistError) {
+    console.log(
+      'DASHBOARD CHECKLIST LISTS ERROR:',
+      checklistError,
+    );
+  } else {
+    const checklistListIds = (
+      checklistLists ?? []
+    ).map((list) => list.id);
+
+    // No checklist lists = zero incomplete checklist items.
+    if (checklistListIds.length === 0) {
+      next.lists = 0;
+    } else {
+      const {
+        data: listRows,
+        error: listError,
+      } = await supabase
+        .from('list_items')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('completed', false)
+        .in('list_id', checklistListIds);
+
+      if (listError) {
+        console.log(
+          'DASHBOARD LIST ITEMS ERROR:',
+          listError,
+        );
+      } else {
+        next.lists = (
+          listRows ?? []
+        ).length;
+      }
+    }
+  }
+} catch (error) {
+  console.log(
+    'DASHBOARD LISTS EXCEPTION:',
+    error,
+  );
+}
 
           /* ===============================================
              5. REMINDERS
@@ -2227,7 +2332,7 @@ const styles =
 
     fixedSidekickArea: {
       paddingHorizontal: 16,
-      paddingTop: 30,
+      paddingTop: 50,
       paddingBottom: 10,
     },
 
@@ -2236,7 +2341,7 @@ const styles =
       minHeight: 220,
       borderRadius: 24,
       paddingHorizontal: 32,
-      paddingTop: 30,
+      paddingTop: 65,
       paddingBottom: 48,
       position: 'relative',
       overflow: 'visible',

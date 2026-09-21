@@ -587,10 +587,10 @@ export default function SplitScreen() {
     const incoming = isIncoming(split);
 
     if (!incoming) {
-      return [
-        { displayName: 'Me', sourceName: 'Me' },
-        ...split.peer_names.map((name) => ({ displayName: name, sourceName: name })),
-      ];
+      return split.peer_names.map((name) => ({
+        displayName: name,
+        sourceName: name,
+      }));
     }
 
     if (split.custom_amounts?.length) {
@@ -1203,83 +1203,91 @@ export default function SplitScreen() {
                       : 'No friends yet. Add friends in chat first.'}
                   </Text>
                 ) : (
-                  filteredFriends.map((friend) => {
-                    const selected = whoOwes.includes(
-                      friend.id
-                    );
+                  <ScrollView
+                    nestedScrollEnabled
+                    showsVerticalScrollIndicator={false}
+                    style={styles.friendResultsScroll}
+                    contentContainerStyle={styles.friendResultsContent}
+                    keyboardShouldPersistTaps="handled"
+                  >
+                    {filteredFriends.map((friend) => {
+                      const selected = whoOwes.includes(
+                        friend.id
+                      );
 
-                    return (
-                      <Pressable
-                        key={friend.id}
-                        onPress={() =>
-                          toggleFriend(friend.id)
-                        }
-                        style={[
-                          styles.friendRow,
-                          isDark &&
-                            styles.friendRowDark,
-                          selected &&
-                            styles.friendRowSelected,
-                        ]}
-                      >
-                        <View style={styles.friendAvatar}>
-                          <Text
-                            style={[
-                              styles.friendAvatarText,
-                              {
-                                color: onAccent,
-                              },
-                            ]}
-                          >
-                            {(friend.display_name ||
-                              friend.username ||
-                              '?')
-                              .charAt(0)
-                              .toUpperCase()}
-                          </Text>
-                        </View>
-
-                        <View
-                          style={styles.friendCopy}
+                      return (
+                        <Pressable
+                          key={friend.id}
+                          onPress={() =>
+                            toggleFriend(friend.id)
+                          }
+                          style={[
+                            styles.friendRow,
+                            isDark &&
+                              styles.friendRowDark,
+                            selected &&
+                              styles.friendRowSelected,
+                          ]}
                         >
-                          <Text
-                            style={[
-                              styles.friendName,
-                              isDark &&
-                                styles.darkText,
-                            ]}
-                          >
-                            {friend.display_name ||
-                              friend.username}
-                          </Text>
+                          <View style={styles.friendAvatar}>
+                            <Text
+                              style={[
+                                styles.friendAvatarText,
+                                {
+                                  color: onAccent,
+                                },
+                              ]}
+                            >
+                              {(friend.display_name ||
+                                friend.username ||
+                                '?')
+                                .charAt(0)
+                                .toUpperCase()}
+                            </Text>
+                          </View>
 
-                          <Text
-                            style={[
-                              styles.friendUsername,
-                              isDark &&
-                                styles.darkMuted,
-                            ]}
+                          <View
+                            style={styles.friendCopy}
                           >
-                            @{friend.username}
-                          </Text>
-                        </View>
+                            <Text
+                              style={[
+                                styles.friendName,
+                                isDark &&
+                                  styles.darkText,
+                              ]}
+                            >
+                              {friend.display_name ||
+                                friend.username}
+                            </Text>
 
-                        {selected && (
-                          <Text
-                            style={[
-                              styles.selectedCheck,
-                              {
-                                color:
-                                  accentForeground,
-                              },
-                            ]}
-                          >
-                            ✓
-                          </Text>
-                        )}
-                      </Pressable>
-                    );
-                  })
+                            <Text
+                              style={[
+                                styles.friendUsername,
+                                isDark &&
+                                  styles.darkMuted,
+                              ]}
+                            >
+                              @{friend.username}
+                            </Text>
+                          </View>
+
+                          {selected && (
+                            <Text
+                              style={[
+                                styles.selectedCheck,
+                                {
+                                  color:
+                                    accentForeground,
+                                },
+                              ]}
+                            >
+                              ✓
+                            </Text>
+                          )}
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
                 )}
               </View>
             </ScrollView>
@@ -1669,7 +1677,7 @@ const styles = StyleSheet.create({
 
   fab: {
     position: 'absolute',
-    bottom: 82,
+    bottom: 30,
     alignSelf: 'center',
     width: 56,
     height: 56,
@@ -1789,6 +1797,15 @@ const styles = StyleSheet.create({
    */
   friendResults: {
     marginTop: 10,
+    maxHeight: 308,
+  },
+
+  friendResultsScroll: {
+    flexGrow: 0,
+    maxHeight: 308,
+  },
+
+  friendResultsContent: {
     gap: 6,
   },
 

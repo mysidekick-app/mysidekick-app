@@ -8,7 +8,9 @@ import {
 import {
   ActivityIndicator,
   Dimensions,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -2218,20 +2220,31 @@ export default function PlannerScreen() {
           )
         }
       >
-        <View
+        <KeyboardAvoidingView
           style={
-            styles.modalShade
+            styles.keyboardAvoidingView
           }
+          behavior={
+            Platform.OS === 'ios'
+              ? 'padding'
+              : 'height'
+          }
+          keyboardVerticalOffset={0}
         >
           <View
-            style={[
-              styles.modalCard,
-              {
-                backgroundColor:
-                  C.card,
-              },
-            ]}
+            style={
+              styles.modalShade
+            }
           >
+            <View
+              style={[
+                styles.modalCard,
+                {
+                  backgroundColor:
+                    C.card,
+                },
+              ]}
+            >
             <View
               style={
                 styles.modalTitleRow
@@ -2269,10 +2282,15 @@ export default function PlannerScreen() {
               style={
                 styles.modalScroll
               }
+              contentContainerStyle={
+                styles.modalScrollContent
+              }
               showsVerticalScrollIndicator={
                 false
               }
-              keyboardShouldPersistTaps="handled"
+              keyboardShouldPersistTaps="always"
+              keyboardDismissMode="none"
+              nestedScrollEnabled
             >
               {error && (
                 <Text
@@ -2928,8 +2946,9 @@ export default function PlannerScreen() {
               </Pressable>
             </View>
 
+            </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -4664,6 +4683,10 @@ const styles =
       elevation: 6,
     },
 
+    keyboardAvoidingView: {
+      flex: 1,
+    },
+
     modalShade: {
       flex: 1,
       justifyContent:
@@ -4678,9 +4701,10 @@ const styles =
       borderTopRightRadius:
         24,
       padding: 22,
-      paddingBottom: 34,
+      paddingBottom: 24,
       maxHeight:
         '92%',
+      flexShrink: 1,
     },
 
     modalTitleRow: {
@@ -4702,8 +4726,12 @@ const styles =
     },
 
     modalScroll: {
-      maxHeight:
-        '80%',
+      flexGrow: 0,
+      flexShrink: 1,
+    },
+
+    modalScrollContent: {
+      paddingBottom: 24,
     },
 
     label: {

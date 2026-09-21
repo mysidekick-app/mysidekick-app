@@ -5,8 +5,6 @@ import {
   useState,
 } from 'react';
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
 import {
   ActivityIndicator,
   Alert,
@@ -72,7 +70,7 @@ type ChatItem = {
   lastMessageSenderId?: string;
   lastMessageRead?: boolean;
   lastMessageAt?: string;
-  category: 'system' | 'groups' | 'direct';
+  category: 'groups' | 'direct';
   icon: string;
   profileId?: string;
   route?: string;
@@ -121,25 +119,6 @@ type ChatTagAssignment = {
   created_at: string;
 };
 
-/* =========================================================
-   SYSTEM CHAT
-========================================================= */
-
-const SIDEKICK_GREETING =
-  "Hi! I'm your Sidekick. I'm here to help you improve your life, one atomic habit at a time!";
-
-const SYSTEM_CHATS: ChatItem[] = [
-  {
-    id: 'sys-sidekick',
-    name: 'Sidekick',
-    detail: SIDEKICK_GREETING,
-    time: '',
-    category: 'system',
-    icon: 'S',
-    route: '/chat/sidekick',
-  },
-];
-
 const filters = [
   'All',
   'Unread',
@@ -179,6 +158,7 @@ export default function ChatScreen() {
     streak?: string;
     habitTitle?: string;
     habitName?: string;
+    frequency?: string;
     filter?: string;
   }>();
 
@@ -196,9 +176,23 @@ export default function ChatScreen() {
         ? params.habitName
         : '';
 
+  const streakFrequency =
+    typeof params.frequency === 'string'
+      ? params.frequency
+      : 'daily';
+
+  const streakUnit =
+    streakFrequency === 'weekly'
+      ? 'week'
+      : streakFrequency === 'monthly'
+        ? 'month'
+        : streakFrequency === 'annually'
+          ? 'year'
+          : 'day';
+
   const streakMessage =
     streakCount > 0 && habitTitle
-      ? `I just hit my ${streakCount} day streak in ${habitTitle}.`
+      ? `I just hit my ${streakCount} ${streakUnit} streak in ${habitTitle}.`
       : '';
 
   /* =======================================================
@@ -256,15 +250,6 @@ export default function ChatScreen() {
 
   const [groupsLoading, setGroupsLoading] =
     useState(false);
-
-  const [sidekickPreview, setSidekickPreview] =
-    useState<{
-      content: string;
-      time: string;
-    } | null>(null);
-
-  const [sidekickUnreadCount, setSidekickUnreadCount] =
-    useState(0);
 
   /* =======================================================
      FLEX RECIPIENT SELECTION
@@ -488,10 +473,10 @@ export default function ChatScreen() {
     }
 
     /*
-     * A deleted direct chat removes only the current user's membership.
-     * The other participant still has membership, so look for old direct
-     * conversations belonging to our friends as well. We only restore one
-     * when there is a message newer than this user's local chat-clear time.
+     * A deleted direct chat removes the current user's membership and
+     * marks its existing messages deleted for that user. Look for an old
+     * direct conversation only when there is a message that was NOT deleted
+     * for this user and that is newer than the local deletion time.
      *
      * This gives us:
      *   - new friend with no chat -> visible
@@ -566,6 +551,31 @@ export default function ChatScreen() {
       if (historicalMessageError) {
         console.warn('LOAD DELETED CHAT MESSAGES ERROR:', historicalMessageError);
       } else {
+        const historicalMessageIds = (historicalMessages ?? [])
+          .map((message: any) => message.id)
+          .filter(Boolean);
+
+        const { data: deletedHistoricalRows, error: deletedHistoricalError } = historicalMessageIds.length
+          ? await supabase
+              .from('chat_message_deletions')
+              .select('message_id')
+              .eq('user_id', user.id)
+              .in('message_id', historicalMessageIds)
+          : { data: [] as any[], error: null };
+
+        if (deletedHistoricalError) {
+          console.warn(
+            'LOAD DELETED CHAT MESSAGE DELETIONS ERROR:',
+            deletedHistoricalError,
+          );
+        }
+
+        const deletedHistoricalIds = new Set(
+          (deletedHistoricalRows ?? [])
+            .map((row: any) => row.message_id)
+            .filter(Boolean),
+        );
+
         const friendByConversation = new Map<string, string>();
         historicalFriendMemberships.forEach((row: any) => {
           if (!friendByConversation.has(row.conversation_id)) {
@@ -576,6 +586,10 @@ export default function ChatScreen() {
         const restoredFriendIds = new Set<string>();
 
         for (const message of historicalMessages ?? []) {
+          if (deletedHistoricalIds.has(message.id)) {
+            continue;
+          }
+
           const friendId = friendByConversation.get(message.conversation_id);
           const clearedAt = historicalClearAtByConversation.get(message.conversation_id);
 
@@ -703,9 +717,34 @@ export default function ChatScreen() {
 
     const friendsList: ChatItem[] =
       (profiles ?? []).filter(
-        (profile: SocialProfile) =>
-          conversationByFriend.has(profile.user_id) ||
-          !friendHasAnyConversation.has(profile.user_id),
+        (profile: SocialProfile) => {
+          const conversationId = conversationByFriend.get(profile.user_id);
+
+          // If this conversation has a deletion/clear timestamp, it must
+          // stay hidden until a genuinely newer message exists. This also
+          // protects against a stale membership row making a deleted chat
+          // reappear immediately after refresh.
+          if (conversationId) {
+            const clearAt = clearAtByConversation.get(conversationId);
+
+            if (clearAt) {
+              const hasNewMessage =
+                (messagesByConversation.get(conversationId) ?? []).some(
+                  (row: any) =>
+                    new Date(row.created_at).getTime() >
+                    new Date(clearAt).getTime(),
+                );
+
+              if (!hasNewMessage) {
+                return false;
+              }
+            }
+
+            return true;
+          }
+
+          return !friendHasAnyConversation.has(profile.user_id);
+        },
       ).map(
         (profile: SocialProfile) => ({
           id: profile.user_id,
@@ -962,72 +1001,6 @@ export default function ChatScreen() {
     setUserGroups(groupsList);
     setGroupsLoading(false);
   }, [readChatAt]);
-
-  /* =========================================================
-     SIDEKICK PREVIEW
-  ========================================================= */
-
-  const loadSidekickPreview =
-    useCallback(async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) return;
-
-      const {
-        data: messages,
-        error,
-      } = await supabase
-        .from('system_messages')
-        .select('content, created_at, sender')
-        .eq('user_id', user.id)
-        .eq('module_key', 'sidekick')
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('LOAD SIDEKICK PREVIEW ERROR:', error);
-        return;
-      }
-
-      const rows = messages ?? [];
-      const latest = rows[0];
-
-      if (latest) {
-        const time = new Date(latest.created_at).toLocaleTimeString([], {
-          hour: 'numeric',
-          minute: '2-digit',
-        });
-
-        setSidekickPreview({
-          content: latest.content,
-          time,
-        });
-      } else {
-        setSidekickPreview(null);
-      }
-
-      const sidekickRows = rows.filter(
-        (row: any) => row.sender === 'sidekick',
-      );
-
-      const readKey = `mysidekick:sidekick-read-at:${user.id}`;
-      let readAt = await AsyncStorage.getItem(readKey);
-
-      // On first use, don't mark existing Sidekick history as new.
-      if (!readAt && sidekickRows.length > 0) {
-        readAt = sidekickRows[0].created_at;
-        if (readAt) {
-          await AsyncStorage.setItem(readKey, readAt);
-        }
-      }
-
-      const unreadCount = sidekickRows.filter((row: any) =>
-        !readAt || new Date(row.created_at).getTime() > new Date(readAt).getTime(),
-      ).length;
-
-      setSidekickUnreadCount(unreadCount);
-    }, []);
 
   /* =========================================================
      LOAD CHAT TAGS
@@ -1802,13 +1775,11 @@ export default function ChatScreen() {
       loadFriends();
       loadIncomingRequests();
       setUserGroups([]);
-      loadSidekickPreview();
       setIncomingGroupInvites([]);
       loadChatTags();
     }, [
       loadFriends,
       loadIncomingRequests,
-      loadSidekickPreview,
       loadChatTags,
     ]),
   );
@@ -1956,30 +1927,8 @@ export default function ChatScreen() {
   ========================================================= */
 
   const allChats = useMemo(
-    () => [
-      ...SYSTEM_CHATS.map(
-        (chat) =>
-          chat.id ===
-            'sys-sidekick'
-            ? {
-                ...chat,
-                ...(sidekickPreview
-                  ? {
-                      detail: sidekickPreview.content,
-                      time: sidekickPreview.time,
-                    }
-                  : {}),
-                unread: sidekickUnreadCount || undefined,
-              }
-            : chat,
-      ),
-      ...userFriends,
-    ],
-    [
-      userFriends,
-      sidekickPreview,
-      sidekickUnreadCount,
-    ],
+    () => [...userFriends],
+    [userFriends],
   );
 
   /* =========================================================
@@ -2754,43 +2703,6 @@ export default function ChatScreen() {
     }
 
     const sourceFilter = filter ?? 'All';
-
-    if (chat.id === 'sys-sidekick') {
-      if (myUserId) {
-        try {
-          const readKey = `mysidekick:sidekick-read-at:${myUserId}`;
-          const { data: latestSidekickMessage } = await supabase
-            .from('system_messages')
-            .select('created_at')
-            .eq('user_id', myUserId)
-            .eq('module_key', 'sidekick')
-            .eq('sender', 'sidekick')
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-          const readAt =
-            latestSidekickMessage?.created_at ??
-            new Date().toISOString();
-
-          await AsyncStorage.setItem(readKey, readAt);
-          setSidekickUnreadCount(0);
-        } catch (error) {
-          console.error('MARK SIDEKICK CHAT READ ERROR:', error);
-        }
-      }
-
-      router.push(
-        {
-          pathname: '/chat/sidekick',
-          params: {
-            from: sourceFilter,
-          },
-        } as never,
-      );
-
-      return;
-    }
 
     /*
      * Direct chats must be marked as read before navigating away.
@@ -3824,21 +3736,7 @@ export default function ChatScreen() {
                         styles.pressed,
                     ]}
                   >
-                    {chat.category === 'system' &&
-                    chat.id === 'sys-sidekick' &&
-                    appContext.sidekick_id ? (
-                      <View
-                        style={[
-                          styles.avatar,
-                          styles.sidekickAvatarContainer,
-                        ]}
-                      >
-                        <SidekickAvatar
-                          sidekickId={appContext.sidekick_id}
-                          size={38}
-                        />
-                      </View>
-                    ) : chat.category === 'direct' && chat.sidekickId ? (
+                    {chat.category === 'direct' && chat.sidekickId ? (
                       <View
                         style={[
                           styles.avatar,
@@ -3863,12 +3761,7 @@ export default function ChatScreen() {
                             { color: '#FFFFFF' },
                           ]}
                         >
-                          {chat.category === 'system' &&
-                          chat.id === 'sys-sidekick'
-                            ? (appContext.display_name || '?')
-                                .slice(0, 1)
-                                .toUpperCase()
-                            : chat.icon}
+                          {chat.icon}
                         </Text>
                       </View>
                     )}
@@ -3991,19 +3884,54 @@ export default function ChatScreen() {
             {filteredChats.length ===
               0 &&
               !groupsLoading && (
-                <Text
-                  style={[
-                    styles.empty,
-                    {
-                      color:
-                        C.muted,
-                    },
-                  ]}
+                <View
+                  style={styles.emptyState}
                 >
-                  No conversations
-                  match your
-                  filters.
-                </Text>
+                  {userFriends.length ===
+                    0 &&
+                  !query.trim() &&
+                  filter === 'All' ? (
+                    <>
+                      <Text
+                        style={[
+                          styles.emptyTitle,
+                          {
+                            color:
+                              C.text,
+                          },
+                        ]}
+                      >
+                        No friends added yet
+                      </Text>
+
+                      <Text
+                        style={[
+                          styles.emptySubtitle,
+                          {
+                            color:
+                              C.muted,
+                          },
+                        ]}
+                      >
+                        Click + to add friends and start chatting.
+                      </Text>
+                    </>
+                  ) : (
+                    <Text
+                      style={[
+                        styles.empty,
+                        {
+                          color:
+                            C.muted,
+                        },
+                      ]}
+                    >
+                      No conversations
+                      match your
+                      filters.
+                    </Text>
+                  )}
+                </View>
               )}
           </>
         )}
@@ -5147,7 +5075,26 @@ const styles =
       fontSize: 10,
     },
 
-    empty: {
+    emptyState: {
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 32,
+  },
+
+  emptyTitle: {
+    fontFamily: 'Poppins_600SemiBold',
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+
+  emptySubtitle: {
+    fontFamily: 'Poppins_400Regular',
+    fontSize: 13,
+    textAlign: 'center',
+  },
+
+  empty: {
       textAlign: 'center',
       fontFamily: FONT,
       marginTop: 30,
@@ -5245,7 +5192,7 @@ const styles =
       position: 'absolute',
       left: 0,
       right: 0,
-      bottom: 70,
+      bottom: 0,
       paddingHorizontal: 18,
       paddingTop: 13,
       paddingBottom: 15,

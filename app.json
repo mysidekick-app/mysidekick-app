@@ -54,11 +54,12 @@
   ],
   [
     "expo-splash-screen",
-    {
-      "image": "./assets/sidekick-logo.png",
-      "imageWidth": 200
-        }
-      ]
+  {
+    "image": "./assets/sidekick-logo.png",
+    "imageWidth": 280,
+    "backgroundColor": "#000000"
+  }
+]
     ],
 
     "experiments": {

@@ -111,17 +111,6 @@ export default function TransactionScreen({
   const [date, setDate] = useState(todayStr());
   const [saving, setSaving] = useState(false);
 
-  /*
-   * Transaction-page date filter.
-   *
-   * IMPORTANT:
-   * These dates belong ONLY to this transaction screen.
-   * They are completely independent from the Financial Health
-   * date filter on the Finance dashboard.
-   */
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-
   const fmt = (v: number) => formatMoney(v, currency_code);
 
   const categories =
@@ -223,59 +212,10 @@ export default function TransactionScreen({
     }
   };
 
-  /*
-   * Apply the date filter locally.
-   *
-   * Both dates are inclusive.
-   * If either date is empty, that side of the range is unrestricted.
-   */
-  const filteredTransactions = transactions.filter((transaction) => {
-    const transactionDate = transaction.transaction_date;
-
-    if (startDate && transactionDate < startDate) {
-      return false;
-    }
-
-    if (endDate && transactionDate > endDate) {
-      return false;
-    }
-
-    return true;
-  });
-
-  const total = filteredTransactions.reduce(
+  const total = transactions.reduce(
     (sum, transaction) => sum + Number(transaction.amount),
     0,
   );
-
-  const hasDateFilter = Boolean(startDate || endDate);
-
-  const clearFilter = () => {
-    setStartDate('');
-    setEndDate('');
-    setError(null);
-  };
-
-  const handleStartDateChange = (d: string) => {
-    setStartDate(d);
-
-    /*
-     * Keep the range valid, matching the Financial Health
-     * filter behaviour.
-     */
-    if (endDate && d > endDate) {
-      setEndDate(d);
-    }
-  };
-
-  const handleEndDateChange = (d: string) => {
-    /*
-     * Do not allow an end date earlier than the start date.
-     */
-    if (!startDate || d >= startDate) {
-      setEndDate(d);
-    }
-  };
 
   return (
     <SafeAreaView
@@ -307,52 +247,6 @@ export default function TransactionScreen({
             isDark && styles.cardDark,
           ]}
         >
-          {/* Financial Health-style date filter.
-              This filter is local to this transaction page only. */}
-          <View style={styles.dateFilterRow}>
-            <View style={{ flex: 1 }}>
-              <DatePickerInput
-                value={startDate}
-                onChange={handleStartDateChange}
-                accent={accentForeground}
-                onAccent={onAccent}
-                isDark={isDark}
-                placeholder="Start date"
-              />
-            </View>
-
-            <Text
-              style={[
-                styles.dateSep,
-                isDark && styles.darkMuted,
-              ]}
-            >
-              →
-            </Text>
-
-            <View style={{ flex: 1 }}>
-              <DatePickerInput
-                value={endDate}
-                onChange={handleEndDateChange}
-                accent={accentForeground}
-                onAccent={onAccent}
-                isDark={isDark}
-                placeholder="End date"
-              />
-            </View>
-          </View>
-
-          {hasDateFilter && (
-            <Pressable
-              onPress={clearFilter}
-              style={styles.clearFilterButton}
-            >
-              <Text style={styles.clearFilterText}>
-                Clear dates
-              </Text>
-            </Pressable>
-          )}
-
           <Text
             style={[
               styles.summaryLabel,
@@ -390,7 +284,7 @@ export default function TransactionScreen({
           >
             Loading...
           </Text>
-        ) : filteredTransactions.length === 0 ? (
+        ) : transactions.length === 0 ? (
           <View style={styles.empty}>
             <Text
               style={[
@@ -398,9 +292,7 @@ export default function TransactionScreen({
                 isDark && styles.darkMuted,
               ]}
             >
-              {hasDateFilter
-                ? `No ${titleFor(txKind).toLowerCase()} found for this date range.`
-                : `No ${titleFor(txKind).toLowerCase()} yet. Tap + to record one.`}
+              {`No ${titleFor(txKind).toLowerCase()} yet. Tap + to record one.`}
             </Text>
           </View>
         ) : (
@@ -410,13 +302,13 @@ export default function TransactionScreen({
               isDark && styles.cardDark,
             ]}
           >
-            {filteredTransactions.map(
+            {transactions.map(
               (transaction, index) => (
                 <View
                   key={transaction.id}
                   style={[
                     styles.row,
-                    index < filteredTransactions.length - 1 &&
+                    index < transactions.length - 1 &&
                       styles.rowBorder,
                     isDark && styles.rowBorderDark,
                   ]}
@@ -730,35 +622,6 @@ const styles = StyleSheet.create({
     borderColor: '#2A2A2A',
   },
 
-  /*
-   * FINANCIAL HEALTH-STYLE DATE FILTER
-   */
-
-  dateFilterRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 14,
-  },
-
-  dateSep: {
-    fontFamily: FONT_MED,
-    fontSize: 11,
-    color: '#908B83',
-  },
-
-  clearFilterButton: {
-    alignSelf: 'flex-start',
-    marginTop: -4,
-    marginBottom: 10,
-  },
-
-  clearFilterText: {
-    fontFamily: FONT_MED,
-    fontSize: 11,
-    color: '#C53A2F',
-  },
-
   summaryLabel: {
     fontFamily: FONT_SEMI,
     fontSize: 13,
@@ -840,7 +703,7 @@ const styles = StyleSheet.create({
 
   fab: {
     position: 'absolute',
-    bottom: 82,
+    bottom: 30,
     alignSelf: 'center',
     width: 56,
     height: 56,

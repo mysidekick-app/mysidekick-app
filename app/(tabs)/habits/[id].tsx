@@ -36,6 +36,7 @@ type Habit = {
   name: string;
   category: string;
   duration_minutes: number | null;
+  frequency: HabitFrequency;
   current_streak: number;
   created_at: string;
   checkpoint: number;
@@ -53,6 +54,57 @@ const FONT = 'Poppins-Regular';
 const FONT_MED = 'Poppins-Medium';
 const FONT_SEMI = 'Poppins-SemiBold';
 const FONT_BOLD = 'Poppins-Bold';
+
+type HabitFrequency = 'daily' | 'weekly' | 'monthly' | 'annually';
+
+const FREQUENCIES: { value: HabitFrequency; label: string }[] = [
+  { value: 'daily', label: 'Daily' },
+  { value: 'weekly', label: 'Weekly' },
+  { value: 'monthly', label: 'Monthly' },
+  { value: 'annually', label: 'Annually' },
+];
+
+function getWeekKey(date: Date): string {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  const day = d.getDay() || 7;
+  d.setDate(d.getDate() + 4 - day);
+  const year = d.getFullYear();
+  const yearStart = new Date(year, 0, 1);
+  const week = Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return `${year}-W${String(week).padStart(2, '0')}`;
+}
+
+function getPeriodKey(dateString: string, frequency: HabitFrequency): string {
+  const d = new Date(`${dateString}T00:00:00`);
+  if (frequency === 'daily') return dateString;
+  if (frequency === 'weekly') return getWeekKey(d);
+  if (frequency === 'monthly') return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  return String(d.getFullYear());
+}
+
+function getFrequencyUnit(frequency: HabitFrequency): string {
+  if (frequency === 'weekly') return 'week';
+  if (frequency === 'monthly') return 'month';
+  if (frequency === 'annually') return 'year';
+  return 'day';
+}
+
+function getDefaultCheckpoint(frequency: HabitFrequency): string {
+  if (frequency === 'weekly') return '4';
+  if (frequency === 'monthly') return '3';
+  if (frequency === 'annually') return '1';
+  return '5';
+}
+
+function getCheckpointLabel(frequency: HabitFrequency): string {
+  if (frequency === 'weekly') return 'Checkpoint (every number of months)';
+  if (frequency === 'monthly') return 'Checkpoint (every number of months)';
+  if (frequency === 'annually') return 'Checkpoint (every number of years)';
+  return 'Checkpoint (every number of days)';
+}
+
+
 
 const MONTHS = [
   'Jan',
@@ -102,8 +154,8 @@ function dateKey(d: Date): string {
 }
 
 export default function HabitDetailScreen() {
-  const { id } =
-    useLocalSearchParams<{ id: string }>();
+  const { id, frequency: routeFrequency } =
+    useLocalSearchParams<{ id: string; frequency?: HabitFrequency }>();
 
   const {
     accentForeground,
@@ -133,8 +185,8 @@ export default function HabitDetailScreen() {
     useState('');
   const [editCategory, setEditCategory] =
     useState('Mind');
-  const [editDuration, setEditDuration] =
-    useState('');
+  const [editFrequency, setEditFrequency] =
+    useState<HabitFrequency>('daily');
   const [editCheckpoint, setEditCheckpoint] =
     useState('5');
   const [editStartDate, setEditStartDate] =
@@ -156,7 +208,7 @@ export default function HabitDetailScreen() {
       supabase
         .from('habits')
         .select(
-          'id, name, category, duration_minutes, current_streak, created_at, checkpoint, trophies_earned, freezes_held, start_date, end_date'
+          'id, name, category, duration_minutes, frequency, current_streak, created_at, checkpoint, trophies_earned, freezes_held, start_date, end_date'
         )
         .eq('id', id)
         .maybeSingle(),
@@ -195,113 +247,171 @@ export default function HabitDetailScreen() {
   }, [load]);
 
   const longestStreak = useMemo(() => {
-    if (!completions.size) return 0;
+    if (!habit || !completions.size) return 0;
 
-    const sorted =
-      Array.from(completions).sort();
+    const periods = Array.from(
+      new Set(
+        Array.from(completions).map((date) =>
+          getPeriodKey(date, habit.frequency),
+        ),
+      ),
+    ).sort();
+
+    if (!periods.length) return 0;
+
+    const startOfPeriod = (key: string): Date => {
+      if (habit.frequency === 'daily') return new Date(`${key}T00:00:00`);
+      if (habit.frequency === 'monthly') return new Date(`${key}-01T00:00:00`);
+      if (habit.frequency === 'annually') return new Date(`${key}-01-01T00:00:00`);
+
+      const [y, w] = key.split('-W').map(Number);
+      const jan4 = new Date(y, 0, 4);
+      const day = jan4.getDay() || 7;
+      const monday = new Date(jan4);
+      monday.setDate(jan4.getDate() - day + 1 + (w - 1) * 7);
+      return monday;
+    };
+
+    const gap = (a: Date, b: Date): number => {
+      if (habit.frequency === 'daily') return Math.round((a.getTime() - b.getTime()) / 86400000);
+      if (habit.frequency === 'weekly') return Math.round((a.getTime() - b.getTime()) / (86400000 * 7));
+      if (habit.frequency === 'monthly') return (a.getFullYear() - b.getFullYear()) * 12 + a.getMonth() - b.getMonth();
+      return a.getFullYear() - b.getFullYear();
+    };
 
     let max = 1;
-    let cur = 1;
+    let current = 1;
 
-    for (
-      let i = 1;
-      i < sorted.length;
-      i++
-    ) {
-      const prev = parseDate(
-        sorted[i - 1]
-      );
-
-      const curr = parseDate(
-        sorted[i]
-      );
-
-      const diff = Math.round(
-        (curr.getTime() -
-          prev.getTime()) /
-          86400000
-      );
-
-      if (diff === 1) {
-        cur++;
-        max = Math.max(
-          max,
-          cur
-        );
+    for (let i = 1; i < periods.length; i++) {
+      if (gap(startOfPeriod(periods[i]), startOfPeriod(periods[i - 1])) === 1) {
+        current++;
+        max = Math.max(max, current);
       } else {
-        cur = 1;
+        current = 1;
       }
     }
 
     return max;
-  }, [completions]);
+  }, [habit, completions]);
 
   const tiles = useMemo(() => {
-    if (!habit || !habit.start_date) {
-      return [];
-    }
+    if (!habit || !habit.start_date) return [];
 
-    const start = parseDate(
-      habit.start_date
-    );
-
+    const start = parseDate(habit.start_date);
     const end = habit.end_date
       ? parseDate(habit.end_date)
-      : new Date(
-          start.getFullYear() + 1,
-          start.getMonth(),
-          start.getDate()
-        );
+      : new Date(start.getFullYear() + 1, start.getMonth(), start.getDate());
+    const today = parseDate(todayStr());
 
-    const today = todayStr();
-
-    const arr: {
+    const result: {
       key: string;
       label: string;
-      day: number;
-      tileNumber: number;
       done: boolean;
       isFuture: boolean;
       isToday: boolean;
     }[] = [];
 
-    const cur = new Date(start);
+    if (habit.frequency === 'daily') {
+      const cur = new Date(start);
+      let i = 0;
 
-    let idx = 0;
+      while (cur <= end && i < 400) {
+        const key = dateKey(cur);
+        result.push({
+          key,
+          label: String(i + 1),
+          done: completions.has(key),
+          isFuture: cur > today,
+          isToday: key === todayStr(),
+        });
+        cur.setDate(cur.getDate() + 1);
+        i++;
+      }
+    } else if (habit.frequency === 'weekly') {
+      const cur = new Date(start);
+      const seen = new Set<string>();
+      let weekNumber = 1;
 
-    while (
-      cur <= end &&
-      idx < 400
-    ) {
-      const key = dateKey(cur);
+      while (cur <= end) {
+        const key = getWeekKey(cur);
 
-      const done =
-        completions.has(key);
+        if (!seen.has(key)) {
+          const weekStart = detailPeriodStart(key, 'weekly');
+          const weekEnd = new Date(weekStart);
+          weekEnd.setDate(weekEnd.getDate() + 6);
 
-      arr.push({
-        key,
-        label: `${MONTHS[cur.getMonth()]} ${cur.getDate()}`,
-        day: cur.getDate(),
-        tileNumber: idx + 1,
-        done,
-        isFuture: key > today,
-        isToday: key === today,
-      });
+          result.push({
+            key,
+            label: `Week ${weekNumber}`,
+            done: Array.from(completions).some(
+              (date) => getPeriodKey(date, 'weekly') === key,
+            ),
+            isFuture: weekStart > today,
+            isToday: weekStart <= today && weekEnd >= today,
+          });
 
-      cur.setDate(
-        cur.getDate() + 1
-      );
+          seen.add(key);
+          weekNumber++;
+        }
 
-      idx++;
+        cur.setDate(cur.getDate() + 7);
+      }
+    } else if (habit.frequency === 'monthly') {
+      const cur = new Date(start.getFullYear(), start.getMonth(), 1);
+      const finalMonth = new Date(end.getFullYear(), end.getMonth(), 1);
+
+      while (cur <= finalMonth && result.length < 120) {
+        const key = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`;
+        const monthEnd = new Date(cur.getFullYear(), cur.getMonth() + 1, 0);
+
+        result.push({
+          key,
+          label: MONTHS[cur.getMonth()],
+          done: Array.from(completions).some(
+            (date) => getPeriodKey(date, 'monthly') === key,
+          ),
+          isFuture: cur > today,
+          isToday: cur <= today && monthEnd >= today,
+        });
+
+        cur.setMonth(cur.getMonth() + 1);
+      }
+    } else {
+      for (let year = start.getFullYear(); year <= end.getFullYear(); year++) {
+        const key = String(year);
+
+        result.push({
+          key,
+          label: key,
+          done: Array.from(completions).some(
+            (date) => getPeriodKey(date, 'annually') === key,
+          ),
+          isFuture: new Date(year, 0, 1) > today,
+          isToday: year === today.getFullYear(),
+        });
+      }
     }
 
-    return arr;
+    return result;
   }, [habit, completions]);
 
-  const totalDays = tiles.length;
+  function detailPeriodStart(key: string, frequency: HabitFrequency): Date {
+    if (frequency === 'daily') return new Date(`${key}T00:00:00`);
+    if (frequency === 'monthly') return new Date(`${key}-01T00:00:00`);
+    if (frequency === 'annually') return new Date(`${key}-01-01T00:00:00`);
 
-  const doneDays = tiles.filter(
-    (t) => t.done
+    const [y, w] = key.split('-W').map(Number);
+    const jan4 = new Date(y, 0, 4);
+    const day = jan4.getDay() || 7;
+    const monday = new Date(jan4);
+    monday.setDate(jan4.getDate() - day + 1 + (w - 1) * 7);
+    return monday;
+  }
+
+  const totalPeriods = tiles.length;
+
+  const donePeriods = tiles.filter(
+    (t) => t.done,
   ).length;
 
   const showToast = (
@@ -326,7 +436,20 @@ export default function HabitDetailScreen() {
           habit.current_streak
         ),
         habitName: habit.name,
+        frequency: habit.frequency,
       },
+    } as never);
+  };
+
+  const goBackToHabitsDashboard = () => {
+    const frequency: HabitFrequency =
+      habit?.frequency ??
+      routeFrequency ??
+      'daily';
+
+    router.dismissTo({
+      pathname: '/habits',
+      params: { frequency },
     } as never);
   };
 
@@ -335,11 +458,7 @@ export default function HabitDetailScreen() {
 
     setEditName(habit.name);
     setEditCategory(habit.category);
-    setEditDuration(
-      habit.duration_minutes
-        ? String(habit.duration_minutes)
-        : '',
-    );
+    setEditFrequency(habit.frequency ?? 'daily');
     setEditCheckpoint(
       habit.checkpoint
         ? String(habit.checkpoint)
@@ -367,10 +486,6 @@ export default function HabitDetailScreen() {
     setSavingEdit(true);
     setError(null);
 
-    const durationValue = editDuration.trim()
-      ? parseInt(editDuration, 10)
-      : null;
-
     const checkpointValue = editCheckpoint.trim()
       ? parseInt(editCheckpoint, 10)
       : 5;
@@ -381,14 +496,14 @@ export default function HabitDetailScreen() {
         .update({
           name: editName.trim(),
           category: editCategory,
-          duration_minutes: durationValue,
+          frequency: editFrequency,
           checkpoint: checkpointValue,
           start_date: editStartDate,
           end_date: editEndDate || null,
         })
         .eq('id', habit.id)
         .select(
-          'id, name, category, duration_minutes, current_streak, created_at, checkpoint, trophies_earned, freezes_held, start_date, end_date',
+          'id, name, category, duration_minutes, frequency, current_streak, created_at, checkpoint, trophies_earned, freezes_held, start_date, end_date',
         )
         .maybeSingle();
 
@@ -420,7 +535,15 @@ export default function HabitDetailScreen() {
         'Could not delete this habit.'
       );
     } else {
-      router.back();
+      const frequency: HabitFrequency =
+        habit?.frequency ??
+        routeFrequency ??
+        'daily';
+
+      router.dismissTo({
+        pathname: '/habits',
+        params: { frequency },
+      } as never);
     }
   };
 
@@ -440,7 +563,7 @@ export default function HabitDetailScreen() {
           ]}
         >
           <Pressable
-            onPress={() => router.replace('/habits' as never)}
+            onPress={goBackToHabitsDashboard}
             style={[
               styles.backButton,
               {
@@ -499,7 +622,7 @@ export default function HabitDetailScreen() {
           ]}
         >
           <Pressable
-            onPress={() => router.replace('/habits' as never)}
+            onPress={goBackToHabitsDashboard}
             style={[
               styles.backButton,
               {
@@ -558,7 +681,7 @@ export default function HabitDetailScreen() {
         ]}
       >
         <Pressable
-          onPress={() => router.replace('/habits' as never)}
+          onPress={goBackToHabitsDashboard}
           style={[
             styles.backButton,
             {
@@ -643,7 +766,7 @@ export default function HabitDetailScreen() {
                   styles.darkMuted,
               ]}
             >
-              day streak
+              {getFrequencyUnit(habit.frequency)} streak
             </Text>
           </View>
 
@@ -693,7 +816,7 @@ export default function HabitDetailScreen() {
                 },
               ]}
             >
-              {doneDays}/{totalDays}
+              {donePeriods}/{totalPeriods}
             </Text>
 
             <Text
@@ -703,7 +826,7 @@ export default function HabitDetailScreen() {
                   styles.darkMuted,
               ]}
             >
-              Days
+              {getFrequencyUnit(habit.frequency).replace(/^./, (c) => c.toUpperCase())}s
             </Text>
           </View>
 
@@ -829,6 +952,10 @@ export default function HabitDetailScreen() {
                   key={tile.key}
                   style={[
                     styles.tile,
+                    habit.frequency === 'daily' && styles.tileDaily,
+                    habit.frequency === 'weekly' && styles.tileWeekly,
+                    habit.frequency === 'monthly' && styles.tileMonthly,
+                    habit.frequency === 'annually' && styles.tileAnnual,
                     tile.done && {
                       backgroundColor:
                         accentForeground,
@@ -873,7 +1000,7 @@ export default function HabitDetailScreen() {
                         },
                       ]}
                     >
-                      {tile.tileNumber}
+                      {tile.label}
                     </Text>
                   )}
                 </View>
@@ -978,6 +1105,8 @@ export default function HabitDetailScreen() {
 
             <ScrollView
               showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
               style={{ maxHeight: 420 }}
             >
               <Text
@@ -1001,6 +1130,47 @@ export default function HabitDetailScreen() {
                     styles.inputDark,
                 ]}
               />
+
+              <Text
+                style={[
+                  styles.label,
+                  isDark && styles.darkMuted,
+                ]}
+              >
+                How frequently would you like to track this habit?
+              </Text>
+
+              <View style={styles.frequencyFormRow}>
+                {FREQUENCIES.map((item) => (
+                  <Pressable
+                    key={item.value}
+                    onPress={() => {
+                      setEditFrequency(item.value);
+                      setEditCheckpoint(getDefaultCheckpoint(item.value));
+                    }}
+                    style={[
+                      styles.frequencyFormChip,
+                      editFrequency === item.value && {
+                        backgroundColor: accentForeground,
+                        borderColor: accentForeground,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.frequencyText,
+                        isDark && styles.darkMuted,
+                        editFrequency === item.value && {
+                          color: onAccent,
+                          fontFamily: FONT_SEMI,
+                        },
+                      ]}
+                    >
+                      {item.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
 
               <Text
                 style={[
@@ -1047,28 +1217,6 @@ export default function HabitDetailScreen() {
                 ))}
               </View>
 
-              <Text
-                style={[
-                  styles.label,
-                  isDark &&
-                    styles.darkMuted,
-                ]}
-              >
-                Duration (minutes, optional)
-              </Text>
-
-              <TextInput
-                value={editDuration}
-                onChangeText={setEditDuration}
-                placeholder="15"
-                placeholderTextColor="#9B978F"
-                style={[
-                  styles.input,
-                  isDark &&
-                    styles.inputDark,
-                ]}
-                keyboardType="numeric"
-              />
 
               <Text
                 style={[
@@ -1077,7 +1225,7 @@ export default function HabitDetailScreen() {
                     styles.darkMuted,
                 ]}
               >
-                Checkpoint (days per trophy)
+                Checkpoint
               </Text>
 
               <TextInput
@@ -1382,13 +1530,39 @@ const styles = StyleSheet.create({
     width: '100%',
   },
 
+  tileDaily: {
+    width: '9.5%',
+    height: 42,
+    marginRight: 1,
+    marginBottom: 2,
+  },
+
+  tileWeekly: {
+    width: '15.8%',
+    height: 38,
+    marginRight: 1,
+    marginBottom: 2,
+  },
+
+  tileMonthly: {
+    width: '13.9%',
+    height: 42,
+    marginRight: 1,
+    marginBottom: 2,
+  },
+
+  tileAnnual: {
+    width: '19%',
+    height: 48,
+    marginRight: 1,
+    marginBottom: 2,
+  },
+
   tile: {
-    width: '10%',
-    aspectRatio: 1,
+    paddingHorizontal: 1,
     borderRadius: 6,
     alignItems: 'center',
     justifyContent: 'center',
-    transform: [{ scale: 0.9 }],
   },
 
   actionRow: {
@@ -1427,8 +1601,11 @@ const styles = StyleSheet.create({
 
   tileDay: {
     fontFamily: FONT,
-    fontSize: 12,
+    fontSize: 11,
     color: '#27241F',
+    includeFontPadding: false,
+    flexShrink: 0,
+    textAlign: 'center',
   },
 
   deleteBtn: {
@@ -1510,6 +1687,28 @@ const styles = StyleSheet.create({
     backgroundColor: '#1E1E1E',
     borderColor: '#363636',
     color: '#FFFFFF',
+  },
+
+  frequencyFormRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+
+  frequencyFormChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E2DFD9',
+    backgroundColor: '#FFF',
+  },
+
+  frequencyText: {
+    fontFamily: FONT_MED,
+    fontSize: 12,
+    color: '#77746E',
+    textAlign: 'center',
   },
 
   catRow: {
