@@ -11,9 +11,10 @@
     "backgroundColor": "#000000",
 
     "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.mysidekickapp",
-      "backgroundColor": "#000000",
+     "supportsTablet": true,
+     "bundleIdentifier": "com.mysidekickapp",
+     "buildNumber": "5",
+     "backgroundColor": "#000000",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }

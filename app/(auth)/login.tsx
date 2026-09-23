@@ -68,7 +68,7 @@ export default function LoginScreen() {
       <SafeAreaView style={styles.safe}>
         <View style={styles.loadingScreen}>
           <Image
-            source={require('@/assets/sidekick.png')}
+            source={require('../../assets/sidekick.png')}
             style={styles.loadingLogo}
             resizeMode="cover"
           />
