@@ -97,7 +97,7 @@ export default function LoginScreen() {
           <View style={styles.card}>
             <View style={styles.brand}>
               <Image
-                source={require('@/assets/sidekick.png')}
+                source={require('../../assets/sidekick.png')}
                 style={styles.logoImage}
                 resizeMode="cover"
               />
