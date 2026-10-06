@@ -13,7 +13,7 @@
     "ios": {
      "supportsTablet": true,
      "bundleIdentifier": "com.mysidekickapp",
-     "buildNumber": "5",
+     "buildNumber": "6",
      "backgroundColor": "#000000",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
@@ -57,7 +57,7 @@
     "expo-splash-screen",
   {
     "image": "./assets/sidekick-logo.png",
-    "imageWidth": 280,
+    "imageWidth": 200,
     "backgroundColor": "#000000"
   }
 ]

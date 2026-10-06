@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'expo-router';
 
 import {
   Modal,
@@ -14,7 +15,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
   Check,
+  CircleHelp,
   ChevronRight,
+  Crown,
   CircleUserRound,
   LogOut,
   Moon,
@@ -33,6 +36,8 @@ import {
 } from '@/components/AppProvider';
 
 import { useAuth } from '@/components/AuthProvider';
+import { configureRevenueCat } from '@/lib/revenuecat';
+import RevenueCatUI from 'react-native-purchases-ui';
 import PrivacyPolicy from '@/components/PrivacyPolicy';
 
 import { CurrencyPickerModal } from '@/components/CurrencyPickerModal';
@@ -546,11 +551,14 @@ const accentChoices: {
 type SettingKey =
   | 'account'
   | 'display'
+  | 'premium'
   | 'privacy'
+  | 'support'
   | 'reset'
   | null;
 
 export default function ProfileScreen() {
+  const router = useRouter();
   const {
     display_name,
     username,
@@ -569,7 +577,17 @@ export default function ProfileScreen() {
     sidekick_id,
   } = useApp();
 
-  const { signOut } = useAuth();
+  const { signOut, user } = useAuth();
+
+  useEffect(() => {
+    if (!user?.id) {
+      return;
+    }
+
+    configureRevenueCat(user.id).catch((error) => {
+      console.error('RevenueCat configuration failed:', error);
+    });
+  }, [user?.id]);
 
   const [editing, setEditing] = useState(false);
 
@@ -724,9 +742,19 @@ export default function ProfileScreen() {
       icon: Volume2,
     },
     {
+      key: 'premium',
+      label: 'My Sidekick Premium',
+      icon: Crown,
+    },
+    {
       key: 'privacy',
       label: 'Privacy Policy',
       icon: ShieldCheck,
+    },
+    {
+      key: 'support',
+      label: 'Support',
+      icon: CircleHelp,
     },
     {
       key: 'reset',
@@ -1182,11 +1210,31 @@ export default function ProfileScreen() {
             ) => (
               <Pressable
                 key={key}
-                onPress={() =>
-                  setOpenSetting(
-                    key
-                  )
-                }
+                onPress={async () => {
+                  if (key === 'premium') {
+                    try {
+                      if (user?.id) {
+                        await configureRevenueCat(user.id);
+                      }
+
+                      await RevenueCatUI.presentPaywall();
+                    } catch (error) {
+                      console.error(
+                        'RevenueCat paywall error:',
+                        error
+                      );
+                    }
+
+                    return;
+                  }
+
+                  if (key === 'support') {
+                    router.push('/support');
+                    return;
+                  }
+
+                  setOpenSetting(key);
+                }}
                 style={[
                   styles.settingRow,
                   {

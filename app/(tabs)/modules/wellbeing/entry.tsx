@@ -643,7 +643,7 @@ export default function WellbeingEntryScreen() {
         behavior={
           Platform.OS === 'ios'
             ? 'padding'
-            : undefined
+            : 'height'
         }
         keyboardVerticalOffset={0}
       >
@@ -845,6 +845,8 @@ export default function WellbeingEntryScreen() {
                       COLORS.muted
                     }
                     multiline
+                    scrollEnabled
+                    blurOnSubmit={false}
                     autoFocus={
                       entryId
                         ? true
@@ -876,55 +878,46 @@ export default function WellbeingEntryScreen() {
                   {saveMsg}
                 </Text>
               ) : null}
-
-              {/* Save button */}
-
-              {(isEditing || !entryId) && (
-                <Pressable
-                  onPress={onSave}
-                  disabled={
-                    saving || isFuture
-                  }
-                  style={({
-                    pressed,
-                  }) => [
-                    styles.saveBtn,
-                    {
-                      backgroundColor:
-                        accent,
-                    },
-                    (saving ||
-                      isFuture) &&
-                      styles.saveBtnDisabled,
-                    pressed &&
-                      styles.saveBtnPressed,
-                  ]}
-                >
-                  {saving ? (
-                    <ActivityIndicator
-                      size="small"
-                      color={onAccent}
-                    />
-                  ) : (
-                    <Text
-                      style={[
-                        styles.saveBtnText,
-                        {
-                          color:
-                            onAccent,
-                        },
-                      ]}
-                    >
-                      {entryId
-                        ? 'UPDATE ENTRY'
-                        : 'SAVE ENTRY'}
-                    </Text>
-                  )}
-                </Pressable>
-              )}
             </>
           )}
         </ScrollView>
+
+        {/* Save / Update button stays above keyboard */}
+
+        {(isEditing || !entryId) && (
+          <View style={styles.saveAction}>
+            <Pressable
+              onPress={onSave}
+              disabled={saving || isFuture}
+              style={({ pressed }) => [
+                styles.saveBtn,
+                { backgroundColor: accent },
+                (saving || isFuture) &&
+                  styles.saveBtnDisabled,
+                pressed &&
+                  styles.saveBtnPressed,
+              ]}
+            >
+              {saving ? (
+                <ActivityIndicator
+                  size="small"
+                  color={onAccent}
+                />
+              ) : (
+                <Text
+                  style={[
+                    styles.saveBtnText,
+                    { color: onAccent },
+                  ]}
+                >
+                  {entryId
+                    ? 'UPDATE ENTRY'
+                    : 'SAVE ENTRY'}
+                </Text>
+              )}
+            </Pressable>
+          </View>
+        )}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -1092,13 +1085,15 @@ function makeStyles(C: Palette) {
       lineHeight: 23,
       color: C.text,
       minHeight: 180,
+      maxHeight: 300,
       padding: 0,
     },
 
     editorLarge: {
       fontSize: 16,
       lineHeight: 26,
-      minHeight: 320,
+      minHeight: 220,
+      maxHeight: 360,
     },
 
     editorDisabled: {
@@ -1136,12 +1131,18 @@ function makeStyles(C: Palette) {
       textAlign: 'center',
     },
 
+    saveAction: {
+      paddingHorizontal: 16,
+      paddingTop: 10,
+      paddingBottom: 8,
+      backgroundColor: C.bg,
+    },
+
     saveBtn: {
       alignItems: 'center',
       justifyContent: 'center',
       paddingVertical: 15,
       borderRadius: 14,
-      marginTop: 18,
     },
 
     saveBtnDisabled: {

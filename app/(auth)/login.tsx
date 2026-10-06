@@ -56,7 +56,20 @@ export default function LoginScreen() {
     setSubmitting(false);
 
     if (result.error) {
-      setError(result.error);
+      const message = result.error.toLowerCase();
+
+      if (
+        message.includes('email not confirmed') ||
+        message.includes('email_not_confirmed') ||
+        message.includes('invalid login credentials')
+      ) {
+        setError(
+          'Your email has not been confirmed yet. Please check your email and confirm your account before signing in.',
+        );
+      } else {
+        setError(result.error);
+      }
+
       return;
     }
 
@@ -177,6 +190,16 @@ export default function LoginScreen() {
                     )}
                   </Pressable>
                 </View>
+              </View>
+
+              <View style={styles.forgotPasswordRow}>
+                <Link href="/forgot-password" asChild>
+                  <Pressable hitSlop={8}>
+                    <Text style={styles.forgotPasswordText}>
+                      Forgot password?
+                    </Text>
+                  </Pressable>
+                </Link>
               </View>
 
               <Pressable
@@ -334,6 +357,19 @@ const styles = StyleSheet.create({
     width: 28,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+
+  forgotPasswordRow: {
+    width: '100%',
+    alignItems: 'flex-end',
+    marginTop: -6,
+    marginBottom: 8,
+  },
+
+  forgotPasswordText: {
+    color: COLORS.text,
+    fontFamily: 'Poppins-SemiBold',
+    fontSize: 11.5,
   },
 
   primaryButton: {

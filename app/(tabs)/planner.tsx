@@ -20,6 +20,7 @@ import {
 } from 'react-native';
 
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
   MoreVertical,
@@ -138,15 +139,20 @@ const REPEAT_OPTIONS: {
   },
 ];
 
+// Planner uses the app's global color family.
+// Black, red, orange, mustard, green, blue, indigo, violet.
 const CARD_COLORS = [
-  '#4A90D9',
-  '#E8873E',
-  '#5BAE6F',
-  '#D94A5A',
-  '#9B6BD4',
-  '#3AA9B0',
-  '#666666',
+  '#000000',
+  '#E53935',
+  '#F57C00',
+  '#C9A227',
+  '#43A047',
+  '#1E88E5',
+  '#3949AB',
+  '#8E24AA',
 ];
+
+const TASK_COLORS_STORAGE_KEY = 'mysidekick_planner_task_colors';
 
 /* =========================================================
    HELPERS
@@ -258,7 +264,8 @@ const getTaskDurationMinutes = (
     return 60;
   }
 
-  return Math.max(0, end - start);
+  const duration = end - start;
+  return duration > 0 ? duration : duration < 0 ? duration + 1440 : 0;
 };
 
 /*
@@ -445,27 +452,99 @@ const getTaskIntervalsForDate = (
 
   /*
    * Regular non-recurring task.
+   *
+   * The timeline must represent the actual
+   * date + time span of the task. This means
+   * a task such as:
+   *
+   * 13 Sep 9 PM → 14 Sep 5 AM
+   *
+   * occupies 9 PM–midnight on the 13th and
+   * midnight–5 AM on the 14th.
+   *
+   * Multi-day tasks are similarly split at
+   * midnight so the block always covers the
+   * real amount of time on each calendar day.
    */
   if (
     task.repeat === 'none'
   ) {
     if (
+      dateIsBefore(
+        date,
+        task.start_date,
+      ) ||
+      dateIsAfter(
+        date,
+        task.end_date,
+      )
+    ) {
+      return segments;
+    }
+
+    if (
+      task.start_date ===
+      task.end_date
+    ) {
+      if (end > start) {
+        segments.push({
+          start,
+          end,
+        });
+      } else if (end < start) {
+        /*
+         * A same-date overnight value is not
+         * allowed by the form, but keep the
+         * timeline safe if one already exists.
+         */
+        segments.push({
+          start,
+          end: 1440,
+        });
+
+        if (end > 0) {
+          segments.push({
+            start: 0,
+            end,
+          });
+        }
+      }
+
+      return segments;
+    }
+
+    if (
       date === task.start_date
     ) {
-      if (end <= start) {
+      segments.push({
+        start,
+        end: 1440,
+      });
+
+      return segments;
+    }
+
+    if (
+      date === task.end_date
+    ) {
+      if (end > 0) {
         segments.push({
-          start,
-          end: end + 1440,
-        });
-      } else {
-        segments.push({
-          start,
+          start: 0,
           end,
         });
       }
 
       return segments;
     }
+
+    /*
+     * A date strictly between the start and
+     * end dates is occupied for the full day.
+     */
+    segments.push({
+      start: 0,
+      end: 1440,
+    });
 
     return segments;
   }
@@ -602,11 +681,16 @@ const getTaskCalendarDates = (
 };
 
 /*
- * Used to create a task color locally.
+ * Returns the saved task color. If a legacy task does not yet
+ * have a saved color, use a deterministic fallback based on its id.
  */
 const getTaskColor = (
   id: string,
+  overrides?: Record<string, string>,
 ) => {
+  if (overrides?.[id]) {
+    return overrides[id];
+  }
   let total = 0;
 
   for (
@@ -719,6 +803,11 @@ export default function PlannerScreen() {
   ] = useState(todayStr());
 
   const [
+    endDate,
+    setEndDate,
+  ] = useState(todayStr());
+
+  const [
     startTime,
     setStartTime,
   ] = useState('09:00');
@@ -741,11 +830,6 @@ export default function PlannerScreen() {
   ] = useState('1');
 
   const [
-    collaborator,
-    setCollaborator,
-  ] = useState('');
-
-  const [
     cardColor,
     setCardColor,
   ] = useState(
@@ -753,9 +837,46 @@ export default function PlannerScreen() {
   );
 
   const [
+    taskColors,
+    setTaskColors,
+  ] = useState<Record<string, string>>({});
+
+  const [
     saving,
     setSaving,
   ] = useState(false);
+
+  // Planner card colors are stored locally so the user's selected
+  // color survives refreshes/reloads instead of being regenerated
+  // from the task id.
+  useEffect(() => {
+    const loadSavedTaskColors = async () => {
+      try {
+        const stored = await AsyncStorage.getItem(
+          TASK_COLORS_STORAGE_KEY,
+        );
+
+        if (!stored) return;
+
+        const parsed = JSON.parse(stored);
+
+        if (
+          parsed &&
+          typeof parsed === 'object' &&
+          !Array.isArray(parsed)
+        ) {
+          setTaskColors(parsed as Record<string, string>);
+        }
+      } catch (err) {
+        console.log(
+          'PLANNER TASK COLORS LOAD ERROR:',
+          err,
+        );
+      }
+    };
+
+    loadSavedTaskColors();
+  }, []);
 
   /* =====================================================
      THEME
@@ -1038,11 +1159,11 @@ export default function PlannerScreen() {
     setSubtaskInputs(['']);
     setSubtaskInputIds([null]);
     setStartDate(selectedDate);
+    setEndDate(selectedDate);
     setStartTime('09:00');
     setEndTime('10:00');
     setRepeat('none');
     setRepeatInterval('1');
-    setCollaborator('');
     setCardColor(CARD_COLORS[0]);
     setEditingTaskId(null);
     setError(null);
@@ -1052,10 +1173,9 @@ export default function PlannerScreen() {
     (date?: string) => {
       resetTaskForm();
 
-      setStartDate(
-        date ??
-          selectedDate,
-      );
+      const taskDate = date ?? selectedDate;
+      setStartDate(taskDate);
+      setEndDate(taskDate);
 
       setModalOpen(true);
     };
@@ -1085,6 +1205,7 @@ export default function PlannerScreen() {
       );
 
       setStartDate(task.start_date);
+      setEndDate(task.end_date || task.start_date);
       setStartTime(
         task.start_time ?? '09:00',
       );
@@ -1097,11 +1218,8 @@ export default function PlannerScreen() {
           task.repeat_interval || 1,
         ),
       );
-      setCollaborator(
-        task.collaborator ?? '',
-      );
       setCardColor(
-        getTaskColor(task.id),
+        getTaskColor(task.id, taskColors),
       );
       setError(null);
       setModalOpen(true);
@@ -1170,18 +1288,36 @@ export default function PlannerScreen() {
           endTime,
         );
 
+      // The end date may be the same day or a later day, never earlier.
+      if (endDate < startDate) {
+        setError('End date cannot be before start date.');
+        return;
+      }
+
+      // On the same date, the end time must not be earlier than the start time.
+      // Overnight activities such as 9 PM → 5 AM are valid when the end date
+      // is the following day.
       if (
+        startDate === endDate &&
         startMinutes !== null &&
         endMinutes !== null &&
         endMinutes < startMinutes
       ) {
         setError(
-          'End time cannot be before start time.',
+          'End time cannot be before start time on the same date. For an overnight activity, set the end date to the next day.',
         );
         return;
       }
 
-      const endDate = startDate;
+      if (
+        startDate === endDate &&
+        startMinutes !== null &&
+        endMinutes !== null &&
+        endMinutes === startMinutes
+      ) {
+        setError('End time must be later than start time.');
+        return;
+      }
 
       const dbRepeat:
         | 'none'
@@ -1217,9 +1353,6 @@ export default function PlannerScreen() {
           startTime || null,
         end_time:
           endTime || null,
-        collaborator:
-          collaborator.trim() ||
-          null,
         repeat:
           dbRepeat,
         repeat_interval:
@@ -1333,6 +1466,28 @@ export default function PlannerScreen() {
           'The task was not returned after saving.',
         );
         return;
+      }
+
+      // Assign the selected color to THIS saved task immediately.
+      // Do not perform the storage write inside the React state updater.
+      // The updater must stay pure so the card color is applied reliably.
+      const updatedTaskColors = {
+        ...taskColors,
+        [taskRow.id]: cardColor,
+      };
+
+      setTaskColors(updatedTaskColors);
+
+      try {
+        await AsyncStorage.setItem(
+          TASK_COLORS_STORAGE_KEY,
+          JSON.stringify(updatedTaskColors),
+        );
+      } catch (err) {
+        console.log(
+          'PLANNER TASK COLOR SAVE ERROR:',
+          err,
+        );
       }
 
       const existingTask =
@@ -1590,12 +1745,13 @@ export default function PlannerScreen() {
       setTaskDesc('');
       setSubtaskInputs(['']);
       setSubtaskInputIds([null]);
+      setStartDate(selectedDate);
+      setEndDate(selectedDate);
       setStartTime('09:00');
       setEndTime('10:00');
       setRepeat('none');
       setRepeatInterval('1');
-      setCollaborator('');
-      setCardColor(
+        setCardColor(
         CARD_COLORS[0],
       );
     } catch (err) {
@@ -1877,6 +2033,30 @@ export default function PlannerScreen() {
           ),
       );
 
+      setTaskColors((current) => {
+        if (!current[task.id]) {
+          return current;
+        }
+
+        const updated = {
+          ...current,
+        };
+
+        delete updated[task.id];
+
+        AsyncStorage.setItem(
+          TASK_COLORS_STORAGE_KEY,
+          JSON.stringify(updated),
+        ).catch((err) =>
+          console.log(
+            'PLANNER TASK COLOR DELETE ERROR:',
+            err,
+          ),
+        );
+
+        return updated;
+      });
+
       setSelectedTaskId(
         (current) =>
           current === task.id
@@ -2058,8 +2238,8 @@ export default function PlannerScreen() {
                 >
                   {mode ===
                   'calendar'
-                    ? 'Calendar'
-                    : 'Task'}
+                    ? 'Calendar view'
+                    : 'Task view'}
                 </Text>
               </Pressable>
             ),
@@ -2148,6 +2328,7 @@ export default function PlannerScreen() {
               toggleSubtask
             }
             C={C}
+            taskColors={taskColors}
           />
         ) : (
           <TaskListView
@@ -2178,6 +2359,7 @@ export default function PlannerScreen() {
               deleteTask
             }
             C={C}
+            taskColors={taskColors}
           />
         )}
       </ScrollView>
@@ -2591,9 +2773,13 @@ export default function PlannerScreen() {
                 value={
                   startDate
                 }
-                onChange={
-                  setStartDate
-                }
+                onChange={(nextStartDate) => {
+                  setStartDate(nextStartDate);
+                  if (endDate < nextStartDate) {
+                    setEndDate(nextStartDate);
+                  }
+                  setError(null);
+                }}
                 accent={
                   accentForeground
                 }
@@ -2603,6 +2789,32 @@ export default function PlannerScreen() {
                 isDark={
                   isDark
                 }
+              />
+
+              {/* END DATE */}
+
+              <Text
+                style={[
+                  styles.label,
+                  { color: C.muted },
+                ]}
+              >
+                End date
+              </Text>
+
+              <DatePickerInput
+                value={endDate}
+                onChange={(nextEndDate) => {
+                  if (nextEndDate < startDate) {
+                    setError('End date cannot be before start date.');
+                    return;
+                  }
+                  setError(null);
+                  setEndDate(nextEndDate);
+                }}
+                accent={accentForeground}
+                onAccent={onAccent}
+                isDark={isDark}
               />
 
               {/* TIME */}
@@ -2622,19 +2834,16 @@ export default function PlannerScreen() {
                       startTime
                     }
                     onChange={(nextStartTime) => {
-                      const nextStartMinutes =
-                        timeToMinutes(nextStartTime);
-                      const currentEndMinutes =
-                        timeToMinutes(endTime);
-
                       setStartTime(nextStartTime);
-
                       if (
-                        nextStartMinutes !== null &&
-                        currentEndMinutes !== null &&
-                        currentEndMinutes < nextStartMinutes
+                        endDate === startDate &&
+                        timeToMinutes(endTime) !== null &&
+                        timeToMinutes(nextStartTime) !== null &&
+                        timeToMinutes(endTime)! < timeToMinutes(nextStartTime)!
                       ) {
-                        setEndTime(nextStartTime);
+                        setError('End time cannot be before start time on the same date.');
+                      } else {
+                        setError(null);
                       }
                     }}
                     label="Start time"
@@ -2660,19 +2869,16 @@ export default function PlannerScreen() {
                       endTime
                     }
                     onChange={(nextEndTime) => {
-                      const nextEndMinutes =
-                        timeToMinutes(nextEndTime);
-                      const currentStartMinutes =
-                        timeToMinutes(startTime);
+                      const nextEndMinutes = timeToMinutes(nextEndTime);
+                      const currentStartMinutes = timeToMinutes(startTime);
 
                       if (
+                        endDate === startDate &&
                         nextEndMinutes !== null &&
                         currentStartMinutes !== null &&
                         nextEndMinutes < currentStartMinutes
                       ) {
-                        setError(
-                          'End time cannot be before start time.',
-                        );
+                        setError('End time cannot be before start time on the same date. For an overnight activity, set the end date to the next day.');
                         return;
                       }
 
@@ -2827,39 +3033,6 @@ export default function PlannerScreen() {
                 </View>
               )}
 
-              {/* COLLABORATOR */}
-
-              <Text
-                style={[
-                  styles.label,
-                  {
-                    color:
-                      C.muted,
-                  },
-                ]}
-              >
-                Collaborator
-              </Text>
-
-              <CollaboratorSearch
-                value={
-                  collaborator
-                }
-                onChange={
-                  setCollaborator
-                }
-                accent={
-                  accentForeground
-                }
-                onAccent={
-                  onAccent
-                }
-                isDark={
-                  isDark
-                }
-                C={C}
-              />
-
               {/* CARD COLOR */}
 
               <Text
@@ -2963,6 +3136,7 @@ type TimelineTaskLayout = {
   start: number;
   end: number;
   column: number;
+  columnCount: number;
 };
 
 function buildTimelineLayouts(
@@ -2976,30 +3150,21 @@ function buildTimelineLayouts(
     order: number;
   }[] = [];
 
-  tasks.forEach(
-    (task, order) => {
-      const intervals =
-        getTaskIntervalsForDate(
-          task,
-          selectedDate,
-        );
+  tasks.forEach((task, order) => {
+    const intervals = getTaskIntervalsForDate(
+      task,
+      selectedDate,
+    );
 
-      intervals.forEach(
-        (interval) => {
-          items.push({
-            task,
-            start:
-              interval.start,
-            end: Math.min(
-              interval.end,
-              1440,
-            ),
-            order,
-          });
-        },
-      );
-    },
-  );
+    intervals.forEach((interval) => {
+      items.push({
+        task,
+        start: interval.start,
+        end: Math.min(interval.end, 1440),
+        order,
+      });
+    });
+  });
 
   items.sort(
     (a, b) =>
@@ -3007,49 +3172,109 @@ function buildTimelineLayouts(
       a.order - b.order,
   );
 
-  const columnsEnd: number[] =
-    [];
+  /*
+   * Build overlap groups. Every task that shares time directly
+   * or through another overlapping task belongs to the same group.
+   * The group size determines the card width.
+   */
+  const groups: {
+    taskIds: Set<string>;
+    items: typeof items;
+  }[] = [];
 
-  return items.map(
-    (item) => {
-      let column = 0;
+  items.forEach((item) => {
+    const overlappingGroups = groups.filter((group) =>
+      group.items.some(
+        (other) =>
+          other.start < item.end &&
+          other.end > item.start,
+      ),
+    );
 
-      while (
-        column <
-        columnsEnd.length
-      ) {
-        if (
-          item.start >=
-          columnsEnd[
-            column
-          ]
-        ) {
-          break;
-        }
+    if (overlappingGroups.length === 0) {
+      groups.push({
+        taskIds: new Set([item.task.id]),
+        items: [item],
+      });
+      return;
+    }
 
-        column += 1;
+    const merged = {
+      taskIds: new Set<string>([item.task.id]),
+      items: [item],
+    };
+
+    overlappingGroups.forEach((group) => {
+      group.taskIds.forEach((id) =>
+        merged.taskIds.add(id),
+      );
+      merged.items.push(...group.items);
+    });
+
+    for (let i = groups.length - 1; i >= 0; i -= 1) {
+      if (overlappingGroups.includes(groups[i])) {
+        groups.splice(i, 1);
       }
+    }
 
-      if (
-        column >=
-        columnsEnd.length
-      ) {
-        columnsEnd.push(
-          item.end,
-        );
-      } else {
-        columnsEnd[
-          column
-        ] = item.end;
-      }
+    groups.push(merged);
+  });
 
-      return {
+  const assigned: TimelineTaskLayout[] = [];
+
+  groups.forEach((group) => {
+    const taskCount = Math.max(
+      1,
+      group.taskIds.size,
+    );
+
+    const taskColumns = new Map<string, number>();
+    let nextColumn = 0;
+
+    const orderedTasks = Array.from(
+      new Set(
+        group.items.map(
+          (item) => item.task.id,
+        ),
+      ),
+    ).sort((a, b) => {
+      const aItem = group.items.find(
+        (item) => item.task.id === a,
+      );
+      const bItem = group.items.find(
+        (item) => item.task.id === b,
+      );
+
+      return (
+        (aItem?.start ?? 0) -
+        (bItem?.start ?? 0)
+      );
+    });
+
+    orderedTasks.forEach((taskId) => {
+      taskColumns.set(
+        taskId,
+        nextColumn,
+      );
+      nextColumn += 1;
+    });
+
+    group.items.forEach((item) => {
+      assigned.push({
         task: item.task,
         start: item.start,
         end: item.end,
-        column,
-      };
-    },
+        column:
+          taskColumns.get(item.task.id) ?? 0,
+        columnCount: taskCount,
+      });
+    });
+  });
+
+  return assigned.sort(
+    (a, b) =>
+      a.start - b.start ||
+      a.task.id.localeCompare(b.task.id),
   );
 }
 
@@ -3061,6 +3286,7 @@ function TimelineView({
   onSelectTask,
   onToggleSub,
   C,
+  taskColors,
 }: {
   tasks: PlannerTask[];
   selectedDate: string;
@@ -3074,6 +3300,7 @@ function TimelineView({
     subtaskId: string,
   ) => void;
   C: Palette;
+  taskColors: Record<string, string>;
 }) {
   const timedTasks =
     tasks.filter(
@@ -3165,6 +3392,7 @@ function TimelineView({
                 const color =
                   getTaskColor(
                     layout.task.id,
+                    taskColors,
                   );
 
                 const isSelected =
@@ -3189,16 +3417,18 @@ function TimelineView({
                       44,
                   );
 
-                const horizontalOffset =
-                  layout.column *
-                  22;
+                // The blocks layer begins after the hour labels, so each
+                // overlapping task can use an equal percentage of the
+                // available timeline width.
+                const columnWidth =
+                  100 /
+                  layout.columnCount;
 
                 const blockLeft =
-                  58 +
-                  horizontalOffset;
+                  `${(layout.column * 100) / layout.columnCount}%` as `${number}%`;
 
-                const blockRight =
-                  8;
+                const blockWidth =
+                  `${100 / layout.columnCount}%` as `${number}%`;
 
                 const completedCount =
                   layout.task.subtasks.filter(
@@ -3218,18 +3448,40 @@ function TimelineView({
                       styles.timelineBlock,
                       {
                         /*
-                         * These values are
-                         * deliberately identical
+                         * These values are deliberately identical
                          * regardless of selection.
+                         *
+                         * When cards share time, remove the
+                         * touching-side corner radii so the cards
+                         * meet edge-to-edge with no visible gap.
                          */
                         top:
                           blockTop,
                         height:
                           blockHeight,
                         left:
-                          blockLeft,
-                        right:
-                          blockRight,
+                          blockLeft as `${number}%`,
+                        width:
+                          blockWidth as `${number}%`,
+
+                        borderTopLeftRadius:
+                          layout.column === 0
+                            ? 8
+                            : 0,
+                        borderBottomLeftRadius:
+                          layout.column === 0
+                            ? 8
+                            : 0,
+                        borderTopRightRadius:
+                          layout.column ===
+                          layout.columnCount - 1
+                            ? 8
+                            : 0,
+                        borderBottomRightRadius:
+                          layout.column ===
+                          layout.columnCount - 1
+                            ? 8
+                            : 0,
 
                         backgroundColor:
                           layout.task.completed
@@ -3395,6 +3647,7 @@ function TimelineView({
                 const color =
                   getTaskColor(
                     task.id,
+                    taskColors,
                   );
 
                 const isSelected =
@@ -3471,8 +3724,7 @@ function TimelineView({
                             },
                           ]}
                         >
-                          {task.collaborator ||
-                            'No collaborator'}
+                          {task.start_date}
                         </Text>
                       </View>
                     </Pressable>
@@ -3569,6 +3821,7 @@ function TaskListView({
   onEditTask,
   onDelete,
   C,
+  taskColors,
 }: {
   tasks: PlannerTask[];
   isDark: boolean;
@@ -3590,6 +3843,7 @@ function TaskListView({
     task: PlannerTask,
   ) => void;
   C: Palette;
+  taskColors: Record<string, string>;
 }) {
   if (!tasks.length) {
     return (
@@ -3620,11 +3874,24 @@ function TaskListView({
         styles.taskListContainer
       }
     >
-      {tasks.map(
+      {[...tasks]
+        .sort((a, b) => {
+          const aTime = timeToMinutes(a.start_time);
+          const bTime = timeToMinutes(b.start_time);
+
+          // Tasks with a start time are arranged chronologically.
+          // Untimed tasks remain after timed tasks.
+          if (aTime === null && bTime === null) return 0;
+          if (aTime === null) return 1;
+          if (bTime === null) return -1;
+          return aTime - bTime;
+        })
+        .map(
         (task) => {
           const color =
             getTaskColor(
               task.id,
+              taskColors,
             );
 
           const isSelected =
@@ -3761,9 +4028,6 @@ function TaskListView({
                           )}`
                         : ''}
 
-                      {task.collaborator
-                        ? `  ·  ${task.collaborator}`
-                        : ''}
                     </Text>
 
                     {task.repeat !==
@@ -3950,275 +4214,6 @@ function TaskListView({
 }
 
 /* =========================================================
-   COLLABORATOR SEARCH
-========================================================= */
-
-function CollaboratorSearch({
-  value,
-  onChange,
-  accent,
-  onAccent,
-  isDark,
-  C,
-}: {
-  value: string;
-  onChange: (
-    value: string,
-  ) => void;
-  accent: string;
-  onAccent: string;
-  isDark: boolean;
-  C: Palette;
-}) {
-  const [
-    query,
-    setQuery,
-  ] = useState(value);
-
-  const [
-    results,
-    setResults,
-  ] = useState<
-    {
-      user_id: string;
-      display_name: string;
-      username: string;
-    }[]
-  >([]);
-
-  const [
-    searching,
-    setSearching,
-  ] = useState(false);
-
-  const [
-    showResults,
-    setShowResults,
-  ] = useState(false);
-
-  const search = async (
-    text: string,
-  ) => {
-    setQuery(text);
-    onChange(text);
-
-    if (!text.trim()) {
-      setResults([]);
-      setShowResults(
-        false,
-      );
-      return;
-    }
-
-    setShowResults(true);
-    setSearching(true);
-
-    try {
-      const {
-        data,
-        error,
-      } = await supabase
-        .from(
-          'social_profiles',
-        )
-        .select(
-          'user_id, display_name, username',
-        )
-        .ilike(
-          'display_name',
-          `%${text.trim()}%`,
-        )
-        .limit(5);
-
-      if (error) {
-        console.log(
-          'COLLABORATOR SEARCH ERROR:',
-          error,
-        );
-
-        setResults([]);
-      } else {
-        setResults(
-          (data ??
-            []) as {
-            user_id: string;
-            display_name: string;
-            username: string;
-          }[],
-        );
-      }
-    } finally {
-      setSearching(false);
-    }
-  };
-
-  return (
-    <View>
-      <TextInput
-        value={query}
-        onChangeText={
-          search
-        }
-        placeholder="Search for users..."
-        placeholderTextColor={
-          C.muted
-        }
-        style={[
-          styles.input,
-          {
-            backgroundColor:
-              C.input,
-            borderColor:
-              C.inputBorder,
-            color: C.text,
-          },
-        ]}
-        onFocus={() => {
-          if (query.trim()) {
-            setShowResults(
-              true,
-            );
-          }
-        }}
-      />
-
-      {showResults && (
-        <View
-          style={[
-            styles.collabResults,
-            {
-              backgroundColor:
-                C.card,
-              borderColor:
-                C.border,
-            },
-          ]}
-        >
-          {searching && (
-            <Text
-              style={[
-                styles.collabHint,
-                {
-                  color:
-                    C.muted,
-                },
-              ]}
-            >
-              Searching...
-            </Text>
-          )}
-
-          {!searching &&
-            results.length ===
-              0 &&
-            query.trim() && (
-              <Text
-                style={[
-                  styles.collabHint,
-                  {
-                    color:
-                      C.muted,
-                  },
-                ]}
-              >
-                No users found.
-              </Text>
-            )}
-
-          {results.map(
-            (user) => (
-              <Pressable
-                key={
-                  user.user_id
-                }
-                onPress={() => {
-                  onChange(
-                    user.display_name,
-                  );
-
-                  setQuery(
-                    user.display_name,
-                  );
-
-                  setShowResults(
-                    false,
-                  );
-                }}
-                style={[
-                  styles.collabRow,
-                  {
-                    borderBottomColor:
-                      C.divider,
-                  },
-                ]}
-              >
-                <View
-                  style={[
-                    styles.collabAvatar,
-                    {
-                      backgroundColor:
-                        accent,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.collabAvatarText,
-                      {
-                        color:
-                          onAccent,
-                      },
-                    ]}
-                  >
-                    {user.display_name
-                      .slice(
-                        0,
-                        1,
-                      )
-                      .toUpperCase()}
-                  </Text>
-                </View>
-
-                <View>
-                  <Text
-                    style={[
-                      styles.collabName,
-                      {
-                        color:
-                          C.text,
-                      },
-                    ]}
-                  >
-                    {
-                      user.display_name
-                    }
-                  </Text>
-
-                  <Text
-                    style={[
-                      styles.collabUsername,
-                      {
-                        color:
-                          C.muted,
-                      },
-                    ]}
-                  >
-                    @
-                    {
-                      user.username
-                    }
-                  </Text>
-                </View>
-              </Pressable>
-            ),
-          )}
-        </View>
-      )}
-    </View>
-  );
-}
-
-/* =========================================================
    STYLES
 ========================================================= */
 
@@ -4372,13 +4367,14 @@ const styles =
     timelineBlocksLayer: {
       position: 'absolute',
       top: 0,
-      left: 0,
-      right: 0,
+      left: 58,
+      right: 8,
       bottom: 0,
     },
 
     timelineBlock: {
       position: 'absolute',
+      margin: 0,
       borderRadius: 8,
       paddingHorizontal: 8,
       paddingVertical: 5,

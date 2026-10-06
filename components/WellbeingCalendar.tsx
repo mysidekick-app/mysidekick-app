@@ -14,17 +14,27 @@ type WellbeingCalendarProps = {
   dotColor?: string;
 };
 
-const DAY_LABELS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+const DAY_LABELS = [
+  'SUN',
+  'MON',
+  'TUE',
+  'WED',
+  'THU',
+  'FRI',
+  'SAT',
+];
 
 export const formatDate = (date: Date) => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
+
   return `${year}-${month}-${day}`;
 };
 
 export const parseDate = (date: string) => {
   const [year, month, day] = date.split('-').map(Number);
+
   return new Date(year, month - 1, day);
 };
 
@@ -43,7 +53,12 @@ export function WellbeingCalendar({
 
   const [viewMonth, setViewMonth] = useState(() => {
     const d = parseDate(selectedDate);
-    return new Date(d.getFullYear(), d.getMonth(), 1);
+
+    return new Date(
+      d.getFullYear(),
+      d.getMonth(),
+      1,
+    );
   });
 
   const [weekOffset, setWeekOffset] = useState(0);
@@ -58,41 +73,97 @@ export function WellbeingCalendar({
 
   const week = useMemo(() => {
     const start = new Date(selected);
+
     start.setDate(
-      selected.getDate() - selected.getDay() + weekOffset * 7
+      selected.getDate() -
+        selected.getDay() +
+        weekOffset * 7,
     );
 
-    return Array.from({ length: 7 }, (_, index) => {
-      const date = new Date(start);
-      date.setDate(start.getDate() + index);
-      return date;
-    });
+    return Array.from(
+      { length: 7 },
+      (_, index) => {
+        const date = new Date(start);
+
+        date.setDate(
+          start.getDate() + index,
+        );
+
+        return date;
+      },
+    );
   }, [selectedDate, weekOffset]);
 
-  const monthDays = useMemo(() => {
+  /*
+   * Build the month as explicit 7-day rows.
+   *
+   * Each week is:
+   *
+   * SUN | MON | TUE | WED | THU | FRI | SAT
+   *
+   * There is deliberately NO flexWrap involved.
+   */
+  const monthWeeks = useMemo(() => {
     const year = viewMonth.getFullYear();
     const month = viewMonth.getMonth();
 
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
+    const firstDay = new Date(
+      year,
+      month,
+      1,
+    );
 
-    const startWeekday = firstDay.getDay();
+    const lastDay = new Date(
+      year,
+      month + 1,
+      0,
+    );
 
-    const days: (Date | null)[] = [];
+    const startWeekday =
+      firstDay.getDay();
 
-    for (let i = 0; i < startWeekday; i++) {
-      days.push(null);
+    const cells: (Date | null)[] = [];
+
+    // Empty cells before the first day.
+    for (
+      let i = 0;
+      i < startWeekday;
+      i++
+    ) {
+      cells.push(null);
     }
 
-    for (let d = 1; d <= lastDay.getDate(); d++) {
-      days.push(new Date(year, month, d));
+    // Days in the month.
+    for (
+      let d = 1;
+      d <= lastDay.getDate();
+      d++
+    ) {
+      cells.push(
+        new Date(year, month, d),
+      );
     }
 
-    while (days.length % 7 !== 0) {
-      days.push(null);
+    // Fill the final week.
+    while (cells.length % 7 !== 0) {
+      cells.push(null);
     }
 
-    return days;
+    // Turn the flat array into explicit
+    // rows of exactly 7 cells.
+    const rows: (Date | null)[][] = [];
+
+    for (
+      let i = 0;
+      i < cells.length;
+      i += 7
+    ) {
+      rows.push(
+        cells.slice(i, i + 7),
+      );
+    }
+
+    return rows;
   }, [viewMonth]);
 
   const styles = makeStyles(isDark);
@@ -106,18 +177,24 @@ export function WellbeingCalendar({
         new Date(
           current.getFullYear(),
           current.getMonth() + amount,
-          1
-        )
+          1,
+        ),
     );
   };
 
   const shiftWeek = (amount: number) => {
-    setWeekOffset((value) => value + amount);
+    setWeekOffset(
+      (value) => value + amount,
+    );
   };
 
   const goToday = () => {
     setViewMonth(
-      new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+      new Date(
+        new Date().getFullYear(),
+        new Date().getMonth(),
+        1,
+      ),
     );
 
     setWeekOffset(0);
@@ -127,33 +204,58 @@ export function WellbeingCalendar({
   return (
     <View style={styles.wrapper}>
       <Pressable
-        onPress={() => setMonthView((value) => !value)}
+        onPress={() =>
+          setMonthView(
+            (value) => !value,
+          )
+        }
         style={styles.calendarHeader}
       >
         <View>
-          <Text style={styles.calendarEyebrow}>DATE</Text>
+          <Text
+            style={styles.calendarEyebrow}
+          >
+            DATE
+          </Text>
 
-          <Text style={[styles.calendarTitle, { color: isDark ? '#FFFFFF' : accent }]}>
+          <Text
+            style={[
+              styles.calendarTitle,
+              {
+                color: isDark
+                  ? '#FFFFFF'
+                  : accent,
+              },
+            ]}
+          >
             {monthLabel}
           </Text>
         </View>
 
         <View style={styles.headerRight}>
           <Pressable
-            onPress={() => setMonthView((value) => !value)}
+            onPress={() =>
+              setMonthView(
+                (value) => !value,
+              )
+            }
             style={styles.viewToggle}
             hitSlop={8}
           >
             <Text
-  style={[
-    styles.viewToggleText,
-    {
-      color: isDark ? '#FFFFFF' : accent,
-    },
-  ]}
->
-  {monthView ? 'WEEK' : 'MONTH'}
-</Text>
+              style={[
+                styles.viewToggleText,
+                {
+                  color: isDark
+                    ? '#FFFFFF'
+                    : accent,
+                },
+              ]}
+            >
+              {monthView
+                ? 'WEEK'
+                : 'MONTH'}
+            </Text>
           </Pressable>
         </View>
       </Pressable>
@@ -162,21 +264,34 @@ export function WellbeingCalendar({
         <View style={styles.monthContainer}>
           <View style={styles.navRow}>
             <Pressable
-              onPress={() => shiftMonth(-1)}
+              onPress={() =>
+                shiftMonth(-1)
+              }
               style={styles.navBtn}
               hitSlop={12}
             >
               <ChevronLeft
-                color={isDark ? '#FFFFFF' : '#27241F'}
+                color={
+                  isDark
+                    ? '#FFFFFF'
+                    : '#27241F'
+                }
                 size={20}
               />
             </Pressable>
 
-            <Pressable onPress={goToday} hitSlop={8}>
+            <Pressable
+              onPress={goToday}
+              hitSlop={8}
+            >
               <Text
                 style={[
                   styles.todayLink,
-                  { color: isDark ? '#FFFFFF' : accent },
+                  {
+                    color: isDark
+                      ? '#FFFFFF'
+                      : accent,
+                  },
                 ]}
               >
                 Today
@@ -184,125 +299,206 @@ export function WellbeingCalendar({
             </Pressable>
 
             <Pressable
-              onPress={() => shiftMonth(1)}
+              onPress={() =>
+                shiftMonth(1)
+              }
               style={styles.navBtn}
               hitSlop={12}
             >
               <ChevronRight
-                color={isDark ? '#FFFFFF' : '#27241F'}
+                color={
+                  isDark
+                    ? '#FFFFFF'
+                    : '#27241F'
+                }
                 size={20}
               />
             </Pressable>
           </View>
 
-          {/* Month weekday header */}
-          <View style={styles.monthGrid}>
+          {/* =========================
+              MONTH WEEKDAY HEADER
+             ========================= */}
+
+          <View style={styles.monthWeekRow}>
             {DAY_LABELS.map((day) => (
               <View
                 key={day}
                 style={styles.monthColumn}
               >
-                <Text style={styles.monthDayLabel}>
+                <Text
+                  style={styles.monthDayLabel}
+                >
                   {day}
                 </Text>
               </View>
             ))}
+          </View>
 
-            {/* Month dates */}
-            {monthDays.map((date, index) => {
-              if (!date) {
-                return (
-                  <View
-                    key={`empty-${index}`}
-                    style={styles.monthColumn}
-                  >
-                    <View style={styles.monthDayEmpty} />
-                  </View>
-                );
-              }
+          {/* =========================
+              MONTH DATES
 
-              const value = formatDate(date);
-              const isSelected = value === selectedDate;
-              const isToday = value === today;
-              const isFuture = value > today;
-              const hasDot = hasEntry(value);
-              const dotBg = isDark ? '#FFFFFF' : (dotColor ?? accent);
+              Each row contains exactly
+              7 columns.
 
-              return (
+              No flexWrap.
+             ========================= */}
+
+          <View
+            style={styles.monthRows}
+          >
+            {monthWeeks.map(
+              (weekRow, weekIndex) => (
                 <View
-                  key={value}
-                  style={styles.monthColumn}
+                  key={`month-week-${weekIndex}`}
+                  style={
+                    styles.monthWeekRow
+                  }
                 >
-                  <Pressable
-                    onPress={() =>
-                      (allowFuture || !isFuture) &&
-                      onSelectDate(value)
-                    }
-                    disabled={!allowFuture && isFuture}
-                    style={[
-                      styles.monthDay,
-                      isSelected && {
-                        backgroundColor: accent,
-                      },
-                      !allowFuture &&
-                        isFuture &&
-                        !isSelected &&
-                        styles.monthDayFuture,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.monthDayNumber,
-                        isSelected &&
-                          styles.selectedText,
-                        !allowFuture &&
-                          isFuture &&
-                          !isSelected &&
-                          styles.futureText,
-                        isToday &&
-                          !isSelected && {
-                            color: accent,
-                          },
-                      ]}
-                    >
-                      {date.getDate()}
-                    </Text>
+                  {weekRow.map(
+                    (date, dayIndex) => {
+                      if (!date) {
+                        return (
+                          <View
+                            key={`empty-${weekIndex}-${dayIndex}`}
+                            style={
+                              styles.monthColumn
+                            }
+                          >
+                            <View
+                              style={
+                                styles.monthDayEmpty
+                              }
+                            />
+                          </View>
+                        );
+                      }
 
-                    {hasDot && !isSelected && (
-                      <View
-                        style={[
-                          styles.entryDot,
-                          {
-                            backgroundColor: dotBg,
-                          },
-                        ]}
-                      />
-                    )}
-                  </Pressable>
+                      const value =
+                        formatDate(date);
+
+                      const isSelected =
+                        value ===
+                        selectedDate;
+
+                      const isToday =
+                        value === today;
+
+                      const isFuture =
+                        value > today;
+
+                      const hasDot =
+                        hasEntry(value);
+
+                      const dotBg = isDark
+                        ? '#FFFFFF'
+                        : (dotColor ??
+                          accent);
+
+                      return (
+                        <View
+                          key={value}
+                          style={
+                            styles.monthColumn
+                          }
+                        >
+                          <Pressable
+                            onPress={() =>
+                              (allowFuture ||
+                                !isFuture) &&
+                              onSelectDate(
+                                value,
+                              )
+                            }
+                            disabled={
+                              !allowFuture &&
+                              isFuture
+                            }
+                            style={[
+                              styles.monthDay,
+                              isSelected && {
+                                backgroundColor:
+                                  accent,
+                              },
+                              !allowFuture &&
+                                isFuture &&
+                                !isSelected &&
+                                styles.monthDayFuture,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.monthDayNumber,
+                                isSelected &&
+                                  styles.selectedText,
+                                !allowFuture &&
+                                  isFuture &&
+                                  !isSelected &&
+                                  styles.futureText,
+                                isToday &&
+                                  !isSelected && {
+                                    color:
+                                      accent,
+                                  },
+                              ]}
+                            >
+                              {date.getDate()}
+                            </Text>
+
+                            {hasDot &&
+                              !isSelected && (
+                                <View
+                                  style={[
+                                    styles.entryDot,
+                                    {
+                                      backgroundColor:
+                                        dotBg,
+                                    },
+                                  ]}
+                                />
+                              )}
+                          </Pressable>
+                        </View>
+                      );
+                    },
+                  )}
                 </View>
-              );
-            })}
+              ),
+            )}
           </View>
         </View>
       ) : (
         <View>
           <View style={styles.navRow}>
             <Pressable
-              onPress={() => shiftWeek(-1)}
+              onPress={() =>
+                shiftWeek(-1)
+              }
               style={styles.navBtn}
               hitSlop={12}
             >
               <ChevronLeft
-                color={isDark ? '#FFFFFF' : '#27241F'}
+                color={
+                  isDark
+                    ? '#FFFFFF'
+                    : '#27241F'
+                }
                 size={20}
               />
             </Pressable>
 
-            <Pressable onPress={goToday} hitSlop={8}>
+            <Pressable
+              onPress={goToday}
+              hitSlop={8}
+            >
               <Text
                 style={[
                   styles.todayLink,
-                  { color: isDark ? '#FFFFFF' : accent },
+                  {
+                    color: isDark
+                      ? '#FFFFFF'
+                      : accent,
+                  },
                 ]}
               >
                 Today
@@ -310,90 +506,118 @@ export function WellbeingCalendar({
             </Pressable>
 
             <Pressable
-              onPress={() => shiftWeek(1)}
+              onPress={() =>
+                shiftWeek(1)
+              }
               style={styles.navBtn}
               hitSlop={12}
             >
               <ChevronRight
-                color={isDark ? '#FFFFFF' : '#27241F'}
+                color={
+                  isDark
+                    ? '#FFFFFF'
+                    : '#27241F'
+                }
                 size={20}
               />
             </Pressable>
           </View>
 
           <View style={styles.weekRow}>
-            {week.map((date, index) => {
-              const value = formatDate(date);
-              const isSelected = value === selectedDate;
-              const isToday = value === today;
-              const isFuture = value > today;
-              const hasDot = hasEntry(value);
-              const dotBg = isDark ? '#FFFFFF' : (dotColor ?? accent);
+            {week.map(
+              (date, index) => {
+                const value =
+                  formatDate(date);
 
-              return (
-                <Pressable
-                  key={value}
-                  onPress={() =>
-                    (allowFuture || !isFuture) &&
-                    onSelectDate(value)
-                  }
-                  disabled={!allowFuture && isFuture}
-                  style={[
-                    styles.day,
-                    isSelected && {
-                      backgroundColor: accent,
-                    },
-                    !allowFuture &&
-                      isFuture &&
-                      !isSelected &&
-                      styles.dayFuture,
-                  ]}
-                >
-                  <Text
+                const isSelected =
+                  value ===
+                  selectedDate;
+
+                const isToday =
+                  value === today;
+
+                const isFuture =
+                  value > today;
+
+                const hasDot =
+                  hasEntry(value);
+
+                const dotBg = isDark
+                  ? '#FFFFFF'
+                  : (dotColor ?? accent);
+
+                return (
+                  <Pressable
+                    key={value}
+                    onPress={() =>
+                      (allowFuture ||
+                        !isFuture) &&
+                      onSelectDate(value)
+                    }
+                    disabled={
+                      !allowFuture &&
+                      isFuture
+                    }
                     style={[
-                      styles.dayLabel,
-                      isSelected &&
-                        styles.selectedText,
+                      styles.day,
+                      isSelected && {
+                        backgroundColor:
+                          accent,
+                      },
                       !allowFuture &&
                         isFuture &&
                         !isSelected &&
-                        styles.futureText,
+                        styles.dayFuture,
                     ]}
                   >
-                    {DAY_LABELS[index]}
-                  </Text>
-
-                  <Text
-                    style={[
-                      styles.dayNumber,
-                      isSelected &&
-                        styles.selectedText,
-                      isToday &&
-                        !isSelected && {
-                          color: accent,
-                        },
-                      !allowFuture &&
-                        isFuture &&
-                        !isSelected &&
-                        styles.futureText,
-                    ]}
-                  >
-                    {date.getDate()}
-                  </Text>
-
-                  {hasDot && !isSelected && (
-                    <View
+                    <Text
                       style={[
-                        styles.entryDot,
-                        {
-                          backgroundColor: dotBg,
-                        },
+                        styles.dayLabel,
+                        isSelected &&
+                          styles.selectedText,
+                        !allowFuture &&
+                          isFuture &&
+                          !isSelected &&
+                          styles.futureText,
                       ]}
-                    />
-                  )}
-                </Pressable>
-              );
-            })}
+                    >
+                      {DAY_LABELS[index]}
+                    </Text>
+
+                    <Text
+                      style={[
+                        styles.dayNumber,
+                        isSelected &&
+                          styles.selectedText,
+                        isToday &&
+                          !isSelected && {
+                            color: accent,
+                          },
+                        !allowFuture &&
+                          isFuture &&
+                          !isSelected &&
+                          styles.futureText,
+                      ]}
+                    >
+                      {date.getDate()}
+                    </Text>
+
+                    {hasDot &&
+                      !isSelected && (
+                        <View
+                          style={[
+                            styles.entryDot,
+                            {
+                              backgroundColor:
+                                dotBg,
+                            },
+                          ]}
+                        />
+                      )}
+                  </Pressable>
+                );
+              },
+            )}
           </View>
         </View>
       )}
@@ -404,24 +628,31 @@ export function WellbeingCalendar({
 function makeStyles(isDark: boolean) {
   return StyleSheet.create({
     wrapper: {
-      backgroundColor: isDark ? '#000000' : '#FFFFFF',
+      backgroundColor: isDark
+        ? '#000000'
+        : '#FFFFFF',
       borderRadius: 18,
       borderWidth: 1,
-      borderColor: isDark ? '#2A2A2A' : '#ECE9E4',
+      borderColor: isDark
+        ? '#2A2A2A'
+        : '#ECE9E4',
       padding: 14,
       marginBottom: 18,
     },
 
     calendarHeader: {
       flexDirection: 'row',
-      justifyContent: 'space-between',
+      justifyContent:
+        'space-between',
       alignItems: 'center',
       marginBottom: 10,
     },
 
     calendarEyebrow: {
       fontFamily: 'Poppins-Bold',
-      color: isDark ? '#FFFFFF' : '#8F8A82',
+      color: isDark
+        ? '#FFFFFF'
+        : '#8F8A82',
       fontSize: 10,
       letterSpacing: 1.2,
     },
@@ -443,7 +674,9 @@ function makeStyles(isDark: boolean) {
       paddingVertical: 4,
       borderRadius: 8,
       borderWidth: 1,
-      borderColor: isDark ? '#2A2A2A' : '#ECE9E4',
+      borderColor: isDark
+        ? '#2A2A2A'
+        : '#ECE9E4',
     },
 
     viewToggleText: {
@@ -454,7 +687,8 @@ function makeStyles(isDark: boolean) {
 
     navRow: {
       flexDirection: 'row',
-      justifyContent: 'space-between',
+      justifyContent:
+        'space-between',
       alignItems: 'center',
       marginBottom: 8,
     },
@@ -465,7 +699,9 @@ function makeStyles(isDark: boolean) {
       borderRadius: 18,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: isDark ? '#111111' : '#F5F3EF',
+      backgroundColor: isDark
+        ? '#111111'
+        : '#F5F3EF',
     },
 
     todayLink: {
@@ -475,7 +711,8 @@ function makeStyles(isDark: boolean) {
 
     weekRow: {
       flexDirection: 'row',
-      justifyContent: 'space-between',
+      justifyContent:
+        'space-between',
     },
 
     day: {
@@ -492,19 +729,25 @@ function makeStyles(isDark: boolean) {
     },
 
     dayLabel: {
-      color: isDark ? '#FFFFFF' : '#8F8A82',
+      color: isDark
+        ? '#FFFFFF'
+        : '#8F8A82',
       fontFamily: 'Poppins-Medium',
       fontSize: 9,
     },
 
     dayNumber: {
-      color: isDark ? '#FFFFFF' : '#27241F',
+      color: isDark
+        ? '#FFFFFF'
+        : '#27241F',
       fontFamily: 'Poppins-SemiBold',
       fontSize: 15,
     },
 
     futureText: {
-      color: isDark ? '#777777' : '#C8C5BE',
+      color: isDark
+        ? '#777777'
+        : '#C8C5BE',
     },
 
     selectedText: {
@@ -518,24 +761,33 @@ function makeStyles(isDark: boolean) {
       marginTop: 2,
     },
 
-    monthContainer: {},
+    monthContainer: {
+      width: '100%',
+    },
 
     /*
      * IMPORTANT:
-     * Both the weekday headers and the date cells now use
-     * the exact same 7-column structure.
      *
-     * flex: 1 makes every column equal width regardless
-     * of screen size.
+     * The month calendar is NOT a wrapping grid.
+     *
+     * Every row contains exactly seven
+     * monthColumn children.
      */
-    monthGrid: {
+    monthRows: {
+      width: '100%',
+    },
+
+    monthWeekRow: {
+      width: '100%',
       flexDirection: 'row',
-      flexWrap: 'wrap',
+      flexWrap: 'nowrap',
     },
 
     monthColumn: {
-      width: '14.285714%',
+      flex: 1,
+      minWidth: 0,
       alignItems: 'center',
+      justifyContent: 'center',
     },
 
     monthDayLabel: {
@@ -543,7 +795,9 @@ function makeStyles(isDark: boolean) {
       textAlign: 'center',
       fontFamily: 'Poppins-Medium',
       fontSize: 9,
-      color: isDark ? '#FFFFFF' : '#8F8A82',
+      color: isDark
+        ? '#FFFFFF'
+        : '#8F8A82',
       marginBottom: 8,
     },
 
@@ -566,7 +820,9 @@ function makeStyles(isDark: boolean) {
     },
 
     monthDayNumber: {
-      color: isDark ? '#FFFFFF' : '#27241F',
+      color: isDark
+        ? '#FFFFFF'
+        : '#27241F',
       fontFamily: 'Poppins-Medium',
       fontSize: 13,
     },

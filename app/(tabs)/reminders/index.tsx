@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
   Modal,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -994,10 +996,14 @@ export default function RemindersScreen() {
         }
       >
         <View style={styles.modalShade}>
-          <View style={styles.modalCard}>
-            <View
-              style={styles.modalTitleRow}
-            >
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.keyboardAvoidingView}
+          >
+            <View style={styles.modalCard}>
+              <View
+                style={styles.modalTitleRow}
+              >
               <Text style={styles.modalTitle}>
                 {editingId
                   ? 'Edit reminder'
@@ -1021,10 +1027,10 @@ export default function RemindersScreen() {
             </View>
 
             <ScrollView
-              showsVerticalScrollIndicator={
-                false
-              }
-              style={{ flex: 1 }}
+              showsVerticalScrollIndicator={false}
+              style={styles.modalScroll}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={styles.modalScrollContent}
             >
               <Text style={styles.label}>
                 Title
@@ -1258,7 +1264,8 @@ export default function RemindersScreen() {
                   : 'Add reminder'}
               </Text>
             </Pressable>
-          </View>
+            </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
 
@@ -1692,35 +1699,55 @@ function makeStyles(C: Palette) {
       elevation: 6,
     },
 
+    keyboardAvoidingView: {
+      flex: 1,
+    },
+
     modalShade: {
       flex: 1,
-      justifyContent: 'flex-end',
-      backgroundColor: 'rgba(0,0,0,0.45)',
+      justifyContent:
+        'flex-end',
+      backgroundColor:
+        'rgba(0,0,0,0.45)',
     },
 
     modalCard: {
-      backgroundColor: C.card,
-      borderTopLeftRadius: 24,
-      borderTopRightRadius: 24,
+      borderTopLeftRadius:
+        24,
+      borderTopRightRadius:
+        24,
       padding: 22,
-      paddingBottom: 34,
-      maxHeight: '92%',
-      flex: 1,
+      paddingBottom: 24,
+      maxHeight:
+        '92%',
+      flexShrink: 1,
     },
 
     modalTitleRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
+      flexDirection:
+        'row',
+      justifyContent:
+        'space-between',
+      alignItems:
+        'center',
       marginBottom: 16,
     },
 
     modalTitle: {
-      fontFamily: FONT_BOLD,
+      fontFamily:
+        FONT_BOLD,
       fontSize: 18,
-      color: C.text,
       flex: 1,
       marginRight: 12,
+    },
+
+    modalScroll: {
+      flexGrow: 0,
+      flexShrink: 1,
+    },
+
+    modalScrollContent: {
+      paddingBottom: 24,
     },
 
     label: {

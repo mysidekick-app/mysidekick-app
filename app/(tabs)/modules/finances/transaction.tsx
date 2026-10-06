@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
+  KeyboardAvoidingView,
   Modal,
   Pressable,
   ScrollView,
@@ -394,13 +395,17 @@ export default function TransactionScreen({
         animationType="slide"
         onRequestClose={() => setModalOpen(false)}
       >
-        <View style={styles.modalShade}>
-          <View
-            style={[
-              styles.modalCard,
-              isDark && styles.modalDark,
-            ]}
-          >
+        <KeyboardAvoidingView
+          style={styles.modalKeyboard}
+          behavior="padding"
+        >
+          <View style={styles.modalShade}>
+            <View
+              style={[
+                styles.modalCard,
+                isDark && styles.modalDark,
+              ]}
+            >
             <View style={styles.modalTitleRow}>
               <Text
                 style={[
@@ -425,6 +430,13 @@ export default function TransactionScreen({
               </Pressable>
             </View>
 
+            <ScrollView
+              style={styles.modalScroll}
+              contentContainerStyle={styles.modalScrollContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="interactive"
+            >
             <Text
               style={[
                 styles.label,
@@ -553,8 +565,10 @@ export default function TransactionScreen({
                 {saving ? 'Saving...' : 'Save'}
               </Text>
             </Pressable>
+            </ScrollView>
+            </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       <CurrencyPickerModal
@@ -724,6 +738,10 @@ const styles = StyleSheet.create({
    * MODALS
    */
 
+  modalKeyboard: {
+    flex: 1,
+  },
+
   modalShade: {
     flex: 1,
     justifyContent: 'flex-end',
@@ -731,6 +749,8 @@ const styles = StyleSheet.create({
   },
 
   modalCard: {
+    maxHeight: '90%',
+
     backgroundColor: '#FFF',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
@@ -740,6 +760,14 @@ const styles = StyleSheet.create({
 
   modalDark: {
     backgroundColor: '#161616',
+  },
+
+  modalScroll: {
+    flexGrow: 0,
+  },
+
+  modalScrollContent: {
+    paddingBottom: 8,
   },
 
   modalTitleRow: {

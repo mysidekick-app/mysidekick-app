@@ -2052,46 +2052,56 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
 
-  modalShade: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor:
-      'rgba(0,0,0,0.45)',
-  },
-
   keyboardModal: {
-    width: '100%',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-  },
+      flex: 1,
+    },
 
-  modalCard: {
-    width: '100%',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 22,
-    paddingBottom: 18,
-    height: '88%',
-    maxHeight: '92%',
-  },
+    modalShade: {
+      flex: 1,
+      justifyContent:
+        'flex-end',
+      backgroundColor:
+        'rgba(0,0,0,0.45)',
+    },
 
-  modalTitleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 16,
-  },
+    modalCard: {
+      borderTopLeftRadius:
+        24,
+      borderTopRightRadius:
+        24,
+      padding: 22,
+      paddingBottom: 24,
+      maxHeight:
+        '92%',
+      flexShrink: 1,
+    },
 
-  modalTitle: {
-    fontFamily: FONT_BOLD,
-    fontSize: 18,
-    flex: 1,
-    marginRight: 12,
-  },
+    modalTitleRow: {
+      flexDirection:
+        'row',
+      justifyContent:
+        'space-between',
+      alignItems:
+        'center',
+      marginBottom: 16,
+    },
 
-  modalScroll: {
-    flex: 1,
-  },
+    modalTitle: {
+      fontFamily:
+        FONT_BOLD,
+      fontSize: 18,
+      flex: 1,
+      marginRight: 12,
+    },
+
+    modalScroll: {
+      flexGrow: 0,
+      flexShrink: 1,
+    },
+
+    modalScrollContent: {
+      paddingBottom: 24,
+    },
 
   saveFooter: {
     paddingTop: 12,

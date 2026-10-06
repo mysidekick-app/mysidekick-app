@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { KeyboardAvoidingView, Platform } from 'react-native';
 
 import {
   Alert,
@@ -772,16 +773,28 @@ export default function SavingsScreen() {
           closeNewModal
         }
       >
-        <View
-          style={styles.modalShade}
+        <KeyboardAvoidingView
+          style={styles.modalKeyboard}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
         >
           <View
-            style={[
-              styles.modalCard,
-              isDark &&
-                styles.modalDark,
-            ]}
+            style={styles.modalShade}
           >
+            <ScrollView
+              style={styles.modalScroll}
+              contentContainerStyle={styles.modalScrollContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+            >
+              <View
+                style={[
+                  styles.modalCard,
+                  isDark &&
+                    styles.modalDark,
+                ]}
+              >
             <View
               style={
                 styles.modalTitleRow
@@ -939,8 +952,10 @@ export default function SavingsScreen() {
                   : 'Create goal'}
               </Text>
             </Pressable>
+              </View>
+            </ScrollView>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Add Contribution Modal */}
@@ -952,16 +967,28 @@ export default function SavingsScreen() {
           closeContribution
         }
       >
-        <View
-          style={styles.modalShade}
+        <KeyboardAvoidingView
+          style={styles.modalKeyboard}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
         >
           <View
-            style={[
-              styles.modalCard,
-              isDark &&
-                styles.modalDark,
-            ]}
+            style={styles.modalShade}
           >
+            <ScrollView
+              style={styles.modalScroll}
+              contentContainerStyle={styles.modalScrollContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+            >
+              <View
+                style={[
+                  styles.modalCard,
+                  isDark &&
+                    styles.modalDark,
+                ]}
+              >
             <View
               style={
                 styles.modalTitleRow
@@ -1079,8 +1106,10 @@ export default function SavingsScreen() {
                   : 'Add'}
               </Text>
             </Pressable>
+              </View>
+            </ScrollView>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Currency Picker */}
@@ -1306,11 +1335,25 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
 
+  modalKeyboard: {
+    flex: 1,
+  },
+
   modalShade: {
     flex: 1,
     justifyContent: 'flex-end',
     backgroundColor:
       'rgba(0,0,0,0.45)',
+  },
+
+  modalScroll: {
+    flexGrow: 0,
+    maxHeight: '100%',
+  },
+
+  modalScrollContent: {
+    justifyContent: 'flex-end',
+    flexGrow: 1,
   },
 
   modalCard: {

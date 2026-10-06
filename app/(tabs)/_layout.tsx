@@ -59,6 +59,7 @@ export default function TabsLayout() {
    * Existing in-app arrows are NOT affected because this
    * only listens to the native Android BackHandler.
    */
+
   useEffect(() => {
     if (Platform.OS !== 'android') {
       return;
@@ -100,8 +101,9 @@ export default function TabsLayout() {
    */
 
   const isProfileSelected =
-    pathname === '/profile' ||
-    pathname.startsWith('/profile/');
+  pathname === '/profile' ||
+  pathname.startsWith('/profile/') ||
+  pathname === '/support';
 
   const isModuleSelected =
     pathname === '/modules' ||
@@ -367,6 +369,13 @@ export default function TabsLayout() {
 
       <Tabs.Screen
         name="settings"
+        options={{
+          href: null,
+        }}
+      />
+
+      <Tabs.Screen
+        name="support"
         options={{
           href: null,
         }}

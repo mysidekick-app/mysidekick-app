@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CreditCard, Minus, Plus, Trash2, X } from 'lucide-react-native';
 import { PageHeader } from '@/components/PageHeader';
@@ -161,9 +161,20 @@ export default function DebtScreen() {
       </Pressable>
 
       <Modal visible={modalOpen} transparent animationType="slide" onRequestClose={() => setModalOpen(false)}>
-        <View style={styles.modalShade}>
-          <View style={[styles.modalCard, isDark && styles.modalDark]}>
-            <View style={styles.modalTitleRow}><Text style={[styles.modalTitle, isDark && styles.darkText]}>Add debt</Text><Pressable onPress={() => setModalOpen(false)}><X color={isDark ? '#F4F2EE' : '#5A5751'} size={21} /></Pressable></View>
+        <KeyboardAvoidingView
+          style={styles.modalKeyboard}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <View style={styles.modalShade}>
+            <ScrollView
+              style={styles.modalScroll}
+              contentContainerStyle={styles.modalScrollContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+            >
+              <View style={[styles.modalCard, isDark && styles.modalDark]}>
+                <View style={styles.modalTitleRow}><Text style={[styles.modalTitle, isDark && styles.darkText]}>Add debt</Text><Pressable onPress={() => setModalOpen(false)}><X color={isDark ? '#F4F2EE' : '#5A5751'} size={21} /></Pressable></View>
             <Text style={[styles.label, isDark && styles.darkMuted]}>Title</Text>
             <TextInput value={title} onChangeText={setTitle} placeholder="What is this debt for?" placeholderTextColor="#9B978F" style={[styles.input, isDark && styles.inputDark]} autoFocus />
             <Text style={[styles.label, isDark && styles.darkMuted]}>Amount ({currency_code})</Text>
@@ -172,21 +183,36 @@ export default function DebtScreen() {
             <View style={styles.chipRow}>{DEBT_CATEGORIES.map((c) => <Pressable key={c} onPress={() => setCategory(c)} style={[styles.chip, category === c && { backgroundColor: accentForeground, borderColor: accentForeground }]}><Text style={[styles.chipText, isDark && styles.darkMuted, category === c && { color: onAccent, fontFamily: FONT_SEMI }]}>{c}</Text></Pressable>)}</View>
             <Text style={[styles.label, isDark && styles.darkMuted]}>Date</Text>
             <DatePickerInput value={date} onChange={setDate} accent={accentForeground} onAccent={onAccent} isDark={isDark} placeholder="Select date" />
-            <Pressable disabled={saving} onPress={save} style={[styles.saveButton, { backgroundColor: accentForeground }]}><Text style={[styles.saveText, { color: onAccent }]}>{saving ? 'Saving...' : 'Save'}</Text></Pressable>
+                <Pressable disabled={saving} onPress={save} style={[styles.saveButton, { backgroundColor: accentForeground }]}><Text style={[styles.saveText, { color: onAccent }]}>{saving ? 'Saving...' : 'Save'}</Text></Pressable>
+              </View>
+            </ScrollView>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       <Modal visible={!!payFor} transparent animationType="slide" onRequestClose={() => setPayFor(null)}>
-        <View style={styles.modalShade}>
-          <View style={[styles.modalCard, isDark && styles.modalDark]}>
-            <View style={styles.modalTitleRow}><Text style={[styles.modalTitle, isDark && styles.darkText]} numberOfLines={1}>Pay down {payFor?.title}</Text><Pressable onPress={() => setPayFor(null)}><X color={isDark ? '#F4F2EE' : '#5A5751'} size={21} /></Pressable></View>
+        <KeyboardAvoidingView
+          style={styles.modalKeyboard}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <View style={styles.modalShade}>
+            <ScrollView
+              style={styles.modalScroll}
+              contentContainerStyle={styles.modalScrollContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+            >
+              <View style={[styles.modalCard, isDark && styles.modalDark]}>
+                <View style={styles.modalTitleRow}><Text style={[styles.modalTitle, isDark && styles.darkText]} numberOfLines={1}>Pay down {payFor?.title}</Text><Pressable onPress={() => setPayFor(null)}><X color={isDark ? '#F4F2EE' : '#5A5751'} size={21} /></Pressable></View>
             <Text style={[styles.label, isDark && styles.darkMuted]}>Current: {payFor ? fmt(Number(payFor.amount)) : ''}</Text>
             <Text style={[styles.label, isDark && styles.darkMuted]}>Amount to pay ({currency_code})</Text>
             <TextInput value={payAmount} onChangeText={setPayAmount} placeholder="500" placeholderTextColor="#9B978F" style={[styles.input, isDark && styles.inputDark]} keyboardType="numeric" autoFocus />
-            <Pressable onPress={payDown} style={[styles.saveButton, { backgroundColor: accentForeground }]}><Text style={[styles.saveText, { color: onAccent }]}>Pay down</Text></Pressable>
+                <Pressable onPress={payDown} style={[styles.saveButton, { backgroundColor: accentForeground }]}><Text style={[styles.saveText, { color: onAccent }]}>Pay down</Text></Pressable>
+              </View>
+            </ScrollView>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       <CurrencyPickerModal
@@ -222,5 +248,9 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 6,
   },
-  modalShade: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' }, modalCard: { backgroundColor: '#FFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 22, paddingBottom: 34 }, modalDark: { backgroundColor: '#161616' }, modalTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }, modalTitle: { fontFamily: FONT_BOLD, fontSize: 18, color: '#27241F', flex: 1, marginRight: 12 }, label: { fontFamily: FONT_MED, fontSize: 13, color: '#77746E', marginTop: 14, marginBottom: 6 }, input: { borderWidth: 1, borderColor: '#E1DED8', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11, fontFamily: FONT, fontSize: 15, color: '#282724' }, inputDark: { backgroundColor: '#1E1E1E', borderColor: '#363636', color: '#F4F2EE' }, chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: '#E2DFD9', backgroundColor: '#FFF' }, chipText: { fontFamily: FONT, fontSize: 13, color: '#77746E' }, saveButton: { borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 22 }, saveText: { fontFamily: FONT_SEMI, fontSize: 15 },
+  modalKeyboard: { flex: 1 },
+  modalShade: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
+  modalScroll: { flexGrow: 0, maxHeight: '100%' },
+  modalScrollContent: { justifyContent: 'flex-end', flexGrow: 1 },
+  modalCard: { backgroundColor: '#FFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 22, paddingBottom: 34 }, modalDark: { backgroundColor: '#161616' }, modalTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }, modalTitle: { fontFamily: FONT_BOLD, fontSize: 18, color: '#27241F', flex: 1, marginRight: 12 }, label: { fontFamily: FONT_MED, fontSize: 13, color: '#77746E', marginTop: 14, marginBottom: 6 }, input: { borderWidth: 1, borderColor: '#E1DED8', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11, fontFamily: FONT, fontSize: 15, color: '#282724' }, inputDark: { backgroundColor: '#1E1E1E', borderColor: '#363636', color: '#F4F2EE' }, chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: '#E2DFD9', backgroundColor: '#FFF' }, chipText: { fontFamily: FONT, fontSize: 13, color: '#77746E' }, saveButton: { borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 22 }, saveText: { fontFamily: FONT_SEMI, fontSize: 15 },
 });

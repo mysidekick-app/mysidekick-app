@@ -950,7 +950,8 @@ export default function SplitScreen() {
       >
         <View style={styles.modalShade}>
           <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
             style={styles.keyboardModal}
           >
           <View
@@ -987,6 +988,8 @@ export default function SplitScreen() {
               contentContainerStyle={{
                 paddingBottom: 8,
               }}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
             >
               <Text
                 style={[
@@ -1698,6 +1701,7 @@ const styles = StyleSheet.create({
   },
 
   keyboardModal: {
+    flex: 1,
     width: '100%',
     alignItems: 'center',
     justifyContent: 'flex-end',

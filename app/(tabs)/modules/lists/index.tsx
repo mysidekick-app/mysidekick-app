@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -1553,256 +1555,245 @@ export default function ListsScreen() {
           setNewListOpen(false)
         }
       >
-        <View
-          style={styles.modalShade}
+        <KeyboardAvoidingView
+          style={styles.keyboardAvoidingView}
+          behavior={
+            Platform.OS === 'ios'
+              ? 'padding'
+              : 'height'
+          }
+          keyboardVerticalOffset={0}
         >
-          <View
-            style={[
-              styles.modalCard,
-              {
-                backgroundColor:
-                  C.card,
-              },
-            ]}
-          >
+          <View style={styles.modalShade}>
             <View
-              style={
-                styles.modalTitleRow
-              }
+              style={[
+                styles.modalCard,
+                {
+                  backgroundColor: C.card,
+                },
+              ]}
             >
-              <Text
-                style={[
-                  styles.modalTitle,
-                  {
-                    color: C.text,
-                  },
-                ]}
+              <View
+                style={styles.modalTitleRow}
               >
-                New list
-              </Text>
+                <Text
+                  style={[
+                    styles.modalTitle,
+                    { color: C.text },
+                  ]}
+                >
+                  New list
+                </Text>
 
-              <Pressable
-                onPress={() =>
-                  setNewListOpen(false)
+                <Pressable
+                  onPress={() =>
+                    setNewListOpen(false)
+                  }
+                  hitSlop={12}
+                >
+                  <X
+                    color={C.muted}
+                    size={21}
+                  />
+                </Pressable>
+              </View>
+
+              <ScrollView
+                style={styles.modalScroll}
+                contentContainerStyle={
+                  styles.modalScrollContent
                 }
-                hitSlop={12}
+                showsVerticalScrollIndicator={
+                  false
+                }
+                keyboardShouldPersistTaps="always"
+                keyboardDismissMode="none"
+                nestedScrollEnabled
               >
-                <X
-                  color={C.muted}
-                  size={21}
+                {error && (
+                  <Text
+                    style={[
+                      styles.error,
+                      {
+                        color: '#C53A2F',
+                        marginTop: 4,
+                      },
+                    ]}
+                  >
+                    {error}
+                  </Text>
+                )}
+
+                <Text
+                  style={[
+                    styles.label,
+                    { color: C.muted },
+                  ]}
+                >
+                  List title
+                </Text>
+
+                <TextInput
+                  value={newListTitle}
+                  onChangeText={
+                    setNewListTitle
+                  }
+                  placeholder="e.g. Groceries, Packing list"
+                  placeholderTextColor={C.muted}
+                  style={[
+                    styles.input,
+                    {
+                      backgroundColor: C.input,
+                      borderColor: C.inputBorder,
+                      color: C.text,
+                    },
+                  ]}
+                  autoFocus
+                  returnKeyType="done"
                 />
-              </Pressable>
-            </View>
 
-            {error && (
-              <Text
-                style={[
-                  styles.error,
-                  {
-                    color: '#C53A2F',
-                    marginTop: 4,
-                  },
-                ]}
-              >
-                {error}
-              </Text>
-            )}
+                <Text
+                  style={[
+                    styles.label,
+                    { color: C.muted },
+                  ]}
+                >
+                  List type
+                </Text>
 
-            <Text
-              style={[
-                styles.label,
-                {
-                  color: C.muted,
-                },
-              ]}
-            >
-              List title
-            </Text>
+                <View
+                  style={styles.typeOptions}
+                >
+                  {LIST_TYPES.map((type) => {
+                    const selected =
+                      newListType ===
+                      type.value;
 
-            <TextInput
-              value={newListTitle}
-              onChangeText={
-                setNewListTitle
-              }
-              placeholder="e.g. Groceries, Packing list"
-              placeholderTextColor={
-                C.muted
-              }
-              style={[
-                styles.input,
-                {
-                  backgroundColor:
-                    C.input,
-                  borderColor:
-                    C.inputBorder,
-                  color: C.text,
-                },
-              ]}
-              autoFocus
-            />
+                    const selectedBackground =
+                      isDark
+                        ? '#FFFFFF'
+                        : accentForeground;
 
-            <Text
-              style={[
-                styles.label,
-                {
-                  color: C.muted,
-                },
-              ]}
-            >
-              List type
-            </Text>
+                    const selectedText =
+                      isDark
+                        ? '#000000'
+                        : onAccent;
 
-            <View
-              style={
-                styles.typeOptions
-              }
-            >
-              {LIST_TYPES.map(
-                (type) => {
-                  const selected =
-                    newListType ===
-                    type.value;
-
-                  /*
-                   * Light mode:
-                   * selected = global accent
-                   *
-                   * Dark mode:
-                   * selected = white
-                   * text = black
-                   */
-                  const selectedBackground =
-                    isDark
-                      ? '#FFFFFF'
-                      : accentForeground;
-
-                  const selectedText =
-                    isDark
-                      ? '#000000'
-                      : onAccent;
-
-                  return (
-                    <Pressable
-                      key={
-                        type.value
-                      }
-                      onPress={() =>
-                        setNewListType(
-                          type.value,
-                        )
-                      }
-                      style={[
-                        styles.typeOption,
-                        {
-                          backgroundColor:
-                            selected
-                              ? selectedBackground
-                              : C.input,
-                          borderColor:
-                            selected
-                              ? selectedBackground
-                              : C.inputBorder,
-                        },
-                      ]}
-                    >
-                      <View
-                        style={
-                          styles.typeOptionCopy
+                    return (
+                      <Pressable
+                        key={type.value}
+                        onPress={() =>
+                          setNewListType(
+                            type.value,
+                          )
                         }
-                      >
-                        <Text
-                          style={[
-                            styles.typeOptionTitle,
-                            {
-                              color:
-                                selected
-                                  ? selectedText
-                                  : C.text,
-                            },
-                          ]}
-                        >
-                          {
-                            type.label
-                          }
-                        </Text>
-
-                        <Text
-                          style={[
-                            styles.typeOptionDescription,
-                            {
-                              color:
-                                selected
-                                  ? isDark
-                                    ? '#333333'
-                                    : selectedText
-                                  : C.muted,
-                            },
-                          ]}
-                        >
-                          {
-                            type.description
-                          }
-                        </Text>
-                      </View>
-
-                      <View
                         style={[
-                          styles.radio,
+                          styles.typeOption,
                           {
+                            backgroundColor:
+                              selected
+                                ? selectedBackground
+                                : C.input,
                             borderColor:
                               selected
-                                ? selectedText
+                                ? selectedBackground
                                 : C.inputBorder,
                           },
                         ]}
                       >
-                        {selected && (
-                          <View
+                        <View
+                          style={
+                            styles.typeOptionCopy
+                          }
+                        >
+                          <Text
                             style={[
-                              styles.radioSelected,
+                              styles.typeOptionTitle,
                               {
-                                backgroundColor:
-                                  selectedText,
+                                color: selected
+                                  ? selectedText
+                                  : C.text,
                               },
                             ]}
-                          />
-                        )}
-                      </View>
-                    </Pressable>
-                  );
-                },
-              )}
-            </View>
+                          >
+                            {type.label}
+                          </Text>
 
-            <Pressable
-              disabled={savingList}
-              onPress={saveList}
-              style={[
-                styles.saveButton,
-                {
-                  backgroundColor:
-                    accentForeground,
-                },
-                savingList && {
-                  opacity: 0.6,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.saveText,
-                  {
-                    color: onAccent,
-                  },
-                ]}
+                          <Text
+                            style={[
+                              styles.typeOptionDescription,
+                              {
+                                color: selected
+                                  ? isDark
+                                    ? '#333333'
+                                    : selectedText
+                                  : C.muted,
+                              },
+                            ]}
+                          >
+                            {type.description}
+                          </Text>
+                        </View>
+
+                        <View
+                          style={[
+                            styles.radio,
+                            {
+                              borderColor: selected
+                                ? selectedText
+                                : C.inputBorder,
+                            },
+                          ]}
+                        >
+                          {selected && (
+                            <View
+                              style={[
+                                styles.radioSelected,
+                                {
+                                  backgroundColor:
+                                    selectedText,
+                                },
+                              ]}
+                            />
+                          )}
+                        </View>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </ScrollView>
+
+              <View
+                style={styles.saveButtonFooter}
               >
-                {savingList
-                  ? 'Saving...'
-                  : 'Create list'}
-              </Text>
-            </Pressable>
+                <Pressable
+                  disabled={savingList}
+                  onPress={saveList}
+                  style={[
+                    styles.saveButton,
+                    {
+                      backgroundColor:
+                        accentForeground,
+                    },
+                    savingList &&
+                      styles.saveButtonDisabled,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.saveText,
+                      { color: onAccent },
+                    ]}
+                  >
+                    {savingList
+                      ? 'Saving...'
+                      : 'Create list'}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -2245,6 +2236,10 @@ const styles = StyleSheet.create({
      NEW LIST MODAL
   ======================================================= */
 
+  keyboardAvoidingView: {
+    flex: 1,
+  },
+
   modalShade: {
     flex: 1,
     justifyContent:
@@ -2254,26 +2249,42 @@ const styles = StyleSheet.create({
   },
 
   modalCard: {
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius:
+      24,
+    borderTopRightRadius:
+      24,
     padding: 22,
-    paddingBottom: 34,
-    maxHeight: '92%',
+    paddingBottom: 24,
+    maxHeight:
+      '92%',
+    flexShrink: 1,
   },
 
   modalTitleRow: {
-    flexDirection: 'row',
+    flexDirection:
+      'row',
     justifyContent:
       'space-between',
-    alignItems: 'center',
+    alignItems:
+      'center',
     marginBottom: 16,
   },
 
   modalTitle: {
-    fontFamily: FONT_BOLD,
+    fontFamily:
+      FONT_BOLD,
     fontSize: 18,
     flex: 1,
     marginRight: 12,
+  },
+
+  modalScroll: {
+    flexGrow: 0,
+    flexShrink: 1,
+  },
+
+  modalScrollContent: {
+    paddingBottom: 24,
   },
 
   label: {
@@ -2339,11 +2350,19 @@ const styles = StyleSheet.create({
     borderRadius: 5,
   },
 
+  saveButtonFooter: {
+    paddingTop: 0,
+  },
+
   saveButton: {
     borderRadius: 14,
     paddingVertical: 14,
     alignItems: 'center',
-    marginTop: 22,
+    marginTop: 12,
+  },
+
+  saveButtonDisabled: {
+    opacity: 0.6,
   },
 
   saveText: {

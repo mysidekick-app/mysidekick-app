@@ -307,7 +307,10 @@ export default function SignUpScreen() {
       return;
     }
 
-    router.replace('/modules' as never);
+    router.replace({
+      pathname: '/confirm-email',
+      params: { email: cleanEmail },
+    } as never);
   };
 
   const usernameLength = username.length;

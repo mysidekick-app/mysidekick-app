@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import {
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -1228,18 +1230,19 @@ export default function HabitsScreen() {
           setModalOpen(false)
         }
       >
-        <View
-          style={
-            styles.modalShade
-          }
+        <KeyboardAvoidingView
+          style={styles.keyboardAvoiding}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
         >
-          <View
-            style={[
-              styles.modalCard,
-              isDark &&
-                styles.modalDark,
-            ]}
-          >
+          <View style={styles.modalShade}>
+            <View
+              style={[
+                styles.modalCard,
+                isDark &&
+                  styles.modalDark,
+              ]}
+            >
             <View
               style={
                 styles.modalTitleRow
@@ -1271,14 +1274,14 @@ export default function HabitsScreen() {
               </Pressable>
             </View>
 
-            <ScrollView
-              showsVerticalScrollIndicator={
-                false
-              }
-              style={{
-                maxHeight: 400,
-              }}
-            >
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="interactive"
+                nestedScrollEnabled
+                style={styles.modalFormScroll}
+                contentContainerStyle={styles.modalFormContent}
+              >
               {/* TITLE */}
 
               <Text
@@ -1409,7 +1412,7 @@ export default function HabitsScreen() {
                     styles.darkMuted,
                 ]}
               >
-                Checkpoint
+                Trophy Checkpoint
               </Text>
 
               <TextInput
@@ -1498,9 +1501,10 @@ export default function HabitsScreen() {
                   ? 'Saving...'
                   : 'Add habit'}
               </Text>
-            </Pressable>
+              </Pressable>
+            </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -1813,6 +1817,10 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
 
+  keyboardAvoiding: {
+    flex: 1,
+  },
+
   modalShade: {
     flex: 1,
     justifyContent: 'flex-end',
@@ -1838,6 +1846,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 16,
+  },
+
+  modalFormScroll: {
+    flexShrink: 1,
+    maxHeight: 400,
+  },
+
+  modalFormContent: {
+    paddingBottom: 4,
   },
 
   modalTitle: {
