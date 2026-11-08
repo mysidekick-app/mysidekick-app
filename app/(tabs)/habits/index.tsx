@@ -1,19 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-
-import {
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
-
-import { SafeAreaView } from 'react-native-safe-area-context';
-
 import {
   Check,
   ChevronLeft,
@@ -23,7 +8,19 @@ import {
   Plus,
   X,
 } from 'lucide-react-native';
-
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 
 import { DatePickerInput } from '@/components/DatePickerInput';
@@ -44,8 +41,8 @@ type Habit = {
 
 const FONT = 'Poppins-Regular';
 const FONT_MED = 'Poppins-Medium';
-const FONT_SEMI = 'Poppins-SemiBold';
 const FONT_BOLD = 'Poppins-Bold';
+const FONT_XB = 'Poppins-ExtraBold';
 
 type HabitFrequency = 'daily' | 'weekly' | 'monthly' | 'annually';
 
@@ -75,21 +72,12 @@ function getPeriodKey(dateString: string, frequency: HabitFrequency): string {
   return String(d.getFullYear());
 }
 
-function getFrequencyUnit(frequency: HabitFrequency): string {
-  if (frequency === 'weekly') return 'week';
-  if (frequency === 'monthly') return 'month';
-  if (frequency === 'annually') return 'year';
-  return 'day';
-}
-
 function getDefaultCheckpoint(frequency: HabitFrequency): string {
   if (frequency === 'weekly') return '4';
   if (frequency === 'monthly') return '3';
   if (frequency === 'annually') return '1';
   return '5';
 }
-
-
 
 const CATEGORIES = [
   'Mind',
@@ -101,7 +89,6 @@ const CATEGORIES = [
 
 const todayStr = () => {
   const d = new Date();
-
   return `${d.getFullYear()}-${String(
     d.getMonth() + 1,
   ).padStart(2, '0')}-${String(d.getDate()).padStart(
@@ -137,57 +124,47 @@ function periodBounds(key: string, frequency: HabitFrequency): [string, string] 
   return [format(start), format(end)];
 }
 
+function isAccentBlack(color?: string): boolean {
+  if (!color) return false;
+  const normalized = color.trim().toLowerCase();
+  return (
+    normalized === '#000000' ||
+    normalized === '#000' ||
+    normalized === 'black' ||
+    normalized === 'rgb(0,0,0)' ||
+    normalized === 'rgba(0,0,0,1)'
+  );
+}
+
 export default function HabitsScreen() {
   const {
     accentForeground,
+    accentColor: rawAccent,
     isDark,
     onAccent,
-  } = useApp();
+  } = useApp() as any;
+
+  const pageBg = rawAccent || accentForeground || '#FDE047';
+  const isAccentPureBlack = isAccentBlack(pageBg);
+  const headerTextColor = isAccentPureBlack ? '#FFFFFF' : '#000000';
 
   const [habits, setHabits] = useState<Habit[]>([]);
-  const [completedToday, setCompletedToday] =
-    useState<Set<string>>(new Set());
+  const [completedToday, setCompletedToday] = useState<Set<string>>(new Set());
 
   const [loading, setLoading] = useState(true);
-  const [error, setError] =
-    useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const [modalOpen, setModalOpen] =
-    useState(false);
-
-  const [settingsMenuOpen, setSettingsMenuOpen] =
-    useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
 
   const [name, setName] = useState('');
-  const [category, setCategory] =
-    useState('Mind');
+  const [category, setCategory] = useState('Mind');
   const [frequencyFilter, setFrequencyFilter] = useState<HabitFrequency>('daily');
   const [frequency, setFrequency] = useState<HabitFrequency>('daily');
   const [checkpoint, setCheckpoint] = useState('5');
-  const [startDate, setStartDate] =
-    useState(todayStr());
+  const [startDate, setStartDate] = useState(todayStr());
   const [endDate, setEndDate] = useState('');
   const [saving, setSaving] = useState(false);
-
-  /*
-   * ---------------------------------------------------------
-   * CALCULATE CURRENT CONTINUOUS STREAK
-   * ---------------------------------------------------------
-   *
-   * The streak is based ONLY on actual completion records.
-   *
-   * Example:
-   *
-   * Aug 18  ✅
-   * Aug 19  ✅
-   * Aug 20  ❌
-   * Aug 21  ❌
-   * Aug 22  ✅
-   *
-   * Current streak = 1
-   *
-   * The old Aug 18-19 streak does not carry over.
-   */
 
   const calculateCurrentStreak = async (habit: Habit): Promise<number> => {
     const { data, error } = await supabase
@@ -238,12 +215,6 @@ export default function HabitsScreen() {
     return streak;
   };
 
-  /*
-   * ---------------------------------------------------------
-   * LOAD HABITS
-   * ---------------------------------------------------------
-   */
-
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -251,23 +222,15 @@ export default function HabitsScreen() {
     const today = todayStr();
 
     const [
-      {
-        data: habitRows,
-        error: habitErr,
-      },
-      {
-        data: compRows,
-        error: compErr,
-      },
+      { data: habitRows, error: habitErr },
+      { data: compRows, error: compErr },
     ] = await Promise.all([
       supabase
         .from('habits')
         .select(
           'id, name, category, duration_minutes, frequency, current_streak, checkpoint, trophies_earned, freezes_held',
         )
-        .order('created_at', {
-          ascending: true,
-        }),
+        .order('created_at', { ascending: true }),
 
       supabase
         .from('habit_completions')
@@ -275,25 +238,13 @@ export default function HabitsScreen() {
         .order('completed_on', { ascending: false }),
     ]);
 
-    console.log('HABITS ERROR:', habitErr);
-
-    console.log(
-      'HABIT COMPLETIONS ERROR:',
-      compErr,
-    );
-
     if (habitErr || compErr) {
-      setError(
-        'Your habits could not be loaded.',
-      );
-
+      setError('Your habits could not be loaded.');
       setLoading(false);
       return;
     }
 
-    const loadedHabits =
-      (habitRows ?? []) as Habit[];
-
+    const loadedHabits = (habitRows ?? []) as Habit[];
     setHabits(loadedHabits);
 
     setCompletedToday(
@@ -310,63 +261,37 @@ export default function HabitsScreen() {
       ),
     );
 
-    /*
-     * Recalculate current streaks when loading.
-     *
-     * This is important because a missed day should
-     * automatically break the current streak even if
-     * the old current_streak value is still stored.
-     */
+    const updatedHabits = await Promise.all(
+      loadedHabits.map(async (habit) => {
+        try {
+          const streak = await calculateCurrentStreak(habit);
+          const trophies = Math.floor(
+            streak / Math.max(Number(habit.checkpoint) || 1, 1),
+          );
 
-    const updatedHabits =
-      await Promise.all(
-        loadedHabits.map(async (habit) => {
-          try {
-            const streak =
-              await calculateCurrentStreak(habit);
-
-            const trophies = Math.floor(
-              streak /
-                Math.max(
-                  Number(habit.checkpoint) || 1,
-                  1,
-                ),
-            );
-
-            /*
-             * Only update the database when the stored
-             * values are different.
-             */
-
-            if (
-              streak !== habit.current_streak ||
-              trophies !== habit.trophies_earned
-            ) {
-              await supabase
-                .from('habits')
-                .update({
-                  current_streak: streak,
-                  trophies_earned: trophies,
-                })
-                .eq('id', habit.id);
-            }
-
-            return {
-              ...habit,
-              current_streak: streak,
-              trophies_earned: trophies,
-            };
-          } catch (err) {
-            console.log(
-              'STREAK LOAD ERROR:',
-              habit.id,
-              err,
-            );
-
-            return habit;
+          if (
+            streak !== habit.current_streak ||
+            trophies !== habit.trophies_earned
+          ) {
+            await supabase
+              .from('habits')
+              .update({
+                current_streak: streak,
+                trophies_earned: trophies,
+              })
+              .eq('id', habit.id);
           }
-        }),
-      );
+
+          return {
+            ...habit,
+            current_streak: streak,
+            trophies_earned: trophies,
+          };
+        } catch (err) {
+          return habit;
+        }
+      }),
+    );
 
     setHabits(updatedHabits);
     setLoading(false);
@@ -376,37 +301,15 @@ export default function HabitsScreen() {
     load();
   }, [load]);
 
-  /*
-   * ---------------------------------------------------------
-   * COMPLETE / UNDO TODAY
-   * ---------------------------------------------------------
-   */
-
-  const toggleToday = async (
-    habit: Habit,
-  ) => {
+  const toggleToday = async (habit: Habit) => {
     const today = todayStr();
     const currentPeriod = getPeriodKey(today, habit.frequency);
-
-    const isDone =
-      completedToday.has(habit.id);
+    const isDone = completedToday.has(habit.id);
 
     setError(null);
 
-    /*
-     * =======================================================
-     * UNDO TODAY
-     * =======================================================
-     */
-
     if (isDone) {
-      /*
-       * Remove today's completion.
-       */
-
-      const {
-        error: delErr,
-      } = await supabase
+      const { error: delErr } = await supabase
         .from('habit_completions')
         .delete()
         .eq('habit_id', habit.id)
@@ -414,73 +317,29 @@ export default function HabitsScreen() {
         .lte('completed_on', periodBounds(currentPeriod, habit.frequency)[1]);
 
       if (delErr) {
-        console.log(
-          'UNDO HABIT ERROR:',
-          delErr,
-        );
-
-        setError(
-          'Could not undo completion.',
-        );
-
+        setError('Could not undo completion.');
         return;
       }
 
-      /*
-       * Remove today from the local completed set.
-       */
-
       setCompletedToday((current) => {
         const next = new Set(current);
-
         next.delete(habit.id);
-
         return next;
       });
 
-      /*
-       * Recalculate from the remaining history.
-       *
-       * Since today was removed, the current streak
-       * becomes zero under the "streak must include today"
-       * rule.
-       */
-
       let newStreak = 0;
-
       try {
-        newStreak =
-          await calculateCurrentStreak(
-            habit,
-          );
+        newStreak = await calculateCurrentStreak(habit);
       } catch (err) {
-        console.log(
-          'STREAK RECALCULATION ERROR:',
-          err,
-        );
-
-        setError(
-          'Could not recalculate streak.',
-        );
-
+        setError('Could not recalculate streak.');
         return;
       }
 
       const newTrophies = Math.floor(
-        newStreak /
-          Math.max(
-            Number(habit.checkpoint) || 1,
-            1,
-          ),
+        newStreak / Math.max(Number(habit.checkpoint) || 1, 1),
       );
 
-      /*
-       * Save the new streak.
-       */
-
-      const {
-        error: updateErr,
-      } = await supabase
+      const { error: updateErr } = await supabase
         .from('habits')
         .update({
           current_streak: newStreak,
@@ -489,55 +348,25 @@ export default function HabitsScreen() {
         .eq('id', habit.id);
 
       if (updateErr) {
-        console.log(
-          'HABIT STREAK UPDATE ERROR:',
-          updateErr,
-        );
-
-        setError(
-          'Could not update streak.',
-        );
-
+        setError('Could not update streak.');
         return;
       }
-
-      /*
-       * Update UI.
-       */
 
       setHabits((current) =>
         current.map((h) =>
           h.id === habit.id
             ? {
                 ...h,
-                current_streak:
-                  newStreak,
-                trophies_earned:
-                  newTrophies,
+                current_streak: newStreak,
+                trophies_earned: newTrophies,
               }
             : h,
         ),
       );
-
       return;
     }
 
-    /*
-     * =======================================================
-     * COMPLETE TODAY
-     * =======================================================
-     */
-
-    /*
-     * Insert today's completion.
-     *
-     * The database unique constraint should prevent
-     * duplicate completions for the same habit/day.
-     */
-
-    const {
-      error: insErr,
-    } = await supabase
+    const { error: insErr } = await supabase
       .from('habit_completions')
       .insert({
         habit_id: habit.id,
@@ -545,104 +374,41 @@ export default function HabitsScreen() {
       });
 
     if (insErr) {
-      console.log(
-        'COMPLETE HABIT ERROR:',
-        insErr,
-      );
-
-      /*
-       * PostgreSQL duplicate key error.
-       */
-
       if (
         insErr.code === '23505' ||
-        insErr.message
-          ?.toLowerCase()
-          .includes('duplicate')
+        insErr.message?.toLowerCase().includes('duplicate')
       ) {
         setCompletedToday((current) => {
           const next = new Set(current);
-
           next.add(habit.id);
-
           return next;
         });
-
-        setError(
-          'This habit is already completed for this period.',
-        );
+        setError('This habit is already completed for this period.');
       } else {
-        setError(
-          'Could not mark complete.',
-        );
+        setError('Could not mark complete.');
       }
-
       return;
     }
-
-    /*
-     * Mark today's habit complete immediately.
-     */
 
     setCompletedToday((current) => {
       const next = new Set(current);
-
       next.add(habit.id);
-
       return next;
     });
 
-    /*
-     * Calculate the streak from the ACTUAL completion
-     * history.
-     *
-     * We do not do:
-     *
-     * current_streak + 1
-     *
-     * because that would incorrectly preserve streaks
-     * across missed days.
-     */
-
     let newStreak = 0;
-
     try {
-      newStreak =
-        await calculateCurrentStreak(
-          habit,
-        );
+      newStreak = await calculateCurrentStreak(habit);
     } catch (err) {
-      console.log(
-        'STREAK RECALCULATION ERROR:',
-        err,
-      );
-
-      setError(
-        'Could not calculate streak.',
-      );
-
+      setError('Could not calculate streak.');
       return;
     }
 
-    /*
-     * Calculate trophies from the current streak.
-     */
-
     const newTrophies = Math.floor(
-      newStreak /
-        Math.max(
-          Number(habit.checkpoint) || 1,
-          1,
-        ),
+      newStreak / Math.max(Number(habit.checkpoint) || 1, 1),
     );
 
-    /*
-     * Save the calculated values.
-     */
-
-    const {
-      error: updateErr,
-    } = await supabase
+    const { error: updateErr } = await supabase
       .from('habits')
       .update({
         current_streak: newStreak,
@@ -651,42 +417,22 @@ export default function HabitsScreen() {
       .eq('id', habit.id);
 
     if (updateErr) {
-      console.log(
-        'HABIT UPDATE ERROR:',
-        updateErr,
-      );
-
-      setError(
-        'Could not update streak.',
-      );
-
+      setError('Could not update streak.');
       return;
     }
-
-    /*
-     * Update the UI.
-     */
 
     setHabits((current) =>
       current.map((h) =>
         h.id === habit.id
           ? {
               ...h,
-              current_streak:
-                newStreak,
-              trophies_earned:
-                newTrophies,
+              current_streak: newStreak,
+              trophies_earned: newTrophies,
             }
           : h,
       ),
     );
   };
-
-  /*
-   * ---------------------------------------------------------
-   * NEW HABIT
-   * ---------------------------------------------------------
-   */
 
   const openNew = () => {
     setName('');
@@ -699,40 +445,23 @@ export default function HabitsScreen() {
     setModalOpen(true);
   };
 
-  /*
-   * ---------------------------------------------------------
-   * SAVE HABIT
-   * ---------------------------------------------------------
-   */
-
   const saveHabit = async () => {
     if (!name.trim()) {
-      setError(
-        'Give your habit a name.',
-      );
-
+      setError('Give your habit a name.');
       return;
     }
 
     if (!startDate.trim()) {
-      setError(
-        'Pick a start date.',
-      );
-
+      setError('Pick a start date.');
       return;
     }
 
     setSaving(true);
     setError(null);
 
-    const cp = checkpoint.trim()
-      ? parseInt(checkpoint, 10)
-      : 5;
+    const cp = checkpoint.trim() ? parseInt(checkpoint, 10) : 5;
 
-    const {
-      data,
-      error: saveErr,
-    } = await supabase
+    const { data, error: saveErr } = await supabase
       .from('habits')
       .insert({
         name: name.trim(),
@@ -750,31 +479,14 @@ export default function HabitsScreen() {
       .maybeSingle();
 
     if (saveErr || !data) {
-      console.log(
-        'SAVE HABIT ERROR:',
-        saveErr,
-      );
-
-      setError(
-        'The habit could not be saved.',
-      );
+      setError('The habit could not be saved.');
     } else {
-      setHabits((current) => [
-        ...current,
-        data as Habit,
-      ]);
-
+      setHabits((current) => [...current, data as Habit]);
       setModalOpen(false);
     }
 
     setSaving(false);
   };
-
-  /*
-   * ---------------------------------------------------------
-   * SUMMARY
-   * ---------------------------------------------------------
-   */
 
   const visibleHabits = habits.filter(
     (habit) => habit.frequency === frequencyFilter,
@@ -786,725 +498,441 @@ export default function HabitsScreen() {
 
   const totalHabits = visibleHabits.length;
 
-  /*
-   * ---------------------------------------------------------
-   * RENDER
-   * ---------------------------------------------------------
-   */
+  const C = isDark
+    ? {
+        cardBg: '#121212',
+        cardText: '#FFFFFF',
+        cardSubtext: '#A1A1AA',
+        cardBorder: '#000000',
+        inputBg: '#1E1E1E',
+        inputBorder: '#333333',
+      }
+    : {
+        cardBg: '#FFFFFF',
+        cardText: '#000000',
+        cardSubtext: '#52525B',
+        cardBorder: '#000000',
+        inputBg: '#F4F4F5',
+        inputBorder: '#E4E4E7',
+      };
 
   return (
-    <SafeAreaView
-      style={[
-        styles.safe,
-        isDark && styles.safeDark,
-      ]}
-    >
-      <View
-        style={[
-          styles.header,
-          isDark && styles.headerDark,
-        ]}
-      >
+    <SafeAreaView style={[styles.safe, { backgroundColor: pageBg }]}>
+      <StatusBar
+        barStyle={isAccentPureBlack ? 'light-content' : 'dark-content'}
+        backgroundColor={pageBg}
+      />
+
+      {/* FIXED HEADER */}
+      <View style={styles.header}>
         <Pressable
           onPress={() => {
             setSettingsMenuOpen(false);
             router.push('/modules');
           }}
-          style={[
-            styles.backButton,
-            {
-              backgroundColor:
-                accentForeground,
-            },
-          ]}
-          hitSlop={8}
+          style={({ pressed }) => [styles.backButton, pressed && styles.pressedBtn]}
+          hitSlop={12}
         >
-          <ChevronLeft
-            color={onAccent}
-            size={21}
-            strokeWidth={2.5}
-          />
+          <ChevronLeft color="#FFFFFF" size={22} strokeWidth={2.8} />
         </Pressable>
 
-        <Text
-          style={[
-            styles.headerTitle,
-            {
-              color:
-                isDark ? '#FFFFFF' : accentForeground,
-            },
-          ]}
-        >
+        <Text style={[styles.headerTitle, { color: headerTextColor }]}>
           HABITS
         </Text>
 
         <Pressable
-          onPress={() =>
-            setSettingsMenuOpen(
-              (current) => !current,
-            )
-          }
-          style={styles.menuButton}
-          hitSlop={8}
+          onPress={() => setSettingsMenuOpen((current) => !current)}
+          style={({ pressed }) => [styles.menuButton, pressed && styles.pressedBtn]}
+          hitSlop={12}
         >
-          <MoreVertical
-            color={
-              isDark
-                ? '#F4F2EE'
-                : '#5A5751'
-            }
-            size={22}
-            strokeWidth={2.2}
-          />
+          <MoreVertical color={headerTextColor} size={24} strokeWidth={2.5} />
         </Pressable>
 
         {settingsMenuOpen && (
-          <View
-            style={[
-              styles.settingsMenu,
-              isDark &&
-                styles.settingsMenuDark,
-            ]}
-          >
-            <Pressable
-              onPress={() => {
-                setSettingsMenuOpen(
-                  false,
-                );
-                router.push('/(tabs)/profile');
-              }}
-              style={
-                styles.settingsMenuItem
-              }
-            >
-              <Text
-                style={[
-                  styles.settingsMenuText,
-                  isDark &&
-                    styles.darkText,
-                ]}
-              >
-                Settings
-              </Text>
+          <View style={styles.menuShadeOverlay}>
+            <Pressable style={{ flex: 1 }} onPress={() => setSettingsMenuOpen(false)}>
+              <View style={styles.menuCardWrapper}>
+                <View style={styles.shadowBackdrop} />
+                <View style={[styles.menuCardBody, { backgroundColor: C.cardBg }]}>
+                  <Pressable
+                    onPress={() => {
+                      setSettingsMenuOpen(false);
+                      router.push('/(tabs)/profile');
+                    }}
+                    style={styles.menuItem}
+                  >
+                    <Text style={[styles.menuItemText, { color: C.cardText }]}>
+                      Settings
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
             </Pressable>
           </View>
         )}
       </View>
 
+      {/* PINNED SECTION: FREQUENCY FILTER + STREAK PROGRESS CARD */}
+      <View style={[styles.pinnedSection, { backgroundColor: pageBg }]}>
+        {/* NEO-BRUTALIST FREQUENCY FILTER */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.filterScroll}
+          contentContainerStyle={styles.filterRow}
+        >
+          {FREQUENCIES.map((item) => {
+            const active = frequencyFilter === item.value;
+            return (
+              <View key={item.value} style={styles.filterTagWrapper}>
+                <View style={styles.filterShadowBackdrop} />
+                <Pressable
+                  onPress={() => setFrequencyFilter(item.value)}
+                  style={({ pressed }) => [
+                    styles.filterTagBtn,
+                    {
+                      backgroundColor: active ? '#000000' : '#FFFFFF',
+                      borderColor: '#000000',
+                    },
+                    pressed && styles.pressedBtn,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.filterTagText,
+                      { color: active ? '#FFFFFF' : '#000000' },
+                    ]}
+                  >
+                    {item.label}
+                  </Text>
+                </Pressable>
+              </View>
+            );
+          })}
+        </ScrollView>
+
+        {/* NEO-BRUTALIST PROGRESS STREAK CARD */}
+        <View style={styles.cardContainer}>
+          <View style={styles.cardShadowBackdrop} />
+          <View style={[styles.progressCardBody, { backgroundColor: C.cardBg, borderColor: C.cardBorder }]}>
+            <View style={styles.progressTop}>
+              <Text style={[styles.progressLabel, { color: C.cardSubtext }]}>
+                {frequencyFilter === 'daily'
+                  ? 'TODAY'
+                  : frequencyFilter === 'weekly'
+                  ? 'THIS WEEK'
+                  : frequencyFilter === 'monthly'
+                  ? 'THIS MONTH'
+                  : 'THIS YEAR'}
+              </Text>
+
+              <Text style={[styles.progressCount, { color: C.cardText }]}>
+                {totalDone}/{totalHabits}
+              </Text>
+            </View>
+
+            <View style={styles.progressTrack}>
+              <View
+                style={[
+                  styles.progressFill,
+                  {
+                    width: `${
+                      totalHabits ? (totalDone / totalHabits) * 100 : 0
+                    }%`,
+                    backgroundColor: pageBg,
+                  },
+                ]}
+              />
+            </View>
+
+            <Text style={[styles.progressHint, { color: C.cardSubtext }]}>
+              Keep going — every check-in grows your streak.
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      {/* ONLY SCROLLABLE LIST OF HABITS */}
       <ScrollView
-        contentContainerStyle={
-          styles.content
-        }
+        contentContainerStyle={styles.scrollListContent}
         showsVerticalScrollIndicator={false}
       >
         {error && (
-          <Text style={styles.error}>
-            {error}
-          </Text>
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
         )}
 
-        <View style={[styles.frequencyCard, isDark && styles.cardDark]}>
-          {FREQUENCIES.map((item) => (
-            <Pressable
-              key={item.value}
-              onPress={() => setFrequencyFilter(item.value)}
-              style={[
-                styles.frequencyChip,
-                frequencyFilter === item.value && {
-                  backgroundColor: accentForeground,
-                  borderColor: accentForeground,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.frequencyText,
-                  isDark && styles.darkMuted,
-                  frequencyFilter === item.value && {
-                    color: onAccent,
-                    fontFamily: FONT_SEMI,
-                  },
-                ]}
-              >
-                {item.label}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-
-        {/* TODAY PROGRESS */}
-
-        <View
-          style={[
-            styles.progressCard,
-            isDark && styles.cardDark,
-          ]}
-        >
-          <View
-            style={styles.progressTop}
-          >
-            <Text
-              style={[
-                styles.progressLabel,
-                isDark &&
-                  styles.darkMuted,
-              ]}
-            >
-              {frequencyFilter === 'daily' ? 'Today' : frequencyFilter === 'weekly' ? 'This week' : frequencyFilter === 'monthly' ? 'This month' : 'This year'}
-            </Text>
-
-            <Text
-              style={[
-                styles.progressCount,
-                {
-                  color: isDark
-                    ? '#FFFFFF'
-                    : accentForeground,
-                },
-              ]}
-            >
-              {totalDone}/
-              {totalHabits}
-            </Text>
-          </View>
-
-          <View
-            style={[
-              styles.progressTrack,
-              isDark &&
-                styles.trackDark,
-            ]}
-          >
-            <View
-              style={[
-                styles.progressFill,
-                {
-                  width: `${
-                    totalHabits
-                      ? (totalDone /
-                          totalHabits) *
-                        100
-                      : 0
-                  }%`,
-                  backgroundColor:
-                    isDark
-                      ? '#000000'
-                      : accentForeground,
-                },
-              ]}
-            />
-          </View>
-
-          <Text
-            style={[
-              styles.progressHint,
-              isDark &&
-                styles.darkMuted,
-            ]}
-          >
-            Keep going — every check-in
-            grows your streak.
-          </Text>
-        </View>
-
-        {/* LOADING */}
-
         {loading ? (
-          <Text
-            style={[
-              styles.emptyText,
-              isDark &&
-                styles.darkMuted,
-            ]}
-          >
+          <Text style={[styles.emptyText, { color: headerTextColor }]}>
             Loading your habits...
           </Text>
         ) : visibleHabits.length === 0 ? (
-          /* EMPTY */
-
           <View style={styles.empty}>
-            <Text
-              style={[
-                styles.emptyText,
-                isDark &&
-                  styles.darkMuted,
-              ]}
-            >
-              No habits yet. Tap + to
-              create your first one.
+            <Text style={[styles.emptyText, { color: headerTextColor }]}>
+              No habits yet. Tap + to create your first one.
             </Text>
           </View>
         ) : (
-          /* HABIT LIST */
+          <View style={styles.listStack}>
+            {visibleHabits.map((habit) => {
+              const done = completedToday.has(habit.id);
 
-          <View
-            style={[
-              styles.list,
-              isDark &&
-                styles.cardDark,
-            ]}
-          >
-            {visibleHabits.map(
-              (habit, i) => {
-                const done =
-                  completedToday.has(
-                    habit.id,
-                  );
-
-                return (
+              return (
+                <View key={habit.id} style={styles.cardContainer}>
+                  <View style={styles.cardShadowBackdrop} />
                   <View
-                    key={habit.id}
                     style={[
-                      styles.row,
-                      i <
-                        visibleHabits.length -
-                          1 &&
-                        styles.rowBorder,
-                      isDark &&
-                        styles.rowBorderDark,
+                      styles.rowCardBody,
+                      {
+                        backgroundColor: C.cardBg,
+                        borderColor: C.cardBorder,
+                      },
                     ]}
                   >
-                    {/* CHECK */}
-
+                    {/* CHECKBOX */}
                     <Pressable
-                      onPress={() =>
-                        toggleToday(
-                          habit,
-                        )
-                      }
-                      style={[
-                        styles.check,
-                        done && {
-                          backgroundColor:
-                            accentForeground,
-                          borderColor:
-                            accentForeground,
-                        },
-                      ]}
+                      onPress={() => toggleToday(habit)}
+                      style={[styles.check, done && styles.checkDone]}
                       hitSlop={8}
                     >
                       {done && (
-                        <Check
-                          color={onAccent}
-                          size={15}
-                        />
+                        <Check color="#000000" size={14} strokeWidth={3} />
                       )}
                     </Pressable>
 
                     {/* HABIT NAME */}
-
                     <Pressable
-                      onPress={() =>
-                        router.push(
-                          `/habits/${habit.id}`,
-                        )
-                      }
-                      style={
-                        styles.rowCopy
-                      }
+                      onPress={() => router.push(`/habits/${habit.id}`)}
+                      style={styles.rowCopy}
                       hitSlop={4}
                     >
                       <Text
                         style={[
                           styles.habitName,
-                          isDark &&
-                            styles.darkText,
-                          done &&
-                            styles.doneName,
+                          { color: C.cardText },
+                          done && styles.doneName,
                         ]}
                       >
                         {habit.name}
                       </Text>
 
-                      <Text
-                        style={[
-                          styles.habitMeta,
-                          isDark &&
-                            styles.darkText,
-                        ]}
-                      >
+                      <Text style={[styles.habitMeta, { color: C.cardSubtext }]}>
                         {habit.category}
-
                         {'  ·  '}
-
-                        {
-                          habit.trophies_earned
-                        }{' '}
-                        🏆
+                        {habit.trophies_earned} 🏆
                       </Text>
                     </Pressable>
 
                     {/* STREAK */}
-
-                    <View
-                      style={
-                        styles.streakBadge
-                      }
-                    >
-                      <Flame
-                        color={
-                          isDark
-                            ? '#FFFFFF'
-                            : done
-                            ? accentForeground
-                            : '#C8C5BE'
-                        }
-                        size={14}
-                      />
-
-                      <Text
-                        style={[
-                          styles.streakText,
-                          {
-                            color: isDark
-                              ? '#FFFFFF'
-                              : done
-                              ? accentForeground
-                              : '#89857D',
-                          },
-                        ]}
-                      >
-                        {
-                          habit.current_streak
-                        }
+                    <View style={styles.streakBadge}>
+                      <Flame color="#000000" size={14} strokeWidth={2.5} />
+                      <Text style={styles.streakText}>
+                        {habit.current_streak}
                       </Text>
                     </View>
 
                     {/* DETAILS */}
-
                     <Pressable
-                      onPress={() =>
-                        router.push(
-                          `/habits/${habit.id}`,
-                        )
-                      }
-                      style={
-                        styles.chevron
-                      }
+                      onPress={() => router.push(`/habits/${habit.id}`)}
+                      style={styles.chevron}
                       hitSlop={8}
                     >
-                      <ChevronRight
-                        color={
-                          isDark
-                            ? '#666'
-                            : '#C8C5BE'
-                        }
-                        size={20}
-                      />
+                      <ChevronRight color={C.cardText} size={20} strokeWidth={2.5} />
                     </Pressable>
                   </View>
-                );
-              },
-            )}
+                </View>
+              );
+            })}
           </View>
         )}
       </ScrollView>
 
-      {/* FLOATING PLUS */}
+      {/* FLOATING PLUS BUTTON */}
+      <View style={styles.fabContainer}>
+        <View style={styles.fabShadowBackdrop} />
+        <Pressable
+          onPress={openNew}
+          style={({ pressed }) => [styles.fabBtn, pressed && styles.pressedBtn]}
+          hitSlop={12}
+        >
+          <Plus color="#FFFFFF" size={28} strokeWidth={3} />
+        </Pressable>
+      </View>
 
-      <Pressable
-        onPress={openNew}
-        style={[
-          styles.fab,
-          {
-            backgroundColor:
-              accentForeground,
-          },
-        ]}
-        hitSlop={12}
-      >
-        <Plus
-          color={onAccent}
-          size={26}
-          strokeWidth={2.6}
-        />
-      </Pressable>
-
-      {/* NEW HABIT MODAL */}
-
+      {/* CENTERED NEW HABIT MODAL */}
       <Modal
         visible={modalOpen}
         transparent
-        animationType="slide"
-        onRequestClose={() =>
-          setModalOpen(false)
-        }
+        animationType="fade"
+        onRequestClose={() => setModalOpen(false)}
       >
-        <KeyboardAvoidingView
-          style={styles.keyboardAvoiding}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
-        >
-          <View style={styles.modalShade}>
-            <View
-              style={[
-                styles.modalCard,
-                isDark &&
-                  styles.modalDark,
-              ]}
-            >
-            <View
-              style={
-                styles.modalTitleRow
-              }
-            >
-              <Text
-                style={[
-                  styles.modalTitle,
-                  isDark &&
-                    styles.darkText,
-                ]}
-              >
-                New habit
-              </Text>
+        <View style={styles.centeredModalShade}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.keyboardAvoidingViewCentered}
+          >
+            <View style={styles.modalCardWrapper}>
+              <View style={styles.modalShadowBackdrop} />
+              <View style={[styles.modalCardBody, { backgroundColor: C.cardBg }]}>
+                <View style={styles.modalTitleRow}>
+                  <Text style={[styles.modalTitle, { color: C.cardText }]}>
+                    New habit
+                  </Text>
 
-              <Pressable
-                onPress={() =>
-                  setModalOpen(false)
-                }
-              >
-                <X
-                  color={
-                    isDark
-                      ? '#F4F2EE'
-                      : '#5A5751'
-                  }
-                  size={21}
-                />
-              </Pressable>
-            </View>
+                  <Pressable onPress={() => setModalOpen(false)} hitSlop={12}>
+                    <X color={C.cardText} size={22} strokeWidth={2.5} />
+                  </Pressable>
+                </View>
 
-              <ScrollView
-                showsVerticalScrollIndicator={false}
-                keyboardShouldPersistTaps="handled"
-                keyboardDismissMode="interactive"
-                nestedScrollEnabled
-                style={styles.modalFormScroll}
-                contentContainerStyle={styles.modalFormContent}
-              >
-              {/* TITLE */}
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                  style={styles.modalScroll}
+                  contentContainerStyle={styles.modalScrollContent}
+                >
+                  {error && <Text style={styles.modalError}>{error}</Text>}
 
-              <Text
-                style={[
-                  styles.label,
-                  isDark &&
-                    styles.darkMuted,
-                ]}
-              >
-                Title
-              </Text>
-
-              <TextInput
-                value={name}
-                onChangeText={setName}
-                placeholder="e.g. Morning meditation"
-                placeholderTextColor="#9B978F"
-                style={[
-                  styles.input,
-                  isDark &&
-                    styles.inputDark,
-                ]}
-                autoFocus
-              />
-
-              <Text
-                style={[
-                  styles.label,
-                  isDark && styles.darkMuted,
-                ]}
-              >
-                How frequently would you like to track this habit?
-              </Text>
-
-              <View style={styles.frequencyFormRow}>
-                {FREQUENCIES.map((item) => (
-                  <Pressable
-                    key={item.value}
-                    onPress={() => {
-                      setFrequency(item.value);
-                      setCheckpoint(getDefaultCheckpoint(item.value));
-                    }}
+                  <Text style={[styles.inputLabel, { color: C.cardSubtext }]}>
+                    TITLE
+                  </Text>
+                  <TextInput
+                    value={name}
+                    onChangeText={setName}
+                    placeholder="e.g. Morning meditation"
+                    placeholderTextColor={C.cardSubtext}
                     style={[
-                      styles.frequencyFormChip,
-                      frequency === item.value && {
-                        backgroundColor: accentForeground,
-                        borderColor: accentForeground,
+                      styles.modalTextInput,
+                      {
+                        backgroundColor: C.inputBg,
+                        borderColor: C.inputBorder,
+                        color: C.cardText,
                       },
                     ]}
-                  >
-                    <Text
-                      style={[
-                        styles.frequencyText,
-                        isDark && styles.darkMuted,
-                        frequency === item.value && {
-                          color: onAccent,
-                          fontFamily: FONT_SEMI,
-                        },
-                      ]}
-                    >
-                      {item.label}
-                    </Text>
-                  </Pressable>
-                ))}
+                    autoFocus
+                  />
+
+                  <Text style={[styles.inputLabel, { color: C.cardSubtext }]}>
+                    FREQUENCY
+                  </Text>
+                  <View style={styles.chipRow}>
+                    {FREQUENCIES.map((item) => {
+                      const selected = frequency === item.value;
+                      return (
+                        <Pressable
+                          key={item.value}
+                          onPress={() => {
+                            setFrequency(item.value);
+                            setCheckpoint(getDefaultCheckpoint(item.value));
+                          }}
+                          style={({ pressed }) => [
+                            styles.chip,
+                            selected ? styles.chipActive : { backgroundColor: C.inputBg },
+                            pressed && styles.pressedBtn,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.chipText,
+                              { color: selected ? '#FFFFFF' : C.cardText },
+                            ]}
+                          >
+                            {item.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  <Text style={[styles.inputLabel, { color: C.cardSubtext }]}>
+                    CATEGORY
+                  </Text>
+                  <View style={styles.chipRow}>
+                    {CATEGORIES.map((c) => {
+                      const selected = category === c;
+                      return (
+                        <Pressable
+                          key={c}
+                          onPress={() => setCategory(c)}
+                          style={({ pressed }) => [
+                            styles.chip,
+                            selected ? styles.chipActive : { backgroundColor: C.inputBg },
+                            pressed && styles.pressedBtn,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.chipText,
+                              { color: selected ? '#FFFFFF' : C.cardText },
+                            ]}
+                          >
+                            {c}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  <Text style={[styles.inputLabel, { color: C.cardSubtext }]}>
+                    TROPHY CHECKPOINT
+                  </Text>
+                  <TextInput
+                    value={checkpoint}
+                    onChangeText={setCheckpoint}
+                    placeholder="5"
+                    placeholderTextColor={C.cardSubtext}
+                    style={[
+                      styles.modalTextInput,
+                      {
+                        backgroundColor: C.inputBg,
+                        borderColor: C.inputBorder,
+                        color: C.cardText,
+                      },
+                    ]}
+                    keyboardType="numeric"
+                  />
+
+                  <Text style={[styles.inputLabel, { color: C.cardSubtext }]}>
+                    START DATE
+                  </Text>
+                  <DatePickerInput
+                    value={startDate}
+                    onChange={setStartDate}
+                    accent={pageBg}
+                    onAccent={onAccent}
+                    isDark={isDark}
+                  />
+
+                  <Text style={[styles.inputLabel, { color: C.cardSubtext }]}>
+                    END DATE (OPTIONAL)
+                  </Text>
+                  <DatePickerInput
+                    value={endDate}
+                    onChange={setEndDate}
+                    accent={pageBg}
+                    onAccent={onAccent}
+                    isDark={isDark}
+                    placeholder="No end date"
+                  />
+                </ScrollView>
+
+                <Pressable
+                  disabled={saving}
+                  onPress={saveHabit}
+                  style={({ pressed }) => [
+                    styles.primaryBtn,
+                    pressed && styles.pressedBtn,
+                    saving && { opacity: 0.6 },
+                  ]}
+                >
+                  <Text style={styles.primaryBtnText}>
+                    {saving ? 'Saving...' : 'Add habit'}
+                  </Text>
+                </Pressable>
               </View>
-
-              {/* CATEGORY */}
-
-              <Text
-                style={[
-                  styles.label,
-                  isDark &&
-                    styles.darkMuted,
-                ]}
-              >
-                Category
-              </Text>
-
-              <View
-                style={styles.catRow}
-              >
-                {CATEGORIES.map(
-                  (c) => (
-                    <Pressable
-                      key={c}
-                      onPress={() =>
-                        setCategory(c)
-                      }
-                      style={[
-                        styles.catChip,
-                        category ===
-                          c && {
-                          backgroundColor:
-                            accentForeground,
-                          borderColor:
-                            accentForeground,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.catText,
-                          isDark &&
-                            styles.darkMuted,
-                          category ===
-                            c && {
-                            color:
-                              onAccent,
-                            fontFamily:
-                              FONT_SEMI,
-                          },
-                        ]}
-                      >
-                        {c}
-                      </Text>
-                    </Pressable>
-                  ),
-                )}
-              </View>
-
-
-              {/* CHECKPOINT */}
-
-              <Text
-                style={[
-                  styles.label,
-                  isDark &&
-                    styles.darkMuted,
-                ]}
-              >
-                Trophy Checkpoint
-              </Text>
-
-              <TextInput
-                value={checkpoint}
-                onChangeText={
-                  setCheckpoint
-                }
-                placeholder="5"
-                placeholderTextColor="#9B978F"
-                style={[
-                  styles.input,
-                  isDark &&
-                    styles.inputDark,
-                ]}
-                keyboardType="numeric"
-              />
-
-              {/* START DATE */}
-
-              <Text
-                style={[
-                  styles.label,
-                  isDark &&
-                    styles.darkMuted,
-                ]}
-              >
-                Start date
-              </Text>
-
-              <DatePickerInput
-                value={startDate}
-                onChange={setStartDate}
-                accent={
-                  accentForeground
-                }
-                onAccent={onAccent}
-                isDark={isDark}
-              />
-
-              {/* END DATE */}
-
-              <Text
-                style={[
-                  styles.label,
-                  isDark &&
-                    styles.darkMuted,
-                ]}
-              >
-                End date (optional)
-              </Text>
-
-              <DatePickerInput
-                value={endDate}
-                onChange={setEndDate}
-                accent={
-                  accentForeground
-                }
-                onAccent={onAccent}
-                isDark={isDark}
-                placeholder="No end date"
-              />
-            </ScrollView>
-
-            {/* SAVE */}
-
-            <Pressable
-              disabled={saving}
-              onPress={saveHabit}
-              style={[
-                styles.saveButton,
-                {
-                  backgroundColor:
-                    accentForeground,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.saveText,
-                  {
-                    color: onAccent,
-                  },
-                ]}
-              >
-                {saving
-                  ? 'Saving...'
-                  : 'Add habit'}
-              </Text>
-              </Pressable>
             </View>
-          </View>
-        </KeyboardAvoidingView>
+          </KeyboardAvoidingView>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -1513,411 +941,392 @@ export default function HabitsScreen() {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: '#FBFAF8',
+  },
+  pressedBtn: {
+    transform: [{ translateX: 2 }, { translateY: 2 }],
   },
 
-  safeDark: {
-    backgroundColor: '#090909',
-  },
-
+  /* HEADER */
   header: {
-    position: 'relative',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 30,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ECE9E4',
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 10,
     zIndex: 100,
   },
-
-  headerDark: {
-    borderBottomColor: '#292929',
-  },
-
   backButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: '#000000',
+    borderWidth: 2,
+    borderColor: '#000000',
     alignItems: 'center',
     justifyContent: 'center',
   },
-
   headerTitle: {
-    fontFamily: FONT_BOLD,
-    fontSize: 17,
-    color: '#27241F',
-    letterSpacing: 0.2,
+    fontFamily: FONT_XB,
+    fontSize: 22,
+    letterSpacing: 1,
   },
-
   menuButton: {
-    width: 38,
-    height: 38,
+    width: 40,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
-  settingsMenu: {
+  /* MENU MODAL OVERLAY */
+  menuShadeOverlay: {
     position: 'absolute',
-    top: 68,
-    right: 16,
-    minWidth: 150,
-    backgroundColor: '#FFF',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#E6E2DC',
-    paddingVertical: 6,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    elevation: 8,
+    top: 55,
+    right: 20,
     zIndex: 1000,
   },
-
-  settingsMenuDark: {
-    backgroundColor: '#181818',
-    borderColor: '#303030',
+  menuCardWrapper: {
+    position: 'relative',
+    width: 160,
   },
-
-  settingsMenuItem: {
-    paddingHorizontal: 16,
+  shadowBackdrop: {
+    position: 'absolute',
+    top: 4,
+    left: 4,
+    right: -4,
+    bottom: -4,
+    backgroundColor: '#000000',
+    borderRadius: 12,
+  },
+  menuCardBody: {
+    borderRadius: 12,
+    borderWidth: 2.5,
+    borderColor: '#000000',
+    paddingVertical: 4,
+  },
+  menuItem: {
     paddingVertical: 12,
+    paddingHorizontal: 16,
   },
-
-  settingsMenuText: {
-    fontFamily: FONT_MED,
+  menuItemText: {
+    fontFamily: FONT_BOLD,
     fontSize: 14,
-    color: '#27241F',
   },
 
-  content: {
-    padding: 16,
-    paddingBottom: 90,
+  /* PINNED CONTAINER */
+  pinnedSection: {
+    paddingHorizontal: 18,
+    paddingBottom: 12,
+    zIndex: 10,
   },
-
-  darkText: {
-    color: '#F4F2EE',
-  },
-
-  darkMuted: {
-    color: '#AAA59D',
-  },
-
-  error: {
-    fontFamily: FONT_MED,
-    color: '#C53A2F',
-    fontSize: 13,
-    marginBottom: 10,
-  },
-
-  frequencyCard: {
-    flexDirection: 'row',
-    gap: 6,
-    backgroundColor: '#FFF',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#ECE9E4',
-    padding: 6,
+  filterScroll: {
     marginBottom: 12,
   },
-
-  frequencyChip: {
-    flex: 1,
-    minHeight: 38,
-    paddingHorizontal: 8,
-    borderRadius: 11,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  frequencyText: {
-    fontFamily: FONT_MED,
-    fontSize: 12,
-    color: '#77746E',
-    textAlign: 'center',
-  },
-
-  frequencyFormRow: {
+  filterRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+    gap: 12,
+    paddingRight: 18,
+    paddingBottom: 4,
   },
-
-  frequencyFormChip: {
-    paddingHorizontal: 12,
+  filterTagWrapper: {
+    position: 'relative',
+  },
+  filterShadowBackdrop: {
+    position: 'absolute',
+    top: 3,
+    left: 3,
+    right: -3,
+    bottom: -3,
+    backgroundColor: '#000000',
+    borderRadius: 10,
+  },
+  filterTagBtn: {
+    paddingHorizontal: 16,
     paddingVertical: 9,
     borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#E2DFD9',
-    backgroundColor: '#FFF',
+    borderWidth: 2.5,
+  },
+  filterTagText: {
+    fontFamily: FONT_BOLD,
+    fontSize: 12.5,
   },
 
-  progressCard: {
-    backgroundColor: '#FFF',
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: '#ECE9E4',
-    padding: 18,
-    marginBottom: 16,
+  /* PROGRESS CARD */
+  progressCardBody: {
+    borderRadius: 16,
+    borderWidth: 2.5,
+    padding: 16,
   },
-
-  cardDark: {
-    backgroundColor: '#111',
-    borderColor: '#2A2A2A',
-  },
-
   progressTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'baseline',
   },
-
   progressLabel: {
-    fontFamily: FONT_SEMI,
-    fontSize: 14,
-    color: '#77746E',
-  },
-
-  progressCount: {
     fontFamily: FONT_BOLD,
+    fontSize: 12,
+    letterSpacing: 1,
+  },
+  progressCount: {
+    fontFamily: FONT_XB,
     fontSize: 22,
   },
-
   progressTrack: {
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#F0EEEA',
-    marginTop: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#000000',
+    backgroundColor: '#FFFFFF',
+    marginTop: 10,
     overflow: 'hidden',
   },
-
-  trackDark: {
-    backgroundColor: '#FFFFFF',
-  },
-
   progressFill: {
-    height: 8,
-    borderRadius: 4,
+    height: '100%',
   },
-
   progressHint: {
-    fontFamily: FONT,
-    fontSize: 12,
-    color: '#908B83',
-    marginTop: 10,
+    fontFamily: FONT_MED,
+    fontSize: 11,
+    marginTop: 8,
   },
 
-  list: {
-    backgroundColor: '#FFF',
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: '#ECE9E4',
-    paddingHorizontal: 14,
+  /* SCROLLABLE LIST CONTENT */
+  scrollListContent: {
+    paddingHorizontal: 18,
+    paddingTop: 4,
+    paddingBottom: 120,
+  },
+  listStack: {
+    gap: 12,
+  },
+  errorBox: {
+    backgroundColor: '#FEE2E2',
+    borderWidth: 2.5,
+    borderColor: '#000000',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 12,
+  },
+  errorText: {
+    fontFamily: FONT_BOLD,
+    color: '#DC2626',
+    fontSize: 13,
   },
 
-  row: {
-    minHeight: 68,
+  /* CARD NEO-BRUTALIST */
+  cardContainer: {
+    position: 'relative',
+  },
+  cardShadowBackdrop: {
+    position: 'absolute',
+    top: 4,
+    left: 4,
+    right: -4,
+    bottom: -4,
+    backgroundColor: '#000000',
+    borderRadius: 14,
+  },
+  rowCardBody: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingVertical: 10,
+    borderRadius: 14,
+    borderWidth: 2.5,
+    padding: 12,
   },
-
-  rowBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0EEEA',
-  },
-
-  rowBorderDark: {
-    borderBottomColor: '#292929',
-  },
-
   check: {
-    width: 26,
-    height: 26,
-    borderRadius: 9,
-    borderWidth: 1.5,
-    borderColor: '#D8D5CE',
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#000000',
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
   },
-
+  checkDone: {
+    backgroundColor: '#FFFFFF',
+  },
   rowCopy: {
     flex: 1,
-    gap: 3,
+    gap: 2,
   },
-
   habitName: {
-    fontFamily: FONT_MED,
+    fontFamily: FONT_BOLD,
     fontSize: 15,
-    color: '#27241F',
   },
-
   doneName: {
     textDecorationLine: 'line-through',
     opacity: 0.5,
   },
-
   habitMeta: {
-    fontFamily: FONT,
-    fontSize: 12,
-    color: '#908B83',
+    fontFamily: FONT_MED,
+    fontSize: 11,
   },
-
   streakBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: '#000000',
+    backgroundColor: '#FDE047',
+    alignSelf: 'center',
   },
-
   streakText: {
-    fontFamily: FONT_SEMI,
-    fontSize: 14,
+    fontFamily: FONT_BOLD,
+    fontSize: 12,
+    color: '#000000',
   },
-
   chevron: {
-    paddingLeft: 4,
+    paddingLeft: 2,
   },
 
   empty: {
-    paddingVertical: 40,
+    paddingVertical: 50,
     alignItems: 'center',
   },
-
   emptyText: {
-    fontFamily: FONT,
-    fontSize: 14,
-    color: '#908B83',
+    fontFamily: FONT_BOLD,
+    fontSize: 15,
     textAlign: 'center',
   },
 
-  fab: {
+  /* FAB */
+  fabContainer: {
     position: 'absolute',
-    bottom: 30,
+    bottom: 28,
     alignSelf: 'center',
+    width: 60,
+    height: 60,
+  },
+  fabShadowBackdrop: {
+    position: 'absolute',
+    top: 4,
+    left: 4,
+    width: 56,
+    height: 56,
+    backgroundColor: '#000000',
+    borderRadius: 28,
+  },
+  fabBtn: {
     width: 56,
     height: 56,
     borderRadius: 28,
+    backgroundColor: '#000000',
+    borderWidth: 2.5,
+    borderColor: '#000000',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    elevation: 6,
   },
 
-  keyboardAvoiding: {
+  /* CENTERED MODALS */
+  centeredModalShade: {
     flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 16,
   },
-
-  modalShade: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor:
-      'rgba(0,0,0,0.45)',
+  keyboardAvoidingViewCentered: {
+    width: '100%',
+    maxHeight: '85%',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-
-  modalCard: {
-    backgroundColor: '#FFF',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 22,
-    paddingBottom: 34,
-    maxHeight: '92%',
+  modalCardWrapper: {
+    position: 'relative',
+    width: '100%',
   },
-
-  modalDark: {
-    backgroundColor: '#161616',
+  modalShadowBackdrop: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    right: -6,
+    bottom: -6,
+    backgroundColor: '#000000',
+    borderRadius: 20,
   },
-
+  modalCardBody: {
+    borderRadius: 20,
+    borderWidth: 3,
+    borderColor: '#000000',
+    padding: 20,
+    maxHeight: 540,
+  },
   modalTitleRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    justifyContent: 'space-between',
+    marginBottom: 12,
   },
-
-  modalFormScroll: {
-    flexShrink: 1,
-    maxHeight: 400,
-  },
-
-  modalFormContent: {
-    paddingBottom: 4,
-  },
-
   modalTitle: {
     fontFamily: FONT_BOLD,
-    fontSize: 18,
-    color: '#27241F',
+    fontSize: 20,
+    flex: 1,
+    marginRight: 10,
   },
-
-  label: {
-    fontFamily: FONT_MED,
-    fontSize: 13,
-    color: '#77746E',
-    marginTop: 12,
+  modalError: {
+    fontFamily: FONT_BOLD,
+    color: '#EF4444',
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  modalScroll: {
+    flexGrow: 0,
+    flexShrink: 1,
+  },
+  modalScrollContent: {
+    paddingBottom: 16,
+  },
+  inputLabel: {
+    fontFamily: FONT_BOLD,
+    fontSize: 11,
+    letterSpacing: 0.5,
     marginBottom: 6,
+    marginTop: 10,
   },
-
-  input: {
-    borderWidth: 1,
-    borderColor: '#E1DED8',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    fontFamily: FONT,
-    fontSize: 15,
-    color: '#282724',
+  modalTextInput: {
+    fontFamily: FONT_MED,
+    fontSize: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 2,
   },
-
-  inputDark: {
-    backgroundColor: '#1E1E1E',
-    borderColor: '#363636',
-    color: '#F4F2EE',
-  },
-
-  catRow: {
+  chipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
   },
-
-  catChip: {
-    paddingHorizontal: 14,
+  chip: {
+    paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#E2DFD9',
-    backgroundColor: '#FFF',
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#000000',
+  },
+  chipActive: {
+    backgroundColor: '#000000',
+  },
+  chipText: {
+    fontFamily: FONT_BOLD,
+    fontSize: 12,
   },
 
-  catText: {
-    fontFamily: FONT,
-    fontSize: 13,
-    color: '#77746E',
-  },
-
-  saveButton: {
-    borderRadius: 14,
+  primaryBtn: {
+    backgroundColor: '#000000',
     paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 2.5,
+    borderColor: '#000000',
     alignItems: 'center',
-    marginTop: 20,
+    marginTop: 14,
   },
-
-  saveText: {
-    fontFamily: FONT_SEMI,
+  primaryBtnText: {
+    fontFamily: FONT_BOLD,
+    color: '#FFFFFF',
     fontSize: 15,
   },
 });

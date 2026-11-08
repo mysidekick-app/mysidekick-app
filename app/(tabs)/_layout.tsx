@@ -4,6 +4,7 @@ import {
   Tabs,
   usePathname,
   useRouter,
+  useLocalSearchParams,
 } from 'expo-router';
 
 import {
@@ -30,22 +31,40 @@ export default function TabsLayout() {
 
   const pathname = usePathname();
   const router = useRouter();
+  const routeParams = useLocalSearchParams<{ shareStreak?: string; flex?: string }>();
+
+  // Hide the bottom navbar while the Chat tab is displaying Share Streak mode.
+  const isShareStreak =
+    routeParams.shareStreak === 'true' ||
+    routeParams.shareStreak === '1' ||
+    routeParams.flex === 'true' ||
+    routeParams.flex === '1';
 
   const inactiveColor = isDark
-    ? '#8C8982'
-    : '#A4A09A';
+    ? '#D4D4D8'
+    : '#52525B';
 
   const navBackground = isDark
-    ? '#000000'
+    ? '#121212'
     : '#FFFFFF';
 
-  const navBorder = isDark
-    ? '#292929'
-    : '#ECE9E4';
+  const navBorder = '#000000';
 
   const screenBackground = isDark
     ? '#000000'
     : '#FFFFFF';
+
+  /*
+   * Show the bottom navbar only on the three main tabs:
+   * Chat, Home (Modules), and Profile.
+   * All sub-module routes hide it.
+   */
+  const showNavbar =
+    !isShareStreak &&
+    (pathname === '/' ||
+      pathname === '/index' ||
+      pathname === '/modules' ||
+      pathname === '/profile');
 
   /*
    * ============================================================
@@ -137,25 +156,27 @@ export default function TabsLayout() {
          * Expo Router tab bar.
          */
 
-        tabBarStyle: {
-          height: 78,
-          backgroundColor:
-            navBackground,
-          borderTopColor:
-            navBorder,
-          borderTopWidth:
-            StyleSheet.hairlineWidth,
-          paddingTop: 10,
-          paddingBottom: 10,
-          paddingHorizontal: 14,
-          elevation: 8,
-          shadowOpacity: 0.08,
-          shadowRadius: 8,
-          shadowOffset: {
-            width: 0,
-            height: -2,
-          },
-        },
+        tabBarStyle: showNavbar
+          ? {
+              height: 78,
+              backgroundColor: navBackground,
+              borderTopColor: navBorder,
+              borderTopWidth: 0,
+              paddingTop: 10,
+              paddingBottom: 10,
+              paddingHorizontal: 14,
+              elevation: 8,
+              shadowColor: '#000000',
+              shadowOpacity: 1,
+              shadowRadius: 0,
+              shadowOffset: {
+                width: 0,
+                height: -4,
+              },
+            }
+          : {
+              display: 'none',
+            },
 
         /*
          * We display the selected label ourselves.
@@ -187,25 +208,32 @@ export default function TabsLayout() {
             <View
               style={[
                 styles.tab,
-                isChatSelected &&
-                  styles.selectedTab,
                 isChatSelected && {
                   backgroundColor:
                     accentForeground,
+                  borderWidth: 2,
+                  borderColor: '#000000',
+                  shadowColor: '#000000',
+                  shadowOffset: { width: 3, height: 3 },
+                  shadowOpacity: 1,
+                  shadowRadius: 0,
+                  elevation: 4,
                 },
+                isChatSelected &&
+                  styles.selectedTab,
               ]}
             >
               <MessageCircle
                 color={
                   isChatSelected
-                    ? '#FFFFFF'
+                    ? '#000000'
                     : inactiveColor
                 }
                 size={22}
                 strokeWidth={
                   isChatSelected
-                    ? 2.3
-                    : 2
+                    ? 2.6
+                    : 2.2
                 }
               />
 
@@ -236,25 +264,32 @@ export default function TabsLayout() {
             <View
               style={[
                 styles.tab,
-                isModuleSelected &&
-                  styles.selectedTab,
                 isModuleSelected && {
                   backgroundColor:
                     accentForeground,
+                  borderWidth: 2,
+                  borderColor: '#000000',
+                  shadowColor: '#000000',
+                  shadowOffset: { width: 3, height: 3 },
+                  shadowOpacity: 1,
+                  shadowRadius: 0,
+                  elevation: 4,
                 },
+                isModuleSelected &&
+                  styles.selectedTab,
               ]}
             >
               <Home
                 color={
                   isModuleSelected
-                    ? '#FFFFFF'
+                    ? '#000000'
                     : inactiveColor
                 }
                 size={22}
                 strokeWidth={
                   isModuleSelected
-                    ? 2.3
-                    : 2
+                    ? 2.6
+                    : 2.2
                 }
               />
 
@@ -285,25 +320,32 @@ export default function TabsLayout() {
             <View
               style={[
                 styles.tab,
-                isProfileSelected &&
-                  styles.selectedTab,
                 isProfileSelected && {
                   backgroundColor:
                     accentForeground,
+                  borderWidth: 2,
+                  borderColor: '#000000',
+                  shadowColor: '#000000',
+                  shadowOffset: { width: 3, height: 3 },
+                  shadowOpacity: 1,
+                  shadowRadius: 0,
+                  elevation: 4,
                 },
+                isProfileSelected &&
+                  styles.selectedTab,
               ]}
             >
               <User
                 color={
                   isProfileSelected
-                    ? '#FFFFFF'
+                    ? '#000000'
                     : inactiveColor
                 }
                 size={22}
                 strokeWidth={
                   isProfileSelected
-                    ? 2.3
-                    : 2
+                    ? 2.6
+                    : 2.2
                 }
               />
 
@@ -429,7 +471,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 10,
-    borderRadius: 23,
+    borderRadius: 12,
   },
 
   /*
@@ -444,14 +486,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 16,
-    borderRadius: 23,
+    borderRadius: 12,
     gap: 7,
   },
 
   selectedText: {
-    color: '#FFFFFF',
+    color: '#000000',
     fontFamily:
-      'Poppins-SemiBold',
+      'Poppins-Bold',
     fontSize: 13,
     lineHeight: 18,
     includeFontPadding: false,

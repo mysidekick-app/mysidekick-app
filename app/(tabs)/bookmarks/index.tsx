@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { KeyboardAvoidingView, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Linking, Modal, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Bookmark, ChevronLeft, ExternalLink, MoreVertical, Pencil, Plus, Search, Trash2, X } from 'lucide-react-native';
+import { Bookmark, ChevronLeft, ExternalLink, Headphones, Film, BookOpen, Folder, MoreVertical, Pencil, Plus, Search, Trash2, X } from 'lucide-react-native';
 import { router } from 'expo-router';
 import { useApp } from '@/components/AppProvider';
 import { supabase } from '@/lib/supabase';
@@ -25,26 +25,45 @@ const CATEGORIES: CategoryDef[] = [
   { label: 'Other', tags: ['Online Courses', 'Tools Inspos', 'Miscellaneous Link'] },
 ];
 
-const ALL_CATEGORY = 'All';
-const CATEGORY_LABELS = [ALL_CATEGORY, ...CATEGORIES.map((c) => c.label)];
-
 const tagsForCategory = (cat: string): string[] => {
-  if (cat === ALL_CATEGORY) return CATEGORIES.flatMap((c) => c.tags);
   return CATEGORIES.find((c) => c.label === cat)?.tags ?? [];
 };
 
-const FONT = 'Poppins-Regular';
-const FONT_MED = 'Poppins-Medium';
-const FONT_SEMI = 'Poppins-SemiBold';
-const FONT_BOLD = 'Poppins-Bold';
+function getFolderIcon(categoryName: string) {
+  switch (categoryName) {
+    case 'Videos & Shows':
+      return Film;
+    case 'Audio':
+      return Headphones;
+    case 'Written':
+      return BookOpen;
+    default:
+      return Folder;
+  }
+}
+
+function isAccentBlack(color?: string): boolean {
+  if (!color) return false;
+  const normalized = color.trim().toLowerCase();
+  return (
+    normalized === '#000000' ||
+    normalized === '#000' ||
+    normalized === 'black' ||
+    normalized === 'rgb(0,0,0)' ||
+    normalized === 'rgba(0,0,0,1)'
+  );
+}
 
 export default function BookmarksScreen() {
-  const { accentForeground, accentWash, isDark, onAccent } = useApp();
+  const { accentForeground, accentColor: rawAccent, isDark } = useApp() as any;
+  const pageBg = rawAccent || accentForeground || '#FDE047';
+  const isAccentPureBlack = isAccentBlack(pageBg);
+
   const [bookmarks, setBookmarks] = useState<BookmarkItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [selectedCategory, setSelectedCategory] = useState(ALL_CATEGORY);
+  const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [query, setQuery] = useState('');
 
@@ -73,12 +92,15 @@ export default function BookmarksScreen() {
 
   useEffect(() => { load(); }, [load]);
 
-  const availableTags = useMemo(() => tagsForCategory(selectedCategory), [selectedCategory]);
+  const availableTags = useMemo(() => {
+    if (!activeFolder) return [];
+    return tagsForCategory(activeFolder);
+  }, [activeFolder]);
 
   const filtered = useMemo(() => {
     let items = bookmarks;
-    if (selectedCategory !== ALL_CATEGORY) {
-      items = items.filter((b) => b.category === selectedCategory);
+    if (activeFolder) {
+      items = items.filter((b) => b.category === activeFolder);
     }
     if (selectedTag) {
       items = items.filter((b) => b.tag === selectedTag);
@@ -92,10 +114,10 @@ export default function BookmarksScreen() {
       );
     }
     return items;
-  }, [bookmarks, selectedCategory, selectedTag, query]);
+  }, [bookmarks, activeFolder, selectedTag, query]);
 
-  const handleCategoryChange = (cat: string) => {
-    setSelectedCategory(cat);
+  const handleOpenFolder = (folderName: string) => {
+    setActiveFolder(folderName);
     setSelectedTag(null);
   };
 
@@ -103,9 +125,9 @@ export default function BookmarksScreen() {
     setEditingId(null);
     setTitle('');
     setUrl('');
-    setCategory(selectedCategory !== ALL_CATEGORY ? selectedCategory : CATEGORIES[0].label);
-    const cat = selectedCategory !== ALL_CATEGORY ? selectedCategory : CATEGORIES[0].label;
-    const catTags = tagsForCategory(cat);
+    const targetCat = activeFolder || CATEGORIES[0].label;
+    setCategory(targetCat);
+    const catTags = tagsForCategory(targetCat);
     setTag(selectedTag && catTags.includes(selectedTag) ? selectedTag : catTags[0]);
     setNotes('');
     setError(null);
@@ -189,145 +211,231 @@ export default function BookmarksScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.safe, isDark && styles.safeDark]}>
+    <SafeAreaView style={[styles.safe, { backgroundColor: pageBg }]}>
+      <StatusBar
+        barStyle={isAccentPureBlack ? 'light-content' : 'dark-content'}
+        backgroundColor={pageBg}
+      />
+
       {/* Header */}
-      <View style={[styles.header, isDark && styles.headerDark]}>
-        <Pressable onPress={() => router.push('/modules')} style={[styles.backBtn, { backgroundColor: accentForeground }]} hitSlop={12}>
-          <ChevronLeft color="#FFFFFF" size={22} strokeWidth={2.4} />
+      <View style={styles.header}>
+        <Pressable
+          onPress={() => {
+            if (activeFolder) {
+              setActiveFolder(null);
+              setSelectedTag(null);
+            } else {
+              router.push('/modules');
+            }
+          }}
+          style={({ pressed }) => [styles.backBtn, pressed && styles.pressedBtn]}
+          hitSlop={12}
+        >
+          <ChevronLeft color="#FFFFFF" size={22} strokeWidth={2.8} />
         </Pressable>
-        <Text
-          style={[
-            styles.headerTitle,
-            {
-              color:
-                isDark ? '#FFFFFF' : accentForeground,
-            },
-          ]}
-        >BOOKMARKS</Text>
-        <Pressable onPress={() => setMenuOpen(true)} style={styles.bellBtn} hitSlop={12}>
-          <MoreVertical color={isDark ? '#F4F2EE' : '#27241F'} size={20} />
+        <Text style={styles.headerTitle} numberOfLines={1}>
+          {activeFolder ? activeFolder.toUpperCase() : 'BOOKMARKS'}
+        </Text>
+        <Pressable
+          onPress={() => setMenuOpen(true)}
+          style={({ pressed }) => [styles.bellBtn, pressed && styles.pressedBtn]}
+          hitSlop={12}
+        >
+          <MoreVertical color="#000000" size={22} strokeWidth={2.5} />
         </Pressable>
       </View>
 
       <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
         <Pressable style={styles.menuShade} onPress={() => setMenuOpen(false)}>
           <Pressable
-            style={[styles.menuCard, { backgroundColor: isDark ? '#1C1C1C' : '#FFFFFF', borderColor: isDark ? '#2A2A2A' : '#ECE9E4' }]}
+            style={[styles.menuCard, { backgroundColor: isDark ? '#121212' : '#FFFFFF', borderColor: '#000000' }]}
             onPress={(event) => event.stopPropagation()}
           >
             <Pressable
-  onPress={() => {
-    setMenuOpen(false);
-    router.push('/(tabs)/profile');
-  }}
-  style={styles.menuItem}
->
-              <Text style={[styles.menuItemText, { color: isDark ? '#F4F2EE' : '#27241F' }]}>Settings</Text>
+              onPress={() => {
+                setMenuOpen(false);
+                router.push('/(tabs)/profile');
+              }}
+              style={styles.menuItem}
+            >
+              <Text style={[styles.menuItemText, { color: isDark ? '#FFFFFF' : '#000000' }]}>Settings</Text>
             </Pressable>
           </Pressable>
         </Pressable>
       </Modal>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Full-width search */}
-        <View style={[styles.search, isDark && styles.searchDark]}>
-          <Search color={isDark ? '#BDB9B1' : '#8D8B86'} size={18} />
-          <TextInput
-            value={query}
-            onChangeText={setQuery}
-            placeholder="Search bookmarks"
-            placeholderTextColor={isDark ? '#8C8982' : '#A4A09A'}
-            style={[styles.searchInput, isDark && styles.darkText]}
-          />
+        {/* Search bar always white background */}
+        <View style={styles.searchWrapper}>
+          <View style={styles.searchShadowBackdrop} />
+          <View style={[styles.search, { backgroundColor: '#FFFFFF' }]}>
+            <Search color="#52525B" size={18} />
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search bookmarks..."
+              placeholderTextColor="#71717A"
+              style={[styles.searchInput, { color: '#000000' }]}
+            />
+          </View>
         </View>
 
         {error && <Text style={styles.error}>{error}</Text>}
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
-          {CATEGORY_LABELS.map((cat) => (
-            <Pressable
-              key={cat}
-              onPress={() => handleCategoryChange(cat)}
-              style={[styles.filter, isDark && styles.filterDark, selectedCategory === cat && { backgroundColor: accentForeground, borderColor: accentForeground }]}
-            >
-              <Text style={[styles.filterText, isDark && styles.darkMuted, selectedCategory === cat && { color: onAccent, fontFamily: FONT_SEMI }]}>{cat}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-
-        {selectedCategory !== ALL_CATEGORY && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tagRow}>
-            <Pressable
-              onPress={() => setSelectedTag(null)}
-              style={[styles.tagChip, isDark && styles.tagChipDark, !selectedTag && { backgroundColor: accentWash, borderColor: accentForeground }]}
-            >
-              <Text style={[styles.tagChipText, isDark && styles.darkMuted, !selectedTag && { color: accentForeground, fontFamily: FONT_SEMI }]}>All</Text>
-            </Pressable>
-            {availableTags.map((t) => (
-              <Pressable
-                key={t}
-                onPress={() => setSelectedTag(selectedTag === t ? null : t)}
-                style={[styles.tagChip, isDark && styles.tagChipDark, selectedTag === t && { backgroundColor: accentWash, borderColor: accentForeground }]}
-              >
-                <Text style={[styles.tagChipText, isDark && styles.darkMuted, selectedTag === t && { color: accentForeground, fontFamily: FONT_SEMI }]}>{t}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-        )}
-
-        {loading ? (
-          <Text style={[styles.emptyText, isDark && styles.darkMuted]}>Loading your bookmarks...</Text>
-        ) : filtered.length === 0 ? (
-          <View style={styles.empty}>
-            <Text style={[styles.emptyText, isDark && styles.darkMuted]}>
-              {bookmarks.length === 0 ? 'No bookmarks yet. Tap + to save your first resource.' : 'No bookmarks match this filter.'}
-            </Text>
+        {/* FOLDERS VIEW (When no folder is selected) */}
+        {!activeFolder ? (
+          <View style={styles.foldersGrid}>
+            {CATEGORIES.map((cat, index) => {
+              const count = bookmarks.filter((b) => b.category === cat.label).length;
+              const IconComponent = getFolderIcon(cat.label);
+              return (
+                <View key={cat.label} style={styles.folderCardContainer}>
+                  <View style={styles.cardShadowBackdrop} />
+                  <Pressable
+                    onPress={() => handleOpenFolder(cat.label)}
+                    style={({ pressed }) => [
+                      styles.folderCard,
+                      { backgroundColor: isDark ? '#121212' : '#FFFFFF', borderColor: '#000000' },
+                      pressed && styles.pressedBtn,
+                    ]}
+                  >
+                    <View style={styles.folderTop}>
+                      <View style={[styles.folderIconWrap, { backgroundColor: pageBg }]}>
+                        <IconComponent color="#000000" size={20} strokeWidth={2.4} />
+                      </View>
+                      <View style={[styles.countBadge, { backgroundColor: pageBg }]}>
+                        <Text style={styles.countBadgeText}>{count}</Text>
+                      </View>
+                    </View>
+                    <Text style={[styles.folderTitle, { color: isDark ? pageBg : '#000000' }]} numberOfLines={1}>
+                      {cat.label.toUpperCase()}
+                    </Text>
+                    <Text style={[styles.folderSub, { color: isDark ? '#A1A1AA' : '#52525B' }]} numberOfLines={1}>
+                      {cat.tags.join(', ')}
+                    </Text>
+                  </Pressable>
+                </View>
+              );
+            })}
           </View>
         ) : (
-          <View style={[styles.list, isDark && styles.cardDark]}>
-            {filtered.map((bk, i) => (
+          /* FOLDER DETAIL & SUB-FILTERS VIEW */
+          <>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tagRow}>
               <Pressable
-                key={bk.id}
-                onPress={() => setDetailOpen(bk)}
-                style={[styles.row, i < filtered.length - 1 && styles.rowBorder, isDark && styles.rowBorderDark]}
+                onPress={() => setSelectedTag(null)}
+                style={({ pressed }) => [
+                  styles.tagChip,
+                  {
+                    backgroundColor: !selectedTag ? pageBg : (isDark ? '#27272A' : '#F4F4F5'),
+                    borderColor: '#000000',
+                  },
+                  pressed && styles.pressedBtn,
+                ]}
               >
-                <View style={[styles.rowIcon, { backgroundColor: accentWash }]}>
-                  <Bookmark color={accentForeground} size={16} strokeWidth={2.2} />
-                </View>
-                <View style={styles.rowCopy}>
-                  <Text style={[styles.rowTitle, isDark && styles.darkText]} numberOfLines={1}>{bk.title}</Text>
-                  <View style={styles.rowMeta}>
-                    {bk.url ? (
-                      <Text style={[styles.rowUrl, isDark && styles.darkMuted]} numberOfLines={1}>{bk.url.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')}</Text>
-                    ) : null}
-                    <View style={[styles.tagPill, { backgroundColor: accentForeground }]}>
-                      <Text style={[styles.tagPillText, { color: onAccent }]}>{bk.tag}</Text>
-                    </View>
-                  </View>
-                </View>
+                <Text style={[styles.tagChipText, { color: !selectedTag ? '#000000' : (isDark ? '#FFFFFF' : '#000000') }]}>
+                  All
+                </Text>
               </Pressable>
-            ))}
-          </View>
-        )}
+              {availableTags.map((t) => {
+                const isSelected = selectedTag === t;
+                return (
+                  <Pressable
+                    key={t}
+                    onPress={() => setSelectedTag(isSelected ? null : t)}
+                    style={({ pressed }) => [
+                      styles.tagChip,
+                      {
+                        backgroundColor: isSelected ? pageBg : (isDark ? '#27272A' : '#F4F4F5'),
+                        borderColor: '#000000',
+                      },
+                      pressed && styles.pressedBtn,
+                    ]}
+                  >
+                    <Text style={[styles.tagChipText, { color: isSelected ? '#000000' : (isDark ? '#FFFFFF' : '#000000') }]}>
+                      {t}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
 
-        <View style={styles.countRow}>
-          <Text style={[styles.countText, isDark && styles.darkMuted]}>{filtered.length} bookmark{filtered.length === 1 ? '' : 's'}{selectedCategory !== ALL_CATEGORY ? ` in ${selectedCategory}` : ''}</Text>
-        </View>
+            {loading ? (
+              <Text style={styles.emptyText}>Loading your bookmarks...</Text>
+            ) : filtered.length === 0 ? (
+              <View style={styles.empty}>
+                <Text style={styles.emptyText}>
+                  {bookmarks.length === 0 ? 'No bookmarks yet. Tap + to save your first resource.' : 'No bookmarks match this filter.'}
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.cardContainer}>
+                <View style={styles.cardShadowBackdrop} />
+                <View style={[styles.list, { backgroundColor: isDark ? '#121212' : '#FFFFFF', borderColor: '#000000' }]}>
+                  {filtered.map((bk, i) => (
+                    <Pressable
+                      key={bk.id}
+                      onPress={() => setDetailOpen(bk)}
+                      style={({ pressed }) => [
+                        styles.row,
+                        i < filtered.length - 1 && [styles.rowBorder, { borderBottomColor: isDark ? '#27272A' : '#E4E4E7' }],
+                        pressed && { opacity: 0.7 },
+                      ]}
+                    >
+                      <View style={[styles.rowIcon, { backgroundColor: pageBg }]}>
+                        <Bookmark color="#000000" size={18} strokeWidth={2.4} />
+                      </View>
+                      <View style={styles.rowCopy}>
+                        <Text style={[styles.rowTitle, { color: isDark ? '#FFFFFF' : '#000000' }]} numberOfLines={1}>{bk.title}</Text>
+                        <View style={styles.rowMeta}>
+                          {bk.url ? (
+                            <Text style={[styles.rowUrl, { color: isDark ? '#A1A1AA' : '#52525B' }]} numberOfLines={1}>{bk.url.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')}</Text>
+                          ) : null}
+                          <View style={[styles.tagPill, { backgroundColor: pageBg }]}>
+                            <Text style={styles.tagPillText}>{bk.tag}</Text>
+                          </View>
+                        </View>
+                      </View>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            <View style={styles.countRow}>
+              <Text style={styles.countText}>
+                {filtered.length} bookmark{filtered.length === 1 ? '' : 's'} in {activeFolder}
+              </Text>
+            </View>
+          </>
+        )}
       </ScrollView>
 
       {/* Floating + button */}
-      <Pressable onPress={openNew} style={[styles.fab, { backgroundColor: accentForeground }]} hitSlop={12}>
-        <Plus color={onAccent} size={26} strokeWidth={2.6} />
+      <Pressable
+        onPress={openNew}
+        style={({ pressed }) => [
+          styles.fab,
+          { backgroundColor: '#000000', borderWidth: 2, borderColor: pageBg },
+          pressed && styles.pressedBtn,
+        ]}
+        hitSlop={12}
+      >
+        <Plus color={pageBg} size={28} strokeWidth={2.8} />
       </Pressable>
 
       {/* Add/Edit modal */}
-      <Modal visible={modalOpen} transparent animationType="slide" onRequestClose={() => setModalOpen(false)}>
-        <View style={styles.modalShade}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.keyboardModal}>
-            <View style={[styles.modalCard, isDark && styles.modalDark]}>
+      <Modal visible={modalOpen} transparent animationType="fade" onRequestClose={() => setModalOpen(false)}>
+        <Pressable style={styles.centeredModalBackdrop} onPress={() => setModalOpen(false)}>
+          <Pressable
+            style={[styles.centeredModalCard, { backgroundColor: isDark ? '#18181B' : '#FFFFFF' }]}
+            onPress={(e) => e.stopPropagation()}
+          >
             <View style={styles.modalTitleRow}>
-              <Text style={[styles.modalTitle, isDark && styles.darkText]}>{editingId ? 'Edit bookmark' : 'Save resource'}</Text>
-              <Pressable onPress={() => { setModalOpen(false); setEditingId(null); }}><X color={isDark ? '#F4F2EE' : '#5A5751'} size={21} /></Pressable>
+              <Text style={[styles.modalTitle, { color: pageBg }]}>{editingId ? 'Edit bookmark' : 'Save resource'}</Text>
+              <Pressable onPress={() => { setModalOpen(false); setEditingId(null); }} hitSlop={12}>
+                <X color={isDark ? '#FFFFFF' : '#000000'} size={21} strokeWidth={2.5} />
+              </Pressable>
             </View>
 
             <ScrollView
@@ -336,191 +444,310 @@ export default function BookmarksScreen() {
               contentContainerStyle={styles.modalScrollContent}
               keyboardShouldPersistTaps="handled"
             >
-              <Text style={[styles.label, isDark && styles.darkMuted]}>Title</Text>
-              <TextInput value={title} onChangeText={setTitle} placeholder="What are you saving?" placeholderTextColor="#9B978F" style={[styles.input, isDark && styles.inputDark]} autoFocus />
+              <Text style={[styles.label, { color: isDark ? '#A1A1AA' : '#52525B' }]}>Title</Text>
+              <TextInput
+                value={title}
+                onChangeText={setTitle}
+                placeholder="What are you saving?"
+                placeholderTextColor={isDark ? '#71717A' : '#A1A1AA'}
+                style={[styles.input, { backgroundColor: isDark ? '#27272A' : '#F4F4F5', borderColor: '#000000', color: isDark ? '#FFFFFF' : '#000000' }]}
+                autoFocus
+              />
 
-              <Text style={[styles.label, isDark && styles.darkMuted]}>Link (optional)</Text>
-              <TextInput value={url} onChangeText={setUrl} placeholder="https://..." placeholderTextColor="#9B978F" style={[styles.input, isDark && styles.inputDark]} autoCapitalize="none" keyboardType="url" />
+              <Text style={[styles.label, { color: isDark ? '#A1A1AA' : '#52525B' }]}>Link (optional)</Text>
+              <TextInput
+                value={url}
+                onChangeText={setUrl}
+                placeholder="https://..."
+                placeholderTextColor={isDark ? '#71717A' : '#A1A1AA'}
+                style={[styles.input, { backgroundColor: isDark ? '#27272A' : '#F4F4F5', borderColor: '#000000', color: isDark ? '#FFFFFF' : '#000000' }]}
+                autoCapitalize="none"
+                keyboardType="url"
+              />
 
-              <Text style={[styles.label, isDark && styles.darkMuted]}>Category</Text>
+              <Text style={[styles.label, { color: isDark ? '#A1A1AA' : '#52525B' }]}>Folder / Category</Text>
               <View style={styles.chipRow}>
-                {CATEGORIES.map((c) => (
-                  <Pressable key={c.label} onPress={() => handleCategorySelect(c.label)} style={[styles.chip, category === c.label && { backgroundColor: accentForeground, borderColor: accentForeground }]}>
-                    <Text style={[styles.chipText, isDark && styles.darkMuted, category === c.label && { color: onAccent, fontFamily: FONT_SEMI }]}>{c.label}</Text>
-                  </Pressable>
-                ))}
+                {CATEGORIES.map((c) => {
+                  const isSelected = category === c.label;
+                  return (
+                    <Pressable
+                      key={c.label}
+                      onPress={() => handleCategorySelect(c.label)}
+                      style={[
+                        styles.chip,
+                        {
+                          backgroundColor: isSelected ? pageBg : (isDark ? '#27272A' : '#F4F4F5'),
+                          borderColor: '#000000',
+                        },
+                      ]}
+                    >
+                      <Text style={[styles.chipText, { color: isSelected ? '#000000' : (isDark ? '#FFFFFF' : '#000000') }]}>
+                        {c.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
               </View>
 
-              <Text style={[styles.label, isDark && styles.darkMuted]}>Tag</Text>
+              <Text style={[styles.label, { color: isDark ? '#A1A1AA' : '#52525B' }]}>Sub-Filter / Tag</Text>
               <View style={styles.chipRow}>
-                {tagsForCategory(category).map((t) => (
-                  <Pressable key={t} onPress={() => setTag(t)} style={[styles.chip, tag === t && { backgroundColor: accentForeground, borderColor: accentForeground }]}>
-                    <Text style={[styles.chipText, isDark && styles.darkMuted, tag === t && { color: onAccent, fontFamily: FONT_SEMI }]}>{t}</Text>
-                  </Pressable>
-                ))}
+                {tagsForCategory(category).map((t) => {
+                  const isSelected = tag === t;
+                  return (
+                    <Pressable
+                      key={t}
+                      onPress={() => setTag(t)}
+                      style={[
+                        styles.chip,
+                        {
+                          backgroundColor: isSelected ? pageBg : (isDark ? '#27272A' : '#F4F4F5'),
+                          borderColor: '#000000',
+                        },
+                      ]}
+                    >
+                      <Text style={[styles.chipText, { color: isSelected ? '#000000' : (isDark ? '#FFFFFF' : '#000000') }]}>
+                        {t}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
               </View>
 
-              <Text style={[styles.label, isDark && styles.darkMuted]}>Notes (optional)</Text>
+              <Text style={[styles.label, { color: isDark ? '#A1A1AA' : '#52525B' }]}>Notes (optional)</Text>
               <TextInput
                 value={notes}
                 onChangeText={setNotes}
                 placeholder="Thoughts about this resource"
-                placeholderTextColor="#9B978F"
-                style={[styles.input, styles.notesInput, isDark && styles.inputDark]}
+                placeholderTextColor={isDark ? '#71717A' : '#A1A1AA'}
+                style={[styles.input, styles.notesInput, { backgroundColor: isDark ? '#27272A' : '#F4F4F5', borderColor: '#000000', color: isDark ? '#FFFFFF' : '#000000' }]}
                 multiline
                 scrollEnabled
                 textAlignVertical="top"
               />
             </ScrollView>
 
-            <View
-              style={[
-                styles.saveFooter,
-                {
-                  backgroundColor: isDark ? '#161616' : '#FFF',
-                  borderTopColor: isDark ? '#2A2A2A' : '#ECE9E4',
-                },
-              ]}
-            >
+            <View style={[styles.saveFooter, { backgroundColor: isDark ? '#18181B' : '#FFFFFF', borderTopColor: '#000000' }]}>
               <Pressable
                 disabled={saving}
                 onPress={saveBookmark}
-                style={[
+                style={({ pressed }) => [
                   styles.saveButton,
-                  { backgroundColor: accentForeground },
+                  { backgroundColor: '#000000', borderWidth: 2, borderColor: pageBg },
                   saving && { opacity: 0.6 },
+                  pressed && styles.pressedBtn,
                 ]}
               >
-                <Text style={[styles.saveText, { color: onAccent }]}>
+                <Text style={[styles.saveText, { color: pageBg }]}>
                   {saving ? 'Saving...' : editingId ? 'Update bookmark' : 'Save bookmark'}
                 </Text>
               </Pressable>
             </View>
-            </View>
-          </KeyboardAvoidingView>
-        </View>
+          </Pressable>
+        </Pressable>
       </Modal>
 
       {/* Detail modal */}
-      <Modal visible={!!detailOpen} transparent animationType="slide" onRequestClose={() => setDetailOpen(null)}>
-        <View style={styles.modalShade}>
-          <View style={[styles.modalCard, isDark && styles.modalDark]}>
+      <Modal visible={!!detailOpen} transparent animationType="fade" onRequestClose={() => setDetailOpen(null)}>
+        <Pressable style={styles.centeredModalBackdrop} onPress={() => setDetailOpen(null)}>
+          <Pressable
+            style={[styles.centeredModalCard, { backgroundColor: isDark ? '#18181B' : '#FFFFFF' }]}
+            onPress={(e) => e.stopPropagation()}
+          >
             {detailOpen && (() => {
               const bk = detailOpen;
               return (
                 <>
                   <View style={styles.modalTitleRow}>
-                    <Text style={[styles.modalTitle, isDark && styles.darkText]} numberOfLines={2}>{bk.title}</Text>
-                    <Pressable onPress={() => setDetailOpen(null)}><X color={isDark ? '#F4F2EE' : '#5A5751'} size={21} /></Pressable>
+                    <Text style={[styles.modalTitle, { color: pageBg }]} numberOfLines={2}>{bk.title}</Text>
+                    <Pressable onPress={() => setDetailOpen(null)} hitSlop={12}>
+                      <X color={isDark ? '#FFFFFF' : '#000000'} size={21} strokeWidth={2.5} />
+                    </Pressable>
                   </View>
 
                   <View style={styles.detailSection}>
                     <View style={styles.detailLine}>
-                      <Bookmark color={isDark ? '#AAA59D' : '#89857D'} size={16} />
-                      <Text style={[styles.detailText, isDark && styles.darkText]}>{bk.category}</Text>
-                      <View style={[styles.tagPill, { backgroundColor: accentForeground, marginLeft: 6 }]}>
-                        <Text style={[styles.tagPillText, { color: onAccent }]}>{bk.tag}</Text>
+                      <Bookmark color={isDark ? '#A1A1AA' : '#52525B'} size={18} />
+                      <Text style={[styles.detailText, { color: isDark ? '#FFFFFF' : '#000000' }]}>{bk.category}</Text>
+                      <View style={[styles.tagPill, { backgroundColor: pageBg, marginLeft: 6 }]}>
+                        <Text style={[styles.tagPillText, { color: '#000000' }]}>{bk.tag}</Text>
                       </View>
                     </View>
                     {bk.url ? (
                       <Pressable onPress={() => openLink(bk.url!)} style={styles.detailLine}>
-                        <ExternalLink color={accentForeground} size={16} />
-                        <Text style={[styles.detailLink, { color: accentForeground }]} numberOfLines={1}>{bk.url}</Text>
+                        <ExternalLink color={pageBg} size={18} />
+                        <Text style={[styles.detailLink, { color: pageBg }]} numberOfLines={1}>{bk.url}</Text>
                       </Pressable>
                     ) : null}
-                    {bk.notes ? <Text style={[styles.detailNotes, isDark && styles.darkMuted]}>{bk.notes}</Text> : null}
-                    <Text style={[styles.detailDate, isDark && styles.darkMuted]}>Saved {new Date(bk.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</Text>
+                    {bk.notes ? <Text style={[styles.detailNotes, { color: isDark ? '#A1A1AA' : '#52525B' }]}>{bk.notes}</Text> : null}
+                    <Text style={[styles.detailDate, { color: isDark ? '#A1A1AA' : '#52525B' }]}>
+                      Saved {new Date(bk.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </Text>
                   </View>
 
                   <View style={styles.detailActions}>
-                    <Pressable onPress={() => openEdit(bk)} style={[styles.detailAction, { backgroundColor: accentForeground }]}>
-                      <Pencil color={onAccent} size={16} />
-                      <Text style={[styles.detailActionText, { color: onAccent }]}>Edit</Text>
+                    <Pressable
+                      onPress={() => openEdit(bk)}
+                      style={({ pressed }) => [
+                        styles.detailAction,
+                        { backgroundColor: '#000000', borderWidth: 2, borderColor: pageBg },
+                        pressed && styles.pressedBtn,
+                      ]}
+                    >
+                      <Pencil color={pageBg} size={16} strokeWidth={2.4} />
+                      <Text style={[styles.detailActionText, { color: pageBg }]}>Edit</Text>
                     </Pressable>
                     {bk.url ? (
-                      <Pressable onPress={() => openLink(bk.url!)} style={[styles.detailAction, styles.secondaryAction, isDark && styles.secondaryActionDark]}>
-                        <ExternalLink color={accentForeground} size={16} />
-                        <Text style={[styles.detailActionText, { color: accentForeground }]}>Open</Text>
+                      <Pressable
+                        onPress={() => openLink(bk.url!)}
+                        style={({ pressed }) => [
+                          styles.detailAction,
+                          { backgroundColor: isDark ? '#27272A' : '#F4F4F5', borderWidth: 2, borderColor: '#000000' },
+                          pressed && styles.pressedBtn,
+                        ]}
+                      >
+                        <ExternalLink color={isDark ? '#FFFFFF' : '#000000'} size={16} strokeWidth={2.4} />
+                        <Text style={[styles.detailActionText, { color: isDark ? '#FFFFFF' : '#000000' }]}>Open</Text>
                       </Pressable>
                     ) : null}
-                    <Pressable onPress={() => deleteBookmark(bk)} style={[styles.detailAction, styles.deleteAction, isDark && styles.deleteActionDark]}>
-                      <Trash2 color={isDark ? '#E5A39C' : '#C53A2F'} size={16} />
+                    <Pressable
+                      onPress={() => deleteBookmark(bk)}
+                      style={({ pressed }) => [
+                        styles.detailAction,
+                        { backgroundColor: isDark ? '#121212' : '#FFFFFF', borderWidth: 2, borderColor: '#EF4444' },
+                        pressed && styles.pressedBtn,
+                      ]}
+                    >
+                      <Trash2 color="#EF4444" size={16} strokeWidth={2.4} />
                       <Text style={styles.deleteText}>Delete</Text>
                     </Pressable>
                   </View>
                 </>
               );
             })()}
-          </View>
-        </View>
+          </Pressable>
+        </Pressable>
       </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#FBFAF8' },
-  safeDark: { backgroundColor: '#090909' },
-  darkText: { color: '#F4F2EE' },
-  darkMuted: { color: '#AAA59D' },
-  error: { fontFamily: FONT_MED, color: '#C53A2F', fontSize: 13, marginBottom: 10 },
+  safe: { flex: 1 },
+  pressedBtn: { transform: [{ translateX: 2 }, { translateY: 2 }] },
+  error: { fontFamily: 'Poppins-Bold', color: '#EF4444', fontSize: 13, marginBottom: 10 },
 
-  header: {     
-    position: 'relative',
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 28,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ECE9E4',
-    zIndex: 100, },
-
-  headerDark: { borderBottomColor: '#262626' },
-  backBtn: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { fontFamily: 'Poppins-ExtraBold', fontSize: 16, letterSpacing: 1.4, color: '#27241F' },
-  bellBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
-  menuShade: { flex: 1, backgroundColor: 'rgba(0,0,0,0.25)', alignItems: 'flex-end', paddingTop: 64, paddingRight: 12 },
-  menuCard: { borderRadius: 14, borderWidth: 1, paddingVertical: 6, minWidth: 150, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 4 },
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 10,
+    zIndex: 100,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: '#000000',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#000000',
+  },
+  headerTitle: { fontFamily: 'Poppins-ExtraBold', fontSize: 20, letterSpacing: 1, color: '#000000', textAlign: 'center', flex: 1 },
+  bellBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  menuShade: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'flex-end', paddingTop: 64, paddingRight: 20 },
+  menuCard: { borderRadius: 12, borderWidth: 3, paddingVertical: 6, minWidth: 150 },
   menuItem: { paddingVertical: 12, paddingHorizontal: 16 },
-  menuItemText: { fontFamily: FONT_MED, fontSize: 14 },
+  menuItemText: { fontFamily: 'Poppins-Bold', fontSize: 14 },
 
+  content: { paddingHorizontal: 18, paddingTop: 4, paddingBottom: 90 },
 
-  content: { paddingHorizontal: 16, paddingTop: 28, paddingBottom: 90 },
+  searchWrapper: { position: 'relative', marginHorizontal: 2, marginBottom: 16, marginTop: 4 },
+  searchShadowBackdrop: { position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 },
+  search: { height: 48, borderRadius: 12, borderWidth: 2, borderColor: '#000000', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, gap: 10, zIndex: 2 },
+  searchInput: { flex: 1, fontFamily: 'Poppins-Medium', fontSize: 14 },
 
-  search: { height: 48, borderRadius: 14, borderWidth: 1, borderColor: '#E1DED8', backgroundColor: '#FFF', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, gap: 10, marginBottom: 4 },
-  searchDark: { backgroundColor: '#171717', borderColor: '#363636' },
-  searchInput: { flex: 1, fontFamily: FONT, fontSize: 14, color: '#282724' },
+  /* FOLDERS GRID STYLING */
+  foldersGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    paddingTop: 4,
+  },
+  folderCardContainer: {
+    width: '48%',
+    position: 'relative',
+    marginBottom: 16,
+  },
+  folderCard: {
+    borderRadius: 16,
+    borderWidth: 3,
+    padding: 16,
+    minHeight: 140,
+    justifyContent: 'space-between',
+  },
+  folderTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  folderIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#000000',
+  },
+  countBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: '#000000',
+  },
+  countBadgeText: {
+    fontFamily: 'Poppins-ExtraBold',
+    fontSize: 12,
+    color: '#000000',
+  },
+  folderTitle: {
+    fontFamily: 'Poppins-ExtraBold',
+    fontSize: 16,
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  folderSub: {
+    fontFamily: 'Poppins-Medium',
+    fontSize: 11,
+  },
 
-  filters: { gap: 8, paddingVertical: 14 },
-  filter: { paddingHorizontal: 15, height: 32, borderRadius: 10, borderWidth: 1, borderColor: '#E2DFD9', justifyContent: 'center', backgroundColor: '#FFF' },
-  filterDark: { backgroundColor: '#171717', borderColor: '#363636' },
-  filterText: { fontFamily: FONT_MED, color: '#77746E', fontSize: 12 },
+  tagRow: { gap: 8, paddingBottom: 14 },
+  tagChip: { paddingHorizontal: 14, height: 34, borderRadius: 8, borderWidth: 2, justifyContent: 'center', alignItems: 'center' },
+  tagChipText: { fontFamily: 'Poppins-Bold', fontSize: 12 },
 
-  tagRow: { gap: 8, paddingBottom: 12 },
-  tagChip: { paddingHorizontal: 13, height: 30, borderRadius: 9, borderWidth: 1, borderColor: '#E2DFD9', justifyContent: 'center', backgroundColor: '#FFF' },
-  tagChipDark: { backgroundColor: '#171717', borderColor: '#363636' },
-  tagChipText: { fontFamily: FONT_MED, color: '#77746E', fontSize: 11 },
-
-  list: { backgroundColor: '#FFF', borderRadius: 18, borderWidth: 1, borderColor: '#ECE9E4', paddingHorizontal: 14 },
-  cardDark: { backgroundColor: '#111', borderColor: '#2A2A2A' },
+  cardContainer: { position: 'relative', width: '100%', marginTop: 4 },
+  cardShadowBackdrop: { position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 16 },
+  list: { borderRadius: 16, borderWidth: 3, paddingHorizontal: 14 },
   row: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 },
-  rowBorder: { borderBottomWidth: 1, borderBottomColor: '#F0EEEA' },
-  rowBorderDark: { borderBottomColor: '#292929' },
-  rowIcon: { width: 36, height: 36, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  rowBorder: { borderBottomWidth: 2 },
+  rowIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: '#000000' },
   rowCopy: { flex: 1, gap: 4 },
-  rowTitle: { fontFamily: FONT_MED, fontSize: 15, color: '#27241F' },
+  rowTitle: { fontFamily: 'Poppins-ExtraBold', fontSize: 15 },
   rowMeta: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
-  rowUrl: { fontFamily: FONT, fontSize: 12, color: '#908B83', maxWidth: '60%' },
-  tagPill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 7 },
-  tagPillText: { fontFamily: FONT_SEMI, fontSize: 10 },
+  rowUrl: { fontFamily: 'Poppins-Medium', fontSize: 11, maxWidth: '60%' },
+  tagPill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1, borderColor: '#000000' },
+  tagPillText: { fontFamily: 'Poppins-ExtraBold', fontSize: 10, color: '#000000' },
 
-  countRow: { paddingTop: 14, alignItems: 'center' },
-  countText: { fontFamily: FONT, fontSize: 12, color: '#908B83' },
+  countRow: { paddingTop: 16, alignItems: 'center' },
+  countText: { fontFamily: 'Poppins-Bold', fontSize: 12, color: '#000000' },
 
   empty: { paddingVertical: 40, alignItems: 'center' },
-  emptyText: { fontFamily: FONT, fontSize: 14, color: '#908B83', textAlign: 'center' },
+  emptyText: { fontFamily: 'Poppins-Medium', fontSize: 14, color: '#000000', textAlign: 'center' },
 
   fab: {
     position: 'absolute',
@@ -537,39 +764,34 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 6,
   },
-  modalShade: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
-  modalCard: { backgroundColor: '#FFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 22, paddingBottom: 18, height: '88%', maxHeight: '92%' },
-  modalDark: { backgroundColor: '#161616' },
+
+  centeredModalBackdrop: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.8)', paddingHorizontal: 20 },
+  centeredModalCard: { width: '100%', maxWidth: 400, borderRadius: 24, borderWidth: 3, borderColor: '#000000', paddingTop: 22, paddingBottom: 26, paddingHorizontal: 22, maxHeight: '85%', shadowColor: '#000000', shadowOffset: { width: 6, height: 6 }, shadowOpacity: 1, shadowRadius: 0, elevation: 8 },
   modalTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  modalTitle: { fontFamily: FONT_BOLD, fontSize: 18, color: '#27241F', flex: 1, marginRight: 12 },
+  modalTitle: { fontFamily: 'Poppins-ExtraBold', fontSize: 20, flex: 1, marginRight: 12 },
   keyboardModal: { width: '100%', alignItems: 'center', justifyContent: 'flex-end' },
-   modalScroll: { flex: 1 },
+  modalScroll: { flexGrow: 0, flexShrink: 1 },
   modalScrollContent: { paddingBottom: 8 },
 
-  label: { fontFamily: FONT_MED, fontSize: 13, color: '#77746E', marginTop: 14, marginBottom: 6 },
-  input: { borderWidth: 1, borderColor: '#E1DED8', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 11, fontFamily: FONT, fontSize: 15, color: '#282724' },
-  inputDark: { backgroundColor: '#1E1E1E', borderColor: '#363636', color: '#F4F2EE' },
-  notesInput: { minHeight: 100, maxHeight: 160 },
+  label: { fontFamily: 'Poppins-Bold', fontSize: 11, letterSpacing: 0.5, marginTop: 12, marginBottom: 6 },
+  input: { borderWidth: 2, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontFamily: 'Poppins-Medium', fontSize: 14 },
+  notesInput: { minHeight: 90, maxHeight: 140, textAlignVertical: 'top' },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, borderWidth: 1, borderColor: '#E2DFD9', backgroundColor: '#FFF' },
-  chipText: { fontFamily: FONT, fontSize: 13, color: '#77746E' },
+  chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, borderWidth: 2 },
+  chipText: { fontFamily: 'Poppins-Bold', fontSize: 12 },
 
-  saveFooter: { paddingTop: 12, paddingBottom: 0, borderTopWidth: 1 },
-  saveButton: { borderRadius: 14, paddingVertical: 14, alignItems: 'center', marginTop: 0 },
-  saveText: { fontFamily: FONT_SEMI, fontSize: 15 },
+  saveFooter: { paddingTop: 12, paddingBottom: 0, borderTopWidth: 2, marginTop: 10 },
+  saveButton: { borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 0 },
+  saveText: { fontFamily: 'Poppins-ExtraBold', fontSize: 15, letterSpacing: 0.5 },
 
   detailSection: { marginTop: 8, gap: 12, paddingVertical: 8 },
   detailLine: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  detailText: { fontFamily: FONT_MED, fontSize: 14, color: '#27241F' },
-  detailLink: { fontFamily: FONT, fontSize: 13, flex: 1 },
-  detailNotes: { fontFamily: FONT, fontSize: 14, color: '#77746E', lineHeight: 20, marginTop: 4 },
-  detailDate: { fontFamily: FONT, fontSize: 12, color: '#908B83', marginTop: 4 },
+  detailText: { fontFamily: 'Poppins-Bold', fontSize: 14 },
+  detailLink: { fontFamily: 'Poppins-Medium', fontSize: 13, flex: 1 },
+  detailNotes: { fontFamily: 'Poppins-Medium', fontSize: 14, lineHeight: 20, marginTop: 4 },
+  detailDate: { fontFamily: 'Poppins-Medium', fontSize: 12, marginTop: 4 },
   detailActions: { flexDirection: 'row', gap: 10, marginTop: 20 },
-  detailAction: { flex: 1, borderRadius: 14, paddingVertical: 14, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8 },
-  secondaryAction: { backgroundColor: '#F5F3EF', borderWidth: 1, borderColor: '#ECE9E4' },
-  secondaryActionDark: { backgroundColor: '#1E1E1E', borderColor: '#2A2A2A' },
-  deleteAction: { backgroundColor: '#FBEAE8', borderWidth: 1, borderColor: '#F2C8C2' },
-  deleteActionDark: { backgroundColor: '#241815', borderColor: '#3A2422' },
-  deleteText: { fontFamily: FONT_SEMI, fontSize: 14, color: '#C53A2F' },
-  detailActionText: { fontFamily: FONT_SEMI, fontSize: 14 },
+  detailAction: { flex: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8 },
+  deleteText: { fontFamily: 'Poppins-ExtraBold', fontSize: 14, color: '#EF4444' },
+  detailActionText: { fontFamily: 'Poppins-ExtraBold', fontSize: 14 },
 });

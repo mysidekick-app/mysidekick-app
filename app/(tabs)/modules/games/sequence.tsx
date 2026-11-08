@@ -4,6 +4,7 @@ import {
   Modal,
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   View,
@@ -260,6 +261,28 @@ function difficultyFromParams(
   return difficultyFromLevel(levelParam);
 }
 
+// ─── Theme Palettes ──────────────────────────────────────────────────────────
+
+const DARK_PALETTE = {
+  bg: '#090909',
+  card: '#121212',
+  cardBorder: '#000000',
+  text: '#FFFFFF',
+  muted: '#A1A1AA',
+  divider: '#262626',
+  inputBg: '#1E1E1E',
+};
+
+const LIGHT_PALETTE = {
+  bg: '#FBFAF8',
+  card: '#FFFFFF',
+  cardBorder: '#000000',
+  text: '#000000',
+  muted: '#52525B',
+  divider: '#E4E4E7',
+  inputBg: '#F4F4F5',
+};
+
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export default function SequenceScreen() {
@@ -274,19 +297,16 @@ export default function SequenceScreen() {
     params.level,
   );
 
-  const { isDark, accentForeground, onAccent } = useApp();
+  const { isDark, accentForeground, onAccent } = useApp() as any;
 
-  const colors = {
-    background: isDark ? '#090909' : '#FBFAF8',
-    section: isDark ? '#151515' : '#FFFFFF',
-    text: isDark ? '#F4F2EE' : '#27241F',
-    muted: isDark ? '#AAA59D' : '#8F8A82',
-    border: isDark ? '#2A2A2A' : '#ECE9E4',
-    accent: accentForeground,
-    onAccent,
-    correct: '#3FB37F',
-    incorrect: '#FF6B6B',
-  };
+  const accent = accentForeground || '#FDE047';
+  const pageBg = accent;
+
+  const COLORS = isDark
+    ? DARK_PALETTE
+    : LIGHT_PALETTE;
+
+  const styles = makeStyles(COLORS);
 
   const [question, setQuestion] = useState<Question>(() =>
     generateQuestion(difficulty),
@@ -360,8 +380,6 @@ export default function SequenceScreen() {
   // ─── Timer ────────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    // Don't run the timer while the game is over
-    // or while the exit confirmation is open.
     if (gameOver || showExitModal) {
       if (timerRef.current) {
         clearInterval(timerRef.current);
@@ -555,38 +573,46 @@ export default function SequenceScreen() {
     <SafeAreaView
       style={[
         styles.safe,
-        { backgroundColor: colors.background },
+        { backgroundColor: pageBg },
       ]}
+      edges={['top', 'bottom']}
     >
+      <StatusBar barStyle="dark-content" backgroundColor={pageBg} />
+
       {/* Header */}
 
       <View
         style={[
           styles.header,
-          { borderBottomColor: colors.border },
+          { borderBottomColor: '#000000', paddingBottom: 10, paddingTop: 12 },
         ]}
       >
-        <Pressable
-          onPress={handleRequestExit}
-          style={[
-            styles.headerBack,
-            { backgroundColor: colors.accent },
-          ]}
-          hitSlop={10}
-        >
-          <ChevronLeft
-            color="#FFFFFF"
-            size={22}
-            strokeWidth={2.4}
-          />
-        </Pressable>
+        <div style={{ position: 'relative' }}>
+          <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 8 }} />
+          <Pressable
+            onPress={handleRequestExit}
+            style={({ pressed }) => [
+              styles.headerBack,
+              { backgroundColor: '#000000', borderColor: '#000000', borderWidth: 2 },
+              pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
+            ]}
+            hitSlop={12}
+          >
+            <ChevronLeft
+              color="#FFFFFF"
+              size={22}
+              strokeWidth={2.8}
+            />
+          </Pressable>
+        </div>
 
         <Text
           style={[
             styles.headerTitle,
             {
-              color:
-                isDark ? '#FFFFFF' : accentForeground,
+              color: '#000000',
+              fontFamily: 'Poppins-ExtraBold',
+              fontSize: 22,
             },
           ]}
         >
@@ -594,38 +620,46 @@ export default function SequenceScreen() {
         </Text>
 
         <View style={styles.headerRight}>
-          <View
-            style={[
-              styles.levelPill,
-              {
-                backgroundColor: colors.section,
-                borderColor: colors.border,
-              },
-            ]}
-          >
-            <Text
+          <div style={{ position: 'relative' }}>
+            <div style={{ position: 'absolute', top: 3, left: 3, right: -3, bottom: -3, backgroundColor: '#000000', borderRadius: 8 }} />
+            <View
               style={[
-                styles.levelText,
-                { color: colors.muted },
+                styles.levelPill,
+                {
+                  backgroundColor: COLORS.card,
+                  borderColor: '#000000',
+                  borderWidth: 2,
+                  borderRadius: 8,
+                },
               ]}
             >
-              {difficulty.toUpperCase()}
-            </Text>
-          </View>
+              <Text
+                style={[
+                  styles.levelText,
+                  { color: COLORS.text, fontFamily: 'Poppins-Bold' },
+                ]}
+              >
+                {difficulty.toUpperCase()}
+              </Text>
+            </View>
+          </div>
 
-          <Text
-            style={[
-              styles.timerText,
-              {
-                color:
-                  secondsLeft <= 20
-                    ? colors.incorrect
-                    : colors.text,
-              },
-            ]}
-          >
-            {formatTime(secondsLeft)}
-          </Text>
+          <div style={{ paddingHorizontal: 4 }}>
+            <Text
+              style={[
+                styles.timerText,
+                {
+                  color:
+                    secondsLeft <= 20
+                      ? '#DC2626'
+                      : '#000000',
+                  fontFamily: 'Poppins-Bold',
+                },
+              ]}
+            >
+              {formatTime(secondsLeft)}
+            </Text>
+          </div>
         </View>
       </View>
 
@@ -634,13 +668,13 @@ export default function SequenceScreen() {
       <View
         style={[
           styles.scoreStrip,
-          { borderBottomColor: colors.border },
+          { borderBottomColor: COLORS.divider },
         ]}
       >
         <Text
           style={[
             styles.scoreStripText,
-            { color: colors.muted },
+            { color: COLORS.text, fontFamily: 'Poppins-Bold' },
           ]}
         >
           {correctCount} correct · {answeredCount} answered ·{' '}
@@ -648,54 +682,64 @@ export default function SequenceScreen() {
         </Text>
       </View>
 
-      <View style={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Sequence */}
 
         <View style={styles.sequenceRow}>
           {question.terms.map((term, index) => (
+            <div key={index} style={{ position: 'relative' }}>
+              <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+              <View
+                style={[
+                  styles.termChip,
+                  {
+                    backgroundColor: COLORS.card,
+                    borderColor: '#000000',
+                    borderWidth: 2.5,
+                    borderRadius: 12,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.termText,
+                    { color: COLORS.text, fontFamily: 'Poppins-ExtraBold' },
+                  ]}
+                >
+                  {term}
+                </Text>
+              </View>
+            </div>
+          ))}
+
+          <div style={{ position: 'relative' }}>
+            <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
             <View
-              key={index}
               style={[
                 styles.termChip,
-                {
-                  backgroundColor: colors.section,
-                  borderColor: colors.border,
-                },
+                styles.blankChip,
+                { backgroundColor: COLORS.card, borderColor: '#000000', borderWidth: 2.5, borderRadius: 12 },
               ]}
             >
               <Text
                 style={[
                   styles.termText,
-                  { color: colors.text },
+                  { color: accent, fontFamily: 'Poppins-ExtraBold' },
                 ]}
               >
-                {term}
+                ?
               </Text>
             </View>
-          ))}
-
-          <View
-            style={[
-              styles.termChip,
-              styles.blankChip,
-              { borderColor: colors.accent },
-            ]}
-          >
-            <Text
-              style={[
-                styles.termText,
-                { color: colors.accent },
-              ]}
-            >
-              ?
-            </Text>
-          </View>
+          </div>
         </View>
 
         <Text
           style={[
             styles.prompt,
-            { color: colors.muted },
+            { color: COLORS.text, fontFamily: 'Poppins-Bold' },
           ]}
         >
           What comes next?
@@ -710,99 +754,108 @@ export default function SequenceScreen() {
             const isCorrectOption =
               opt === question.answer;
 
-            let bg = colors.section;
-            let borderColor = colors.border;
-            let textColor = colors.text;
+            let bg = COLORS.card;
+            let textColor = COLORS.text;
 
             if (checked) {
               if (isCorrectOption) {
-                bg = colors.correct;
-                borderColor = colors.correct;
+                bg = '#22C55E';
                 textColor = '#FFFFFF';
               } else if (isSelected) {
-                bg = colors.incorrect;
-                borderColor = colors.incorrect;
+                bg = '#EF4444';
                 textColor = '#FFFFFF';
               }
             } else if (isSelected) {
-              bg = colors.accent;
-              borderColor = colors.accent;
-              textColor = colors.onAccent;
+              bg = '#000000';
+              textColor = '#FFFFFF';
             }
 
             return (
-              <Pressable
-                key={opt}
-                onPress={() => handleSelect(opt)}
-                disabled={
-                  checked ||
-                  gameOver ||
-                  showExitModal
-                }
-                style={[
-                  styles.optionBtn,
-                  {
-                    backgroundColor: bg,
-                    borderColor,
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.optionText,
-                    { color: textColor },
+              <div key={opt} style={styles.optionContainer}>
+                <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 14 }} />
+                <Pressable
+                  onPress={() => handleSelect(opt)}
+                  disabled={
+                    checked ||
+                    gameOver ||
+                    showExitModal
+                  }
+                  style={({ pressed }) => [
+                    styles.optionBtn,
+                    {
+                      backgroundColor: bg,
+                      borderColor: '#000000',
+                      borderWidth: 2.5,
+                      borderRadius: 14,
+                    },
+                    pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
                   ]}
                 >
-                  {opt}
-                </Text>
-              </Pressable>
+                  <Text
+                    style={[
+                      styles.optionText,
+                      { color: textColor, fontFamily: 'Poppins-ExtraBold' },
+                    ]}
+                  >
+                    {opt}
+                  </Text>
+                </Pressable>
+              </div>
             );
           })}
         </View>
 
         {!checked ? (
-          <Pressable
-            style={[
-              styles.actionBtn,
-              { backgroundColor: colors.accent },
-              selected === null && { opacity: 0.4 },
-            ]}
-            onPress={handleCheck}
-            disabled={
-              selected === null ||
-              gameOver ||
-              showExitModal
-            }
-          >
-            <Text
-              style={[
-                styles.actionBtnText,
-                { color: colors.onAccent },
+          <div style={{ position: 'relative', width: '100%', maxWidth: 300, marginTop: 8 }}>
+            <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 14 }} />
+            <Pressable
+              style={({ pressed }) => [
+                styles.actionBtn,
+                { backgroundColor: '#000000', borderColor: '#000000', borderWidth: 2.5, borderRadius: 14 },
+                selected === null && { opacity: 0.5 },
+                pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
               ]}
+              onPress={handleCheck}
+              disabled={
+                selected === null ||
+                gameOver ||
+                showExitModal
+              }
             >
-              Check Answer
-            </Text>
-          </Pressable>
+              <Text
+                style={[
+                  styles.actionBtnText,
+                  { color: '#FFFFFF', fontFamily: 'Poppins-ExtraBold' },
+                ]}
+              >
+                Check Answer
+              </Text>
+            </Pressable>
+          </div>
         ) : (
-          <Pressable
-            style={[
-              styles.actionBtn,
-              { backgroundColor: colors.accent },
-            ]}
-            onPress={handleNext}
-            disabled={gameOver}
-          >
-            <Text
-              style={[
-                styles.actionBtnText,
-                { color: colors.onAccent },
+          <div style={{ position: 'relative', width: '100%', maxWidth: 300, marginTop: 8 }}>
+            <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 14 }} />
+            <Pressable
+              style={({ pressed }) => [
+                styles.actionBtn,
+                { backgroundColor: '#000000', borderColor: '#000000', borderWidth: 2.5, borderRadius: 14 },
+                pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
               ]}
+              onPress={handleNext}
+              disabled={gameOver}
             >
-              Next
-            </Text>
-          </Pressable>
+              <Text
+                style={[
+                  styles.actionBtnText,
+                  { color: '#FFFFFF', fontFamily: 'Poppins-ExtraBold' },
+                ]}
+              >
+                Next
+              </Text>
+            </Pressable>
+          </div>
         )}
-      </View>
+      </ScrollView>
 
       {/* ─────────────────────────────────────────────────────────────────────
           EXIT CONFIRMATION
@@ -816,75 +869,93 @@ export default function SequenceScreen() {
         onRequestClose={handleCancelExit}
       >
         <View style={styles.modalOverlay}>
-          <View
-            style={[
-              styles.modalCard,
-              {
-                backgroundColor: colors.section,
-                borderColor: colors.border,
-              },
-            ]}
-          >
-            <Text
+          <div style={{ position: 'relative', width: '100%', maxWidth: 360 }}>
+            <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 20 }} />
+            <View
               style={[
-                styles.modalTitle,
-                { color: colors.text },
+                styles.modalCard,
+                {
+                  backgroundColor: COLORS.card,
+                  borderColor: '#000000',
+                  borderWidth: 3,
+                  borderRadius: 20,
+                },
               ]}
             >
-              Exit Game?
-            </Text>
-
-            <Text
-              style={[
-                styles.exitMessage,
-                { color: colors.muted },
-              ]}
-            >
-              Your current game will be cancelled and your
-              progress will be lost.
-            </Text>
-
-            <View style={styles.modalBtns}>
-              <Pressable
+              <Text
                 style={[
-                  styles.btnSecondary,
-                  {
-                    backgroundColor: colors.background,
-                    borderColor: colors.border,
-                  },
+                  styles.modalTitle,
+                  { color: COLORS.text, fontFamily: 'Poppins-ExtraBold' },
                 ]}
-                onPress={handleCancelExit}
               >
-                <Text
-                  style={[
-                    styles.btnSecondaryText,
-                    { color: colors.text },
-                  ]}
-                >
-                  Stay
-                </Text>
-              </Pressable>
+                Exit Game?
+              </Text>
 
-              <Pressable
+              <Text
                 style={[
-                  styles.btnPrimary,
-                  {
-                    backgroundColor: colors.accent,
-                  },
+                  styles.exitMessage,
+                  { color: COLORS.muted, fontFamily: 'Poppins-Medium' },
                 ]}
-                onPress={handleConfirmExit}
               >
-                <Text
-                  style={[
-                    styles.btnPrimaryText,
-                    { color: colors.onAccent },
-                  ]}
-                >
-                  Exit Game
-                </Text>
-              </Pressable>
+                Your current game will be cancelled and your
+                progress will be lost.
+              </Text>
+
+              <View style={styles.modalBtns}>
+                <div style={{ position: 'relative', width: '100%' }}>
+                  <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.btnSecondary,
+                      {
+                        backgroundColor: COLORS.card,
+                        borderColor: '#000000',
+                        borderWidth: 2.5,
+                        borderRadius: 12,
+                      },
+                      pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
+                    ]}
+                    onPress={handleCancelExit}
+                  >
+                    <Text
+                      style={[
+                        styles.btnSecondaryText,
+                        { color: COLORS.text, fontFamily: 'Poppins-ExtraBold' },
+                      ]}
+                    >
+                      Stay
+                    </Text>
+                  </Pressable>
+                </div>
+
+                <div style={{ position: 'relative', width: '100%' }}>
+                  <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.btnPrimary,
+                      {
+                        backgroundColor: '#000000',
+                        borderColor: '#000000',
+                        borderWidth: 2.5,
+                        borderRadius: 12,
+                      },
+                      pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
+                    ]}
+                    onPress={handleConfirmExit}
+                  >
+                    <Text
+                      style={[
+                        styles.btnPrimaryText,
+                        { color: '#FFFFFF', fontFamily: 'Poppins-ExtraBold' },
+                      ]}
+                    >
+                      Exit Game
+                    </Text>
+                  </Pressable>
+                </div>
+              </View>
             </View>
-          </View>
+          </div>
         </View>
       </Modal>
 
@@ -899,88 +970,106 @@ export default function SequenceScreen() {
         statusBarTranslucent
       >
         <View style={styles.modalOverlay}>
-          <View
-            style={[
-              styles.modalCard,
-              {
-                backgroundColor: colors.section,
-                borderColor: colors.border,
-              },
-            ]}
-          >
-            <Text style={styles.modalEmoji}>⏱️</Text>
-
-            <Text
+          <div style={{ position: 'relative', width: '100%', maxWidth: 360 }}>
+            <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 20 }} />
+            <View
               style={[
-                styles.modalTitle,
-                { color: colors.text },
+                styles.modalCard,
+                {
+                  backgroundColor: COLORS.card,
+                  borderColor: '#000000',
+                  borderWidth: 3,
+                  borderRadius: 20,
+                },
               ]}
             >
-              Time's Up!
-            </Text>
+              <Text style={styles.modalEmoji}>⏱️</Text>
 
-            <Text
-              style={[
-                styles.modalSub,
-                { color: colors.muted },
-              ]}
-            >
-              {correctCount} correct out of {answeredCount} ·{' '}
-              {difficulty.toUpperCase()}
-            </Text>
-
-            <Text
-              style={[
-                styles.modalScore,
-                { color: colors.accent },
-              ]}
-            >
-              {finalScore} pts
-            </Text>
-
-            <View style={styles.modalBtns}>
-              <Pressable
+              <Text
                 style={[
-                  styles.btnPrimary,
-                  {
-                    backgroundColor: colors.accent,
-                  },
+                  styles.modalTitle,
+                  { color: COLORS.text, fontFamily: 'Poppins-ExtraBold' },
                 ]}
-                onPress={handlePlayAgain}
               >
-                <Text
-                  style={[
-                    styles.btnPrimaryText,
-                    { color: colors.onAccent },
-                  ]}
-                >
-                  Play Again
-                </Text>
-              </Pressable>
+                Time's Up!
+              </Text>
 
-              <Pressable
+              <Text
                 style={[
-                  styles.btnSecondary,
-                  {
-                    backgroundColor: colors.background,
-                    borderColor: colors.border,
-                  },
+                  styles.modalSub,
+                  { color: COLORS.muted, fontFamily: 'Poppins-Medium' },
                 ]}
-                onPress={() =>
-                  router.replace('/modules/games')
-                }
               >
-                <Text
-                  style={[
-                    styles.btnSecondaryText,
-                    { color: colors.text },
-                  ]}
-                >
-                  Exit Game
-                </Text>
-              </Pressable>
+                {correctCount} correct out of {answeredCount} ·{' '}
+                {difficulty.toUpperCase()}
+              </Text>
+
+              <Text
+                style={[
+                  styles.modalScore,
+                  { color: COLORS.text, fontFamily: 'Poppins-ExtraBold' },
+                ]}
+              >
+                {finalScore} pts
+              </Text>
+
+              <View style={styles.modalBtns}>
+                <div style={{ position: 'relative', width: '100%' }}>
+                  <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.btnPrimary,
+                      {
+                        backgroundColor: '#000000',
+                        borderColor: '#000000',
+                        borderWidth: 2.5,
+                        borderRadius: 12,
+                      },
+                      pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
+                    ]}
+                    onPress={handlePlayAgain}
+                  >
+                    <Text
+                      style={[
+                        styles.btnPrimaryText,
+                        { color: '#FFFFFF', fontFamily: 'Poppins-ExtraBold' },
+                      ]}
+                    >
+                      Play Again
+                    </Text>
+                  </Pressable>
+                </div>
+
+                <div style={{ position: 'relative', width: '100%' }}>
+                  <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.btnSecondary,
+                      {
+                        backgroundColor: COLORS.card,
+                        borderColor: '#000000',
+                        borderWidth: 2.5,
+                        borderRadius: 12,
+                      },
+                      pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
+                    ]}
+                    onPress={() =>
+                      router.replace('/modules/games')
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.btnSecondaryText,
+                        { color: COLORS.text, fontFamily: 'Poppins-ExtraBold' },
+                      ]}
+                    >
+                      Exit Game
+                    </Text>
+                  </Pressable>
+                </div>
+              </View>
             </View>
-          </View>
+          </div>
         </View>
       </Modal>
     </SafeAreaView>
@@ -989,238 +1078,214 @@ export default function SequenceScreen() {
 
 // ─── Styles ─────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-  },
+function makeStyles(C: typeof DARK_PALETTE) {
+  return StyleSheet.create({
+    safe: {
+      flex: 1,
+    },
 
-  header: {
-    position: 'relative',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 25,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ECE9E4',
-    zIndex: 100,
-  },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 20,
+      borderBottomWidth: 0,
+      zIndex: 100,
+    },
 
-  headerBack: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+    headerBack: {
+      width: 40,
+      height: 40,
+      borderRadius: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
 
-  headerTitle: {
-    fontFamily: 'Poppins-ExtraBold',
-    fontSize: 16,
-    letterSpacing: 1.5,
-  },
+    headerTitle: {
+      letterSpacing: 1,
+    },
 
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
+    headerRight: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
 
-  levelPill: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
+    levelPill: {
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+    },
 
-  levelText: {
-    fontFamily: 'Poppins-Medium',
-    fontSize: 11,
-  },
+    levelText: {
+      fontSize: 11,
+    },
 
-  timerText: {
-    fontFamily: 'Poppins-Bold',
-    fontSize: 15,
-    fontVariant: ['tabular-nums'],
-    minWidth: 46,
-    textAlign: 'right',
-  },
+    timerText: {
+      fontSize: 14,
+      fontVariant: ['tabular-nums'],
+      minWidth: 42,
+      textAlign: 'right',
+    },
 
-  scoreStrip: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-  },
+    scoreStrip: {
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      borderBottomWidth: 0,
+      alignItems: 'center',
+    },
 
-  scoreStripText: {
-    fontFamily: 'Poppins-Medium',
-    fontSize: 12,
-    textAlign: 'center',
-  },
+    scoreStripText: {
+      fontSize: 13,
+      textAlign: 'center',
+    },
 
-  content: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 20,
-    paddingTop: 60,
-    gap: 20,
-  },
+    content: {
+      flexGrow: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 20,
+      paddingTop: 40,
+      gap: 24,
+    },
 
-  sequenceRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 10,
-  },
+    sequenceRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'center',
+      gap: 12,
+    },
 
-  termChip: {
-    minWidth: 56,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+    termChip: {
+      minWidth: 64,
+      paddingHorizontal: 16,
+      paddingVertical: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
 
-  blankChip: {
-    borderWidth: 2,
-    borderStyle: 'dashed',
-  },
+    blankChip: {
+      // border specified inline
+    },
 
-  termText: {
-    fontFamily: 'Poppins-Bold',
-    fontSize: 18,
-  },
+    termText: {
+      fontSize: 20,
+    },
 
-  prompt: {
-    fontFamily: 'Poppins-Medium',
-    fontSize: 13,
-  },
+    prompt: {
+      fontSize: 15,
+    },
 
-  optionsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 12,
-    width: '100%',
-  },
+    optionsGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'center',
+      gap: 16,
+      width: '100%',
+      maxWidth: 380,
+    },
 
-  optionBtn: {
-    minWidth: 100,
-    flexGrow: 1,
-    maxWidth: 160,
-    paddingVertical: 16,
-    borderRadius: 14,
-    borderWidth: 1.5,
-    alignItems: 'center',
-  },
+    optionContainer: {
+      position: 'relative',
+      minWidth: 120,
+      flexGrow: 1,
+      maxWidth: 170,
+    },
 
-  optionText: {
-    fontFamily: 'Poppins-Bold',
-    fontSize: 16,
-  },
+    optionBtn: {
+      width: '100%',
+      paddingVertical: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
 
-  actionBtn: {
-    borderRadius: 14,
-    paddingVertical: 16,
-    paddingHorizontal: 48,
-    alignItems: 'center',
-    marginTop: 8,
-  },
+    optionText: {
+      fontSize: 16,
+    },
 
-  actionBtnText: {
-    fontFamily: 'Poppins-Bold',
-    fontSize: 16,
-  },
+    actionBtn: {
+      width: '100%',
+      paddingVertical: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
 
-  // ─── Modals ──────────────────────────────────────────────────────────────
+    actionBtnText: {
+      fontSize: 16,
+      letterSpacing: 1,
+    },
 
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.75)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
+    // ─── Modals ──────────────────────────────────────────────────────────────
 
-  modalCard: {
-    borderRadius: 20,
-    padding: 28,
-    alignItems: 'center',
-    borderWidth: 1,
-    width: '90%',
-    maxWidth: 360,
-    gap: 8,
-  },
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.75)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 24,
+    },
 
-  modalEmoji: {
-    fontSize: 48,
-  },
+    modalCard: {
+      padding: 24,
+      alignItems: 'center',
+      width: '100%',
+      gap: 12,
+    },
 
-  exitEmoji: {
-    fontSize: 42,
-    marginBottom: 2,
-  },
+    modalEmoji: {
+      fontSize: 48,
+    },
 
-  modalTitle: {
-    fontFamily: 'Poppins-ExtraBold',
-    fontSize: 24,
-    textAlign: 'center',
-  },
+    modalTitle: {
+      fontSize: 22,
+      letterSpacing: 0.5,
+      textAlign: 'center',
+    },
 
-  exitMessage: {
-    fontFamily: 'Poppins-Medium',
-    fontSize: 14,
-    textAlign: 'center',
-    lineHeight: 21,
-    marginTop: 4,
-    maxWidth: 280,
-  },
+    exitMessage: {
+      fontSize: 14,
+      textAlign: 'center',
+      lineHeight: 21,
+      marginTop: 4,
+    },
 
-  modalSub: {
-    fontFamily: 'Poppins-Medium',
-    fontSize: 14,
-    textAlign: 'center',
-  },
+    modalSub: {
+      fontSize: 14,
+      textAlign: 'center',
+    },
 
-  modalScore: {
-    fontFamily: 'Poppins-ExtraBold',
-    fontSize: 32,
-    marginTop: 4,
-  },
+    modalScore: {
+      fontSize: 32,
+      marginTop: 4,
+    },
 
-  modalBtns: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 16,
-    width: '100%',
-  },
+    modalBtns: {
+      flexDirection: 'column',
+      gap: 12,
+      marginTop: 12,
+      width: '100%',
+    },
 
-  btnPrimary: {
-    flex: 1,
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
+    btnPrimary: {
+      width: '100%',
+      paddingVertical: 14,
+      alignItems: 'center',
+    },
 
-  btnPrimaryText: {
-    fontFamily: 'Poppins-Bold',
-    fontSize: 15,
-  },
+    btnPrimaryText: {
+      fontSize: 15,
+      letterSpacing: 1,
+    },
 
-  btnSecondary: {
-    flex: 1,
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-    borderWidth: 1,
-  },
+    btnSecondary: {
+      width: '100%',
+      paddingVertical: 14,
+      alignItems: 'center',
+    },
 
-  btnSecondaryText: {
-    fontFamily: 'Poppins-SemiBold',
-    fontSize: 15,
-  },
-});
+    btnSecondaryText: {
+      fontSize: 15,
+      letterSpacing: 1,
+      textAlign: 'center',
+    },
+  });
+}

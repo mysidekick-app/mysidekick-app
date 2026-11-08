@@ -1,65 +1,12 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from 'react';
-
-import {
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
-
-import {
-  Check,
-  CheckCheck,
-  Plus,
-  Search,
-  Send,
-  UserPlus,
-  X,
-} from 'lucide-react-native';
-
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import {
-  useLocalSearchParams,
-  useFocusEffect,
-  router,
-} from 'expo-router';
-
-import {
-  Poppins_400Regular,
-  Poppins_500Medium,
-  Poppins_600SemiBold,
-  Poppins_700Bold,
-} from '@expo-google-fonts/poppins';
-
+import { Check, CheckCheck, ChevronLeft, MoreVertical, Plus, Search, Send, UserPlus, X } from 'lucide-react-native';
+import { router, useLocalSearchParams, useFocusEffect, useNavigation } from 'expo-router';
 import { useApp } from '@/components/AppProvider';
 import SidekickAvatar from '@/components/SidekickAvatar';
 import { supabase } from '@/lib/supabase';
-import {
-  ensureDirectConversation,
-  ensureGroupConversation,
-  getChatClearedAt,
-  getConversationReadMap,
-  getDeletedMessageIds,
-  markConversationRead,
-  sendChatMessage,
-} from './chat/chatHelpers';
-
-/* =========================================================
-   TYPES
-========================================================= */
+import { ensureDirectConversation, getChatClearedAt, getConversationReadMap, getDeletedMessageIds, markConversationRead, sendChatMessage } from './chat/chatHelpers';
 
 type ChatItem = {
   id: string;
@@ -70,7 +17,7 @@ type ChatItem = {
   lastMessageSenderId?: string;
   lastMessageRead?: boolean;
   lastMessageAt?: string;
-  category: 'groups' | 'direct';
+  category: 'direct';
   icon: string;
   profileId?: string;
   route?: string;
@@ -95,15 +42,6 @@ type IncomingRequest = {
   created_at: string;
 };
 
-type IncomingGroupInvite = {
-  id: string;
-  group_id: string;
-  group_name: string;
-  inviter_id: string;
-  inviter_name: string;
-  created_at: string;
-};
-
 type ChatTag = {
   id: string;
   user_id: string;
@@ -119,38 +57,26 @@ type ChatTagAssignment = {
   created_at: string;
 };
 
-const filters = [
-  'All',
-  'Unread',
-] as const;
-
+const filters = ['All', 'Unread'] as const;
 type FilterKey = (typeof filters)[number];
 
-/* =========================================================
-   SCREEN
-========================================================= */
+function isAccentBlack(color?: string): boolean {
+  if (!color) return false;
+  const normalized = color.trim().toLowerCase();
+  return (
+    normalized === '#000000' ||
+    normalized === '#000' ||
+    normalized === 'black' ||
+    normalized === 'rgb(0,0,0)' ||
+    normalized === 'rgba(0,0,0,1)'
+  );
+}
 
 export default function ChatScreen() {
   const appContext = useApp() as any;
-
-  const {
-    accentForeground,
-    isDark,
-  } = appContext;
-
-  const isBlackDark =
-    isDark && appContext.accent_family === 'black';
-
-  /* =======================================================
-     HABIT FLEX PARAMETERS
-
-     Habits opens:
-
-     /chat?shareStreak=true&streak=7&habitName=Morning%20Workout
-
-     This puts the chat screen into recipient-selection
-     mode instead of opening one person's conversation.
-  ======================================================= */
+  const { accentForeground, accentColor: rawAccent, isDark } = appContext;
+  const pageBg = rawAccent || accentForeground || '#FDE047';
+  const isAccentPureBlack = isAccentBlack(pageBg);
 
   const params = useLocalSearchParams<{
     flex?: string;
@@ -164,11 +90,26 @@ export default function ChatScreen() {
 
   const flexMode =
     params.shareStreak === '1' ||
-    params.shareStreak === 'true';
+    params.shareStreak === 'true' ||
+    params.flex === '1' ||
+    params.flex === 'true';
 
-  const streakCount =
-    Number(params.streak ?? 0);
+  // Hide the parent Tabs navbar while Share Streak is active.
+  // The query params are owned by this screen, so handle the tab bar here
+  // rather than relying on the Tabs layout to read child route params.
+  const navigation = useNavigation();
 
+  useEffect(() => {
+    navigation.setOptions({
+      tabBarStyle: flexMode ? { display: 'none' } : undefined,
+    } as never);
+
+    return () => {
+      navigation.setOptions({ tabBarStyle: undefined } as never);
+    };
+  }, [flexMode, navigation]);
+
+  const streakCount = Number(params.streak ?? 0);
   const habitTitle =
     typeof params.habitTitle === 'string'
       ? params.habitTitle
@@ -176,11 +117,7 @@ export default function ChatScreen() {
         ? params.habitName
         : '';
 
-  const streakFrequency =
-    typeof params.frequency === 'string'
-      ? params.frequency
-      : 'daily';
-
+  const streakFrequency = typeof params.frequency === 'string' ? params.frequency : 'daily';
   const streakUnit =
     streakFrequency === 'weekly'
       ? 'week'
@@ -191,166 +128,49 @@ export default function ChatScreen() {
           : 'day';
 
   const streakMessage =
-    streakCount > 0 && habitTitle
-      ? `I just hit my ${streakCount} ${streakUnit} streak in ${habitTitle}.`
-      : '';
+    streakCount > 0 && habitTitle ? `I just hit my ${streakCount} ${streakUnit} streak in ${habitTitle}.` : '';
 
-  /* =======================================================
-     NORMAL CHAT STATE
-  ======================================================= */
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<FilterKey | null>('All');
+  const [chatTags, setChatTags] = useState<ChatTag[]>([]);
+  const [chatTagAssignments, setChatTagAssignments] = useState<ChatTagAssignment[]>([]);
+  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
 
-  const [query, setQuery] =
-    useState('');
+  const [showAddTagModal, setShowAddTagModal] = useState(false);
+  const [newTagName, setNewTagName] = useState('');
+  const [editingTagId, setEditingTagId] = useState<string | null>(null);
+  const [addTagError, setAddTagError] = useState<string | null>(null);
+  const [addingTag, setAddingTag] = useState(false);
 
-  const [filter, setFilter] =
-    useState<FilterKey | null>('All');
-
-  const [chatTags, setChatTags] =
-    useState<ChatTag[]>([]);
-
-  const [chatTagAssignments, setChatTagAssignments] =
-    useState<ChatTagAssignment[]>([]);
-
-  const [selectedTagIds, setSelectedTagIds] =
-    useState<string[]>([]);
-
-  const [showAddTagModal, setShowAddTagModal] =
-    useState(false);
-
-  const [newTagName, setNewTagName] =
-    useState('');
-
-  const [editingTagId, setEditingTagId] =
-    useState<string | null>(null);
-
-  const [addTagError, setAddTagError] =
-    useState<string | null>(null);
-
-  const [addingTag, setAddingTag] =
-    useState(false);
-
-  const [tagChat, setTagChat] =
-    useState<ChatItem | null>(null);
-
-  const [tagModalError, setTagModalError] =
-    useState<string | null>(null);
-
-  // Read state is kept for the current app session. Opening a chat marks it read.
   const [readChatAt, setReadChatAt] = useState<Record<string, string>>({});
   const [myUserId, setMyUserId] = useState<string | null>(null);
 
-  const [userFriends, setUserFriends] =
-    useState<ChatItem[]>([]);
+  const [userFriends, setUserFriends] = useState<ChatItem[]>([]);
+  const [searchableFriends, setSearchableFriends] = useState<ChatItem[]>([]);
 
-  const [searchableFriends, setSearchableFriends] =
-    useState<ChatItem[]>([]);
+  const [selectedRecipients, setSelectedRecipients] = useState<string[]>([]);
+  const [flexSearch, setFlexSearch] = useState('');
+  const [flexSending, setFlexSending] = useState(false);
+  const [flexError, setFlexError] = useState<string | null>(null);
+  const [sentStreakRecipients, setSentStreakRecipients] = useState<string[]>([]);
 
-  const [userGroups, setUserGroups] =
-    useState<ChatItem[]>([]);
+  const [friendSearchOpen, setFriendSearchOpen] = useState(false);
+  const [friendQuery, setFriendQuery] = useState('');
+  const [friendResults, setFriendResults] = useState<SocialProfile[]>([]);
+  const [friendSearching, setFriendSearching] = useState(false);
+  const [friendError, setFriendError] = useState<string | null>(null);
+  const [sendingRequestId, setSendingRequestId] = useState<string | null>(null);
+  const [sentRequestIds, setSentRequestIds] = useState<string[]>([]);
+  const [existingFriendIds, setExistingFriendIds] = useState<string[]>([]);
 
-  const [groupsLoading, setGroupsLoading] =
-    useState(false);
+  const [incomingRequests, setIncomingRequests] = useState<IncomingRequest[]>([]);
+  const [requestsLoading, setRequestsLoading] = useState(true);
+  const [requestActionId, setRequestActionId] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
 
-  /* =======================================================
-     FLEX RECIPIENT SELECTION
-  ======================================================= */
-
-  const [selectedRecipients, setSelectedRecipients] =
-    useState<string[]>([]);
-
-  const [flexSearch, setFlexSearch] =
-    useState('');
-
-  const [flexSending, setFlexSending] =
-    useState(false);
-
-  const [flexError, setFlexError] =
-    useState<string | null>(null);
-
-  // Existing chat messages determine who already received this
-  // exact streak message today. No new table is required.
-  const [sentStreakRecipients, setSentStreakRecipients] =
-    useState<string[]>([]);
-
-  /* =======================================================
-     ADD FRIEND
-  ======================================================= */
-
-  const [friendSearchOpen, setFriendSearchOpen] =
-    useState(false);
-
-  const [friendQuery, setFriendQuery] =
-    useState('');
-
-  const [friendResults, setFriendResults] =
-    useState<SocialProfile[]>([]);
-
-  const [friendSearching, setFriendSearching] =
-    useState(false);
-
-  const [friendError, setFriendError] =
-    useState<string | null>(null);
-
-  const [sendingRequestId, setSendingRequestId] =
-    useState<string | null>(null);
-
-  // Users who already have an outgoing pending request.
-  // Keep the search result visible so the button can change to "Sent".
-  const [sentRequestIds, setSentRequestIds] =
-    useState<string[]>([]);
-
-  // Users who are already friends with the current user.
-  // Their search result stays visible and the button shows "Friends".
-  const [existingFriendIds, setExistingFriendIds] =
-    useState<string[]>([]);
-
-  /* =======================================================
-     CREATE GROUP
-  ======================================================= */
-
-  const [createGroupOpen, setCreateGroupOpen] =
-    useState(false);
-
-  const [newGroupName, setNewGroupName] =
-    useState('');
-
-  const [newGroupDescription, setNewGroupDescription] =
-    useState('');
-
-  const [creatingGroup, setCreatingGroup] =
-    useState(false);
-
-  const [createGroupError, setCreateGroupError] =
-    useState<string | null>(null);
-
-  /* =======================================================
-     INCOMING REQUESTS
-  ======================================================= */
-
-  const [incomingRequests, setIncomingRequests] =
-    useState<IncomingRequest[]>([]);
-
-  const [requestsLoading, setRequestsLoading] =
-    useState(true);
-
-  const [requestActionId, setRequestActionId] =
-    useState<string | null>(null);
-
-  /* =======================================================
-     GROUP INVITES
-  ======================================================= */
-
-  const [incomingGroupInvites, setIncomingGroupInvites] =
-    useState<IncomingGroupInvite[]>([]);
-
-  const [groupInviteActionId, setGroupInviteActionId] =
-    useState<string | null>(null);
-
-  useEffect(() => { supabase.auth.getUser().then(({ data: { user } }) => setMyUserId(user?.id ?? null)); }, []);
-
-  /* =========================================================
-     LOAD FRIENDS
-  ========================================================= */
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => setMyUserId(user?.id ?? null));
+  }, []);
 
   const loadFriends = useCallback(async () => {
     const {
@@ -362,29 +182,20 @@ export default function ChatScreen() {
       return;
     }
 
-    const {
-      data: friendshipRows,
-      error: friendshipError,
-    } = await supabase
+    const { data: friendshipRows, error: friendshipError } = await supabase
       .from('friendships')
       .select('user_id, friend_user_id')
       .or(`user_id.eq.${user.id},friend_user_id.eq.${user.id}`);
 
     if (friendshipError) {
-      console.error(
-        'LOAD FRIENDSHIPS ERROR:',
-        friendshipError,
-      );
-
       setUserFriends([]);
       return;
     }
 
     const friendIds: string[] = [
       ...new Set<string>(
-        (friendshipRows ?? []).map(
-          (row: { user_id: string; friend_user_id: string }) =>
-            row.user_id === user.id ? row.friend_user_id : row.user_id,
+        (friendshipRows ?? []).map((row: { user_id: string; friend_user_id: string }) =>
+          row.user_id === user.id ? row.friend_user_id : row.user_id,
         ),
       ),
     ];
@@ -394,103 +205,63 @@ export default function ChatScreen() {
       return;
     }
 
-    const {
-      data: profiles,
-      error: profileError,
-    } = await supabase
+    const { data: profiles, error: profileError } = await supabase
       .from('social_profiles')
       .select('*')
       .in('user_id', friendIds);
 
     if (profileError) {
-      console.error(
-        'LOAD FRIEND PROFILES ERROR:',
-        profileError,
-      );
-
       setUserFriends([]);
       return;
     }
 
-    const {
-      data: sidekickProfiles,
-      error: sidekickProfileError,
-    } = await supabase
+    const { data: sidekickProfiles } = await supabase
       .from('profiles')
       .select('user_id, sidekick_id')
       .in('user_id', friendIds);
 
-    if (sidekickProfileError) {
-      console.warn(
-        'LOAD FRIEND SIDEKICKS ERROR:',
-        sidekickProfileError,
-      );
-    }
-
     const sidekickByUserId = new Map<string, string | null>(
-      (sidekickProfiles ?? []).map((row: any) => [
-        row.user_id,
-        row.sidekick_id ?? null,
-      ]),
+      (sidekickProfiles ?? []).map((row: any) => [row.user_id, row.sidekick_id ?? null]),
     );
 
     const conversationByFriend = new Map<string, string>();
     const friendHasAnyConversation = new Set<string>();
 
-    const { data: myMembershipRows, error: membershipLoadError } = await supabase
+    const { data: myMembershipRows } = await supabase
       .from('chat_conversation_members')
       .select('conversation_id')
       .eq('user_id', user.id);
 
-    if (membershipLoadError) {
-      console.error('LOAD CHAT MEMBERSHIPS ERROR:', membershipLoadError);
-    } else {
-      const conversationIds = [...new Set((myMembershipRows ?? []).map((r: any) => r.conversation_id).filter(Boolean))];
-      if (conversationIds.length) {
-        const { data: directRows } = await supabase
-          .from('chat_conversations')
-          .select('id')
-          .eq('type', 'direct')
-          .in('id', conversationIds);
+    const conversationIds = [...new Set((myMembershipRows ?? []).map((r: any) => r.conversation_id).filter(Boolean))];
+    if (conversationIds.length) {
+      const { data: directRows } = await supabase
+        .from('chat_conversations')
+        .select('id')
+        .eq('type', 'direct')
+        .in('id', conversationIds);
 
-        const directIds = (directRows ?? []).map((r: any) => r.id);
+      const directIds = (directRows ?? []).map((r: any) => r.id);
 
-        if (directIds.length) {
-          const { data: pairedRows } = await supabase
-            .from('chat_conversation_members')
-            .select('conversation_id, user_id')
-            .in('conversation_id', directIds)
-            .in('user_id', friendIds);
+      if (directIds.length) {
+        const { data: pairedRows } = await supabase
+          .from('chat_conversation_members')
+          .select('conversation_id, user_id')
+          .in('conversation_id', directIds)
+          .in('user_id', friendIds);
 
-          (pairedRows ?? []).forEach((row: any) => {
-            if (row.user_id) friendHasAnyConversation.add(row.user_id);
-            if (row.user_id && !conversationByFriend.has(row.user_id)) {
-              conversationByFriend.set(row.user_id, row.conversation_id);
-            }
-          });
-        }
+        (pairedRows ?? []).forEach((row: any) => {
+          if (row.user_id) friendHasAnyConversation.add(row.user_id);
+          if (row.user_id && !conversationByFriend.has(row.user_id)) {
+            conversationByFriend.set(row.user_id, row.conversation_id);
+          }
+        });
       }
     }
 
-    /*
-     * A deleted direct chat removes the current user's membership and
-     * marks its existing messages deleted for that user. Look for an old
-     * direct conversation only when there is a message that was NOT deleted
-     * for this user and that is newer than the local deletion time.
-     *
-     * This gives us:
-     *   - new friend with no chat -> visible
-     *   - deleted chat with no new message -> hidden
-     *   - deleted chat with a new incoming message -> restored and visible
-     */
-    const { data: friendMembershipRows, error: friendMembershipError } = await supabase
+    const { data: friendMembershipRows } = await supabase
       .from('chat_conversation_members')
       .select('conversation_id, user_id')
       .in('user_id', friendIds);
-
-    if (friendMembershipError) {
-      console.warn('LOAD FRIEND CHAT MEMBERSHIPS ERROR:', friendMembershipError);
-    }
 
     const historicalFriendMemberships = (friendMembershipRows ?? []).filter(
       (row: any) => row.conversation_id && row.user_id && friendIds.includes(row.user_id),
@@ -501,11 +272,7 @@ export default function ChatScreen() {
     });
 
     const historicalConversationIds = [
-      ...new Set(
-        historicalFriendMemberships
-          .map((row: any) => row.conversation_id)
-          .filter(Boolean),
-      ),
+      ...new Set(historicalFriendMemberships.map((row: any) => row.conversation_id).filter(Boolean)),
     ];
 
     const activeConversationIds = new Set(conversationByFriend.values());
@@ -531,95 +298,68 @@ export default function ChatScreen() {
     );
 
     const historicalClearAtByConversation = new Map<string, string>(
-      historicalClearRows.filter(
-        (row): row is readonly [string, string] => Boolean(row[1]),
-      ),
+      historicalClearRows.filter((row): row is readonly [string, string] => Boolean(row[1])),
     );
 
-    const candidateHistoricalIds = historicalDirectIds.filter(
-      (conversationId) => historicalClearAtByConversation.has(conversationId),
+    const candidateHistoricalIds = historicalDirectIds.filter((conversationId) =>
+      historicalClearAtByConversation.has(conversationId),
     );
 
     if (candidateHistoricalIds.length) {
-      const { data: historicalMessages, error: historicalMessageError } = await supabase
+      const { data: historicalMessages } = await supabase
         .from('chat_messages')
         .select('id, conversation_id, sender_id, body, created_at')
         .in('conversation_id', candidateHistoricalIds)
         .is('deleted_at', null)
         .order('created_at', { ascending: false });
 
-      if (historicalMessageError) {
-        console.warn('LOAD DELETED CHAT MESSAGES ERROR:', historicalMessageError);
-      } else {
-        const historicalMessageIds = (historicalMessages ?? [])
-          .map((message: any) => message.id)
-          .filter(Boolean);
+      const historicalMessageIds = (historicalMessages ?? []).map((message: any) => message.id).filter(Boolean);
 
-        const { data: deletedHistoricalRows, error: deletedHistoricalError } = historicalMessageIds.length
-          ? await supabase
-              .from('chat_message_deletions')
-              .select('message_id')
-              .eq('user_id', user.id)
-              .in('message_id', historicalMessageIds)
-          : { data: [] as any[], error: null };
+      const { data: deletedHistoricalRows } = historicalMessageIds.length
+        ? await supabase
+            .from('chat_message_deletions')
+            .select('message_id')
+            .eq('user_id', user.id)
+            .in('message_id', historicalMessageIds)
+        : { data: [] as any[] };
 
-        if (deletedHistoricalError) {
-          console.warn(
-            'LOAD DELETED CHAT MESSAGE DELETIONS ERROR:',
-            deletedHistoricalError,
-          );
+      const deletedHistoricalIds = new Set(
+        (deletedHistoricalRows ?? []).map((row: any) => row.message_id).filter(Boolean),
+      );
+
+      const friendByConversation = new Map<string, string>();
+      historicalFriendMemberships.forEach((row: any) => {
+        if (!friendByConversation.has(row.conversation_id)) {
+          friendByConversation.set(row.conversation_id, row.user_id);
+        }
+      });
+
+      const restoredFriendIds = new Set<string>();
+
+      for (const message of historicalMessages ?? []) {
+        if (deletedHistoricalIds.has(message.id)) {
+          continue;
         }
 
-        const deletedHistoricalIds = new Set(
-          (deletedHistoricalRows ?? [])
-            .map((row: any) => row.message_id)
-            .filter(Boolean),
-        );
+        const friendId = friendByConversation.get(message.conversation_id);
+        const clearedAt = historicalClearAtByConversation.get(message.conversation_id);
 
-        const friendByConversation = new Map<string, string>();
-        historicalFriendMemberships.forEach((row: any) => {
-          if (!friendByConversation.has(row.conversation_id)) {
-            friendByConversation.set(row.conversation_id, row.user_id);
-          }
+        if (
+          !friendId ||
+          restoredFriendIds.has(friendId) ||
+          !clearedAt ||
+          new Date(message.created_at).getTime() <= new Date(clearedAt).getTime()
+        ) {
+          continue;
+        }
+
+        await supabase.from('chat_conversation_members').insert({
+          conversation_id: message.conversation_id,
+          user_id: user.id,
         });
 
-        const restoredFriendIds = new Set<string>();
-
-        for (const message of historicalMessages ?? []) {
-          if (deletedHistoricalIds.has(message.id)) {
-            continue;
-          }
-
-          const friendId = friendByConversation.get(message.conversation_id);
-          const clearedAt = historicalClearAtByConversation.get(message.conversation_id);
-
-          if (
-            !friendId ||
-            restoredFriendIds.has(friendId) ||
-            !clearedAt ||
-            new Date(message.created_at).getTime() <= new Date(clearedAt).getTime()
-          ) {
-            continue;
-          }
-
-          const { error: restoreMembershipError } = await supabase
-            .from('chat_conversation_members')
-            .insert({
-              conversation_id: message.conversation_id,
-              user_id: user.id,
-            });
-
-          if (restoreMembershipError && restoreMembershipError.code !== '23505') {
-            console.warn(
-              'RESTORE DELETED CHAT MEMBERSHIP ERROR:',
-              restoreMembershipError,
-            );
-            continue;
-          }
-
-          conversationByFriend.set(friendId, message.conversation_id);
-          restoredFriendIds.add(friendId);
-        }
+        conversationByFriend.set(friendId, message.conversation_id);
+        restoredFriendIds.add(friendId);
       }
     }
 
@@ -637,14 +377,10 @@ export default function ChatScreen() {
 
     const directConversationIds = [...conversationByFriend.values()];
 
-    // Always reload the persisted read positions from Supabase.
-    // This prevents unread badges from returning after an app refresh/reload.
     const readRows = directConversationIds.length
       ? await getConversationReadMap(user.id, directConversationIds)
       : new Map<string, string>();
 
-    // Keep the local UI state synchronized with the database so the
-    // unread calculation has the same source of truth after refresh.
     if (directConversationIds.length && readRows.size) {
       setReadChatAt((previous) => {
         const next = { ...previous };
@@ -677,15 +413,8 @@ export default function ChatScreen() {
           .order('created_at', { ascending: false })
       : { data: [] as any[] };
 
-    const directMessageIds = (messageRows ?? [])
-      .map((row: any) => row.id)
-      .filter(Boolean);
-
-    const { ids: deletedDirectMessageIds } =
-      await getDeletedMessageIds(
-        directMessageIds,
-        user.id,
-      );
+    const directMessageIds = (messageRows ?? []).map((row: any) => row.id).filter(Boolean);
+    const { ids: deletedDirectMessageIds } = await getDeletedMessageIds(directMessageIds, user.id);
 
     const clearRows = await Promise.all(
       directConversationIds.map(async (conversationId) => [
@@ -693,18 +422,15 @@ export default function ChatScreen() {
         await getChatClearedAt(user.id, conversationId),
       ] as const),
     );
-    const clearAtByConversation = new Map<string, string>(clearRows.filter((row): row is readonly [string, string] => Boolean(row[1])));
+    const clearAtByConversation = new Map<string, string>(
+      clearRows.filter((row): row is readonly [string, string] => Boolean(row[1])),
+    );
 
     const messagesByConversation = new Map<string, any[]>();
     (messageRows ?? []).forEach((row: any) => {
-      if (deletedDirectMessageIds.has(row.id)) {
-        return;
-      }
-
+      if (deletedDirectMessageIds.has(row.id)) return;
       const clearAt = clearAtByConversation.get(row.conversation_id);
-      if (clearAt && new Date(row.created_at).getTime() <= new Date(clearAt).getTime()) {
-        return;
-      }
+      if (clearAt && new Date(row.created_at).getTime() <= new Date(clearAt).getTime()) return;
       const list = messagesByConversation.get(row.conversation_id) ?? [];
       list.push(row);
       messagesByConversation.set(row.conversation_id, list);
@@ -715,79 +441,60 @@ export default function ChatScreen() {
       return conversationId ? (messagesByConversation.get(conversationId) ?? []) : [];
     };
 
-    const friendsList: ChatItem[] =
-      (profiles ?? []).filter(
-        (profile: SocialProfile) => {
-          const conversationId = conversationByFriend.get(profile.user_id);
-
-          // If this conversation has a deletion/clear timestamp, it must
-          // stay hidden until a genuinely newer message exists. This also
-          // protects against a stale membership row making a deleted chat
-          // reappear immediately after refresh.
-          if (conversationId) {
-            const clearAt = clearAtByConversation.get(conversationId);
-
-            if (clearAt) {
-              const hasNewMessage =
-                (messagesByConversation.get(conversationId) ?? []).some(
-                  (row: any) =>
-                    new Date(row.created_at).getTime() >
-                    new Date(clearAt).getTime(),
-                );
-
-              if (!hasNewMessage) {
-                return false;
-              }
-            }
-
-            return true;
+    const friendsList: ChatItem[] = (profiles ?? [])
+      .filter((profile: SocialProfile) => {
+        const conversationId = conversationByFriend.get(profile.user_id);
+        if (conversationId) {
+          const clearAt = clearAtByConversation.get(conversationId);
+          if (clearAt) {
+            const hasNewMessage = (messagesByConversation.get(conversationId) ?? []).some(
+              (row: any) => new Date(row.created_at).getTime() > new Date(clearAt).getTime(),
+            );
+            if (!hasNewMessage) return false;
           }
-
-          return !friendHasAnyConversation.has(profile.user_id);
-        },
-      ).map(
-        (profile: SocialProfile) => ({
-          id: profile.user_id,
-          name: profile.display_name,
-          detail: (() => {
-            const last = getDirectRows(profile.user_id)[0];
-            return last?.body?.trim() || (profile.title || profile.tag || profile.profile_title || `@${profile.username}`);
-          })(),
-          time: (() => {
-            const last = getDirectRows(profile.user_id)[0];
-            return last ? formatChatTime(last.created_at) : '';
-          })(),
-          lastMessageSenderId: (() => {
-            const last = getDirectRows(profile.user_id)[0];
-            return last?.sender_id;
-          })(),
-          lastMessageAt: (() => {
-            const last = getDirectRows(profile.user_id)[0];
-            return last?.created_at ?? '';
-          })(),
-          lastMessageRead: (() => {
-            const last = getDirectRows(profile.user_id)[0];
-            const conversationId = conversationByFriend.get(profile.user_id);
-            const peerRead = conversationId ? peerReadByConversation.get(conversationId) : undefined;
-            return !!last && last.sender_id === user.id && !!peerRead && peerRead >= last.created_at;
-          })(),
-          unread: (() => {
-            const rows = getDirectRows(profile.user_id);
-            const conversationId = conversationByFriend.get(profile.user_id);
-            const lastRead = (conversationId ? readRows.get(conversationId) : undefined) ?? readChatAt[conversationId ?? ''];
-            return rows.filter((row: any) => row.sender_id !== user.id && (!lastRead || row.created_at > lastRead)).length;
-          })(),
-          category: 'direct',
-          icon: (
-            profile.display_name || '?'
-          )
-            .slice(0, 1)
-            .toUpperCase(),
-          profileId: profile.user_id,
-          sidekickId:
-            sidekickByUserId.get(profile.user_id) ?? null,
-        }),
-      );
+          return true;
+        }
+        return !friendHasAnyConversation.has(profile.user_id);
+      })
+      .map((profile: SocialProfile) => ({
+        id: profile.user_id,
+        name: profile.display_name,
+        detail: (() => {
+          const last = getDirectRows(profile.user_id)[0];
+          return last?.body?.trim() || profile.title || profile.tag || profile.profile_title || `@${profile.username}`;
+        })(),
+        time: (() => {
+          const last = getDirectRows(profile.user_id)[0];
+          return last ? formatChatTime(last.created_at) : '';
+        })(),
+        lastMessageSenderId: (() => {
+          const last = getDirectRows(profile.user_id)[0];
+          return last?.sender_id;
+        })(),
+        lastMessageAt: (() => {
+          const last = getDirectRows(profile.user_id)[0];
+          return last?.created_at ?? '';
+        })(),
+        lastMessageRead: (() => {
+          const last = getDirectRows(profile.user_id)[0];
+          const conversationId = conversationByFriend.get(profile.user_id);
+          const peerRead = conversationId ? peerReadByConversation.get(conversationId) : undefined;
+          return !!last && last.sender_id === user.id && !!peerRead && peerRead >= last.created_at;
+        })(),
+        unread: (() => {
+          const rows = getDirectRows(profile.user_id);
+          const conversationId = conversationByFriend.get(profile.user_id);
+          const lastRead =
+            (conversationId ? readRows.get(conversationId) : undefined) ?? readChatAt[conversationId ?? ''];
+          return rows.filter(
+            (row: any) => row.sender_id !== user.id && (!lastRead || row.created_at > lastRead),
+          ).length;
+        })(),
+        category: 'direct',
+        icon: (profile.display_name || '?').slice(0, 1).toUpperCase(),
+        profileId: profile.user_id,
+        sidekickId: sidekickByUserId.get(profile.user_id) ?? null,
+      }));
 
     friendsList.sort((a, b) => {
       const aTime = a.lastMessageAt ? new Date(a.lastMessageAt).getTime() : 0;
@@ -797,214 +504,6 @@ export default function ChatScreen() {
 
     setUserFriends(friendsList);
   }, [readChatAt]);
-
-  /* =========================================================
-     LOAD GROUPS
-  ========================================================= */
-
-  const loadGroups = useCallback(async () => {
-    setGroupsLoading(true);
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      setUserGroups([]);
-      setGroupsLoading(false);
-      return;
-    }
-
-    const {
-      data: memberRows,
-      error: memberError,
-    } = await supabase
-      .from('chat_group_members')
-      .select('group_id, role')
-      .eq('user_id', user.id);
-
-    if (memberError) {
-      console.error(
-        'LOAD GROUP MEMBERSHIPS ERROR:',
-        memberError,
-      );
-
-      setUserGroups([]);
-      setGroupsLoading(false);
-      return;
-    }
-
-    const groupIds =
-      (memberRows ?? []).map(
-        (row: {
-          group_id: string;
-        }) => row.group_id,
-      );
-
-    if (!groupIds.length) {
-      setUserGroups([]);
-      setGroupsLoading(false);
-      return;
-    }
-
-    const roleByGroupId = new Map(
-      (memberRows ?? []).map(
-        (row: {
-          group_id: string;
-          role: string;
-        }) => [
-          row.group_id,
-          row.role,
-        ],
-      ),
-    );
-
-    const {
-      data: groupRows,
-      error: groupError,
-    } = await supabase
-      .from('chat_groups')
-      .select('id, name, description, created_at')
-      .in('id', groupIds)
-      .order(
-        'created_at',
-        {
-          ascending: false,
-        },
-      );
-
-    if (groupError) {
-      console.error(
-        'LOAD GROUPS ERROR:',
-        groupError,
-      );
-
-      setUserGroups([]);
-      setGroupsLoading(false);
-      return;
-    }
-
-    // Groups use a channel conversation. A group id is NOT a conversation id.
-    const { data: channelRows } = await supabase
-      .from('chat_channels')
-      .select('id, group_id')
-      .in('group_id', groupIds)
-      .order('is_default', { ascending: false })
-      .order('position', { ascending: true });
-
-    const channelByGroup = new Map<string, string>();
-    (channelRows ?? []).forEach((row: any) => {
-      if (!channelByGroup.has(row.group_id)) channelByGroup.set(row.group_id, row.id);
-    });
-
-    const channelIds = [...new Set([...channelByGroup.values()])];
-    const { data: conversationRows } = channelIds.length
-      ? await supabase
-          .from('chat_conversations')
-          .select('id, group_id, channel_id')
-          .eq('type', 'channel')
-          .in('channel_id', channelIds)
-      : { data: [] as any[] };
-
-    const conversationByGroup = new Map<string, string>();
-    (conversationRows ?? []).forEach((row: any) => {
-      if (row.group_id) conversationByGroup.set(row.group_id, row.id);
-    });
-
-    const groupConversationIds = [...conversationByGroup.values()];
-    const groupReadMap = await getConversationReadMap(user.id, groupConversationIds);
-
-    // Synchronize persisted group read positions into local UI state too.
-    if (groupConversationIds.length && groupReadMap.size) {
-      setReadChatAt((previous) => {
-        const next = { ...previous };
-        groupReadMap.forEach((readAt, conversationId) => {
-          next[conversationId] = readAt;
-        });
-        return next;
-      });
-    }
-    const { data: groupMessageRows } = groupConversationIds.length
-      ? await supabase
-          .from('chat_messages')
-          .select('id, conversation_id, sender_id, body, created_at')
-          .in('conversation_id', groupConversationIds)
-          .is('deleted_at', null)
-          .order('created_at', { ascending: false })
-      : { data: [] as any[] };
-
-    const groupMessageIds = (groupMessageRows ?? [])
-      .map((row: any) => row.id)
-      .filter(Boolean);
-
-    const { ids: deletedGroupMessageIds } =
-      await getDeletedMessageIds(
-        groupMessageIds,
-        user.id,
-      );
-
-    const groupMessagesByConversation = new Map<string, any[]>();
-    (groupMessageRows ?? []).forEach((row: any) => {
-      if (deletedGroupMessageIds.has(row.id)) {
-        return;
-      }
-
-      const list = groupMessagesByConversation.get(row.conversation_id) ?? [];
-      list.push(row);
-      groupMessagesByConversation.set(row.conversation_id, list);
-    });
-
-    const senderIds = [...new Set((groupMessageRows ?? []).map((row: any) => row.sender_id).filter(Boolean))];
-    const { data: senderProfiles } = senderIds.length
-      ? await supabase.from('social_profiles').select('user_id, display_name').in('user_id', senderIds)
-      : { data: [] as any[] };
-    const senderNames = new Map((senderProfiles ?? []).map((p: any) => [p.user_id, p.display_name]));
-
-    const groupsList: ChatItem[] =
-      (groupRows ?? []).map(
-        (group: {
-          id: string;
-          name: string;
-        }) => ({
-          id: `group-${group.id}`,
-          name: group.name,
-          detail: (() => {
-            const last = (groupMessagesByConversation.get(conversationByGroup.get(group.id) ?? '') ?? [])[0];
-            if (!last) return ['admin', 'owner'].includes(String(roleByGroupId.get(group.id) ?? '')) ? 'You’re an admin' : 'Group';
-            const sender = last.sender_id === user.id ? 'You' : (senderNames.get(last.sender_id) ?? 'Member');
-            return `${sender}: ${last.body || 'Attachment'}`;
-          })(),
-          time: (() => {
-            const last = (groupMessagesByConversation.get(conversationByGroup.get(group.id) ?? '') ?? [])[0];
-            return last ? formatChatTime(last.created_at) : '';
-          })(),
-          lastMessageSenderId: (() => {
-            const last = (groupMessagesByConversation.get(conversationByGroup.get(group.id) ?? '') ?? [])[0];
-            return last?.sender_id;
-          })(),
-          unread: (() => {
-            const rows = groupMessagesByConversation.get(conversationByGroup.get(group.id) ?? '') ?? [];
-            const lastRead = groupReadMap.get(conversationByGroup.get(group.id) ?? '') ?? readChatAt[conversationByGroup.get(group.id) ?? ''];
-            return rows.filter((row: any) => row.sender_id !== user.id && (!lastRead || row.created_at > lastRead)).length;
-          })(),
-          category: 'groups',
-          icon: (
-            group.name || '?'
-          )
-            .slice(0, 1)
-            .toUpperCase(),
-          route:
-            `/chat/group/${group.id}`,
-        }),
-      );
-
-    setUserGroups(groupsList);
-    setGroupsLoading(false);
-  }, [readChatAt]);
-
-  /* =========================================================
-     LOAD CHAT TAGS
-  ========================================================= */
 
   const loadChatTags = useCallback(async () => {
     const {
@@ -1017,10 +516,7 @@ export default function ChatScreen() {
       return;
     }
 
-    const [
-      { data: tags, error: tagsError },
-      { data: assignments, error: assignmentsError },
-    ] = await Promise.all([
+    const [{ data: tags }, { data: assignments }] = await Promise.all([
       supabase
         .from('social_chat_tags')
         .select('id, user_id, name, created_at')
@@ -1032,44 +528,20 @@ export default function ChatScreen() {
         .eq('user_id', user.id),
     ]);
 
-    if (tagsError) {
-      console.error('LOAD CHAT TAGS ERROR:', tagsError);
-      setChatTags([]);
-    } else {
-      setChatTags((tags ?? []) as ChatTag[]);
-    }
-
-    if (assignmentsError) {
-      console.error(
-        'LOAD CHAT TAG ASSIGNMENTS ERROR:',
-        assignmentsError,
-      );
-      setChatTagAssignments([]);
-    } else {
-      setChatTagAssignments(
-        (assignments ?? []) as ChatTagAssignment[],
-      );
-    }
+    setChatTags((tags ?? []) as ChatTag[]);
+    setChatTagAssignments((assignments ?? []) as ChatTagAssignment[]);
   }, []);
-
-  /* =========================================================
-     CHAT TAG HELPERS
-  ========================================================= */
 
   const getTagChatId = (chat: ChatItem) => chat.id;
 
   const isChatTagged = (chat: ChatItem, tagId: string) =>
     chatTagAssignments.some(
-      (assignment) =>
-        assignment.chat_id === getTagChatId(chat) &&
-        assignment.tag_id === tagId,
+      (assignment) => assignment.chat_id === getTagChatId(chat) && assignment.tag_id === tagId,
     );
 
   const toggleTagFilter = (tagId: string) => {
     setSelectedTagIds((previous) =>
-      previous.includes(tagId)
-        ? previous.filter((id) => id !== tagId)
-        : [...previous, tagId],
+      previous.includes(tagId) ? previous.filter((id) => id !== tagId) : [...previous, tagId],
     );
   };
 
@@ -1083,23 +555,51 @@ export default function ChatScreen() {
   const createChatTag = async () => {
     const name = newTagName.trim();
     if (addingTag) return;
-    if (!name) { setAddTagError('Enter a tag name.'); return; }
-    if (name.length > 20) { setAddTagError('Tag names can be up to 20 characters.'); return; }
-
-    setAddingTag(true); setAddTagError(null);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) { setAddTagError('You must be signed in.'); setAddingTag(false); return; }
-
-    if (editingTagId) {
-      const { data, error } = await supabase.from('social_chat_tags').update({ name }).eq('id', editingTagId).eq('user_id', user.id).select('id, user_id, name, created_at').single();
-      setAddingTag(false);
-      if (error || !data) { setAddTagError(error?.message || 'Could not edit tag.'); return; }
-      setChatTags(previous => previous.map(tag => tag.id === editingTagId ? data as ChatTag : tag));
-      setEditingTagId(null); setNewTagName(''); setShowAddTagModal(false);
+    if (!name) {
+      setAddTagError('Enter a tag name.');
+      return;
+    }
+    if (name.length > 20) {
+      setAddTagError('Tag names can be up to 20 characters.');
       return;
     }
 
-    const { data, error } = await supabase.from('social_chat_tags').insert({ user_id: user.id, name }).select('id, user_id, name, created_at').single();
+    setAddingTag(true);
+    setAddTagError(null);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      setAddTagError('You must be signed in.');
+      setAddingTag(false);
+      return;
+    }
+
+    if (editingTagId) {
+      const { data, error } = await supabase
+        .from('social_chat_tags')
+        .update({ name })
+        .eq('id', editingTagId)
+        .eq('user_id', user.id)
+        .select('id, user_id, name, created_at')
+        .single();
+      setAddingTag(false);
+      if (error || !data) {
+        setAddTagError(error?.message || 'Could not edit tag.');
+        return;
+      }
+      setChatTags((previous) => previous.map((tag) => (tag.id === editingTagId ? (data as ChatTag) : tag)));
+      setEditingTagId(null);
+      setNewTagName('');
+      setShowAddTagModal(false);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('social_chat_tags')
+      .insert({ user_id: user.id, name })
+      .select('id, user_id, name, created_at')
+      .single();
     setAddingTag(false);
     if (error || !data) {
       if (error?.code === '23505') setAddTagError('You already have a tag with that name.');
@@ -1107,9 +607,11 @@ export default function ChatScreen() {
       return;
     }
     const tag = data as ChatTag;
-    setChatTags(previous => [...previous, tag]);
-    setFilter(null); setSelectedTagIds(previous => [...previous, tag.id]);
-    setNewTagName(''); setShowAddTagModal(false);
+    setChatTags((previous) => [...previous, tag]);
+    setFilter(null);
+    setSelectedTagIds((previous) => [...previous, tag.id]);
+    setNewTagName('');
+    setShowAddTagModal(false);
   };
 
   const deleteChatTag = async (tag: ChatTag) => {
@@ -1119,24 +621,8 @@ export default function ChatScreen() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          const { error: assignmentError } = await supabase
-            .from('social_chat_tag_assignments')
-            .delete()
-            .eq('user_id', tag.user_id)
-            .eq('tag_id', tag.id);
-          if (assignmentError) {
-            Alert.alert('Could not delete tag', assignmentError.message);
-            return;
-          }
-          const { error } = await supabase
-            .from('social_chat_tags')
-            .delete()
-            .eq('id', tag.id)
-            .eq('user_id', tag.user_id);
-          if (error) {
-            Alert.alert('Could not delete tag', error.message);
-            return;
-          }
+          await supabase.from('social_chat_tag_assignments').delete().eq('user_id', tag.user_id).eq('tag_id', tag.id);
+          await supabase.from('social_chat_tags').delete().eq('id', tag.id).eq('user_id', tag.user_id);
           setChatTags((previous) => previous.filter((item) => item.id !== tag.id));
           setChatTagAssignments((previous) => previous.filter((item) => item.tag_id !== tag.id));
           setSelectedTagIds((previous) => previous.filter((id) => id !== tag.id));
@@ -1152,38 +638,28 @@ export default function ChatScreen() {
     setShowAddTagModal(true);
   };
 
-  const reorderChatTag = async (tag: ChatTag) => {
-    const index = chatTags.findIndex((item) => item.id === tag.id);
-    if (index < 0) return;
-    const options: any[] = [
-      { text: 'Cancel', style: 'cancel' },
-    ];
-    if (index > 0) {
-      options.push({ text: 'Move up', onPress: () => swapChatTags(index, index - 1) });
-    }
-    if (index < chatTags.length - 1) {
-      options.push({ text: 'Move down', onPress: () => swapChatTags(index, index + 1) });
-    }
-    Alert.alert(`Re-order “${tag.name}”`, undefined, options);
-  };
-
   const swapChatTags = async (a: number, b: number) => {
     const first = chatTags[a];
     const second = chatTags[b];
     if (!first || !second) return;
     const firstDate = first.created_at;
     const secondDate = second.created_at;
-    const [firstUpdate, secondUpdate] = await Promise.all([
+    await Promise.all([
       supabase.from('social_chat_tags').update({ created_at: secondDate }).eq('id', first.id).eq('user_id', first.user_id),
       supabase.from('social_chat_tags').update({ created_at: firstDate }).eq('id', second.id).eq('user_id', second.user_id),
     ]);
-    if (firstUpdate.error || secondUpdate.error) {
-      Alert.alert('Could not reorder tag', firstUpdate.error?.message || secondUpdate.error?.message || 'Please try again.');
-      return;
-    }
     const next = [...chatTags];
     [next[a], next[b]] = [next[b], next[a]];
     setChatTags(next);
+  };
+
+  const reorderChatTag = async (tag: ChatTag) => {
+    const index = chatTags.findIndex((item) => item.id === tag.id);
+    if (index < 0) return;
+    const options: any[] = [{ text: 'Cancel', style: 'cancel' }];
+    if (index > 0) options.push({ text: 'Move up', onPress: () => swapChatTags(index, index - 1) });
+    if (index < chatTags.length - 1) options.push({ text: 'Move down', onPress: () => swapChatTags(index, index + 1) });
+    Alert.alert(`Re-order “${tag.name}”`, undefined, options);
   };
 
   const handleTagLongPress = (tag: ChatTag) => {
@@ -1195,569 +671,51 @@ export default function ChatScreen() {
     ]);
   };
 
-  const openTagChat = (chat: ChatItem) => {
-    setTagChat(chat);
-    setTagModalError(null);
-  };
-
-  const closeTagChat = () => {
-    setTagChat(null);
-    setTagModalError(null);
-  };
-
-  const setChatTagAssignment = async (
-    chat: ChatItem,
-    tag: ChatTag,
-    assigned: boolean,
-  ) => {
-    const chatId = getTagChatId(chat);
-
+  const loadIncomingRequests = useCallback(async () => {
+    setRequestsLoading(true);
     const {
       data: { user },
     } = await supabase.auth.getUser();
 
     if (!user) {
-      setTagModalError('You must be signed in.');
-      return;
-    }
-
-    if (assigned) {
-      const { data, error } = await supabase
-        .from('social_chat_tag_assignments')
-        .insert({
-          user_id: user.id,
-          chat_id: chatId,
-          tag_id: tag.id,
-        })
-        .select('id, user_id, chat_id, tag_id, created_at')
-        .single();
-
-      if (error) {
-        console.error('ADD CHAT TAG ERROR:', error);
-        if (error.code !== '23505') {
-          setTagModalError(error.message || 'Could not add tag.');
-        }
-        return;
-      }
-
-      if (data) {
-        setChatTagAssignments((previous) => [
-          ...previous,
-          data as ChatTagAssignment,
-        ]);
-      }
-      return;
-    }
-
-    const { error } = await supabase
-      .from('social_chat_tag_assignments')
-      .delete()
-      .eq('user_id', user.id)
-      .eq('chat_id', chatId)
-      .eq('tag_id', tag.id);
-
-    if (error) {
-      console.error('REMOVE CHAT TAG ERROR:', error);
-      setTagModalError(error.message || 'Could not remove tag.');
-      return;
-    }
-
-    setChatTagAssignments((previous) =>
-      previous.filter(
-        (assignment) =>
-          !(
-            assignment.chat_id === chatId &&
-            assignment.tag_id === tag.id
-          ),
-      ),
-    );
-  };
-
-  /* =========================================================
-     GROUP INVITES
-  ========================================================= */
-
-  const loadIncomingGroupInvites =
-    useCallback(async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        setIncomingGroupInvites([]);
-        return;
-      }
-
-      const {
-        data: inviteRows,
-        error: inviteError,
-      } = await supabase
-        .from(
-          'chat_group_invitations',
-        )
-        .select(
-          'id, group_id, inviter_id, created_at',
-        )
-        .eq(
-          'invitee_id',
-          user.id,
-        )
-        .eq(
-          'status',
-          'pending',
-        )
-        .order(
-          'created_at',
-          {
-            ascending: false,
-          },
-        );
-
-      if (inviteError) {
-        console.error(
-          'LOAD GROUP INVITES ERROR:',
-          inviteError,
-        );
-
-        setIncomingGroupInvites([]);
-        return;
-      }
-
-      if (!inviteRows?.length) {
-        setIncomingGroupInvites([]);
-        return;
-      }
-
-      const groupIds = [
-        ...new Set(
-          inviteRows.map(
-            (row) =>
-              row.group_id,
-          ),
-        ),
-      ];
-
-      const inviterIds = [
-        ...new Set(
-          inviteRows.map(
-            (row) =>
-              row.inviter_id,
-          ),
-        ),
-      ];
-
-      const [
-        { data: groupRows },
-        { data: profileRows },
-      ] = await Promise.all([
-        supabase
-          .from('chat_groups')
-          .select(
-            'id, name',
-          )
-          .in(
-            'id',
-            groupIds,
-          ),
-
-        supabase
-          .from('social_profiles')
-          .select(
-            'user_id, display_name',
-          )
-          .in(
-            'user_id',
-            inviterIds,
-          ),
-      ]);
-
-      const groupNameById =
-        new Map(
-          (groupRows ?? []).map(
-            (group) => [
-              group.id,
-              group.name,
-            ],
-          ),
-        );
-
-      const inviterNameById =
-        new Map(
-          (profileRows ?? []).map(
-            (profile) => [
-              profile.user_id,
-              profile.display_name,
-            ],
-          ),
-        );
-
-      setIncomingGroupInvites(
-        inviteRows.map(
-          (row) => ({
-            id: row.id,
-            group_id:
-              row.group_id,
-            group_name:
-              groupNameById.get(
-                row.group_id,
-              ) ?? 'Group',
-            inviter_id:
-              row.inviter_id,
-            inviter_name:
-              inviterNameById.get(
-                row.inviter_id,
-              ) ?? 'Someone',
-            created_at:
-              row.created_at,
-          }),
-        ),
-      );
-    }, []);
-
-  /* =========================================================
-     ACCEPT GROUP INVITE
-  ========================================================= */
-
-  const acceptGroupInvite =
-    async (
-      invite: IncomingGroupInvite,
-    ) => {
-      setGroupInviteActionId(
-        invite.id,
-      );
-
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        setGroupInviteActionId(null);
-        return;
-      }
-
-      const {
-        error: updateError,
-      } = await supabase
-        .from(
-          'chat_group_invitations',
-        )
-        .update({
-          status: 'accepted',
-        })
-        .eq(
-          'id',
-          invite.id,
-        );
-
-      if (updateError) {
-        console.error(
-          'ACCEPT GROUP INVITE ERROR:',
-          updateError,
-        );
-
-        setGroupInviteActionId(null);
-        return;
-      }
-
-      const {
-        error: memberError,
-      } = await supabase
-        .from('chat_group_members')
-        .insert({
-          group_id: invite.group_id,
-          user_id: user.id,
-          role: 'member',
-        });
-
-      if (memberError) {
-        console.error(
-          'JOIN GROUP AFTER ACCEPT ERROR:',
-          memberError,
-        );
-      }
-
-      const conversation = await ensureGroupConversation(invite.group_id, user.id);
-      if (conversation.error || !conversation.id) {
-        console.error('JOIN GROUP CHAT ERROR:', conversation.error);
-      }
-
-      setIncomingGroupInvites(
-        (previous) =>
-          previous.filter(
-            (item) =>
-              item.id !==
-              invite.id,
-          ),
-      );
-
-      await loadGroups();
-
-      setGroupInviteActionId(null);
-    };
-
-  /* =========================================================
-     DECLINE GROUP INVITE
-  ========================================================= */
-
-  const declineGroupInvite =
-    async (
-      invite: IncomingGroupInvite,
-    ) => {
-      setGroupInviteActionId(
-        invite.id,
-      );
-
-      const {
-        error,
-      } = await supabase
-        .from(
-          'chat_group_invitations',
-        )
-        .update({
-          status: 'declined',
-        })
-        .eq(
-          'id',
-          invite.id,
-        );
-
-      if (error) {
-        console.error(
-          'DECLINE GROUP INVITE ERROR:',
-          error,
-        );
-      }
-
-      setIncomingGroupInvites(
-        (previous) =>
-          previous.filter(
-            (item) =>
-              item.id !==
-              invite.id,
-          ),
-      );
-
-      setGroupInviteActionId(null);
-    };
-
-  /* =========================================================
-     CREATE GROUP
-  ========================================================= */
-
-  const handleCreateGroup = async () => {
-    const name = newGroupName.trim();
-    const description = newGroupDescription.trim();
-    if (!name || creatingGroup) return;
-
-    setCreatingGroup(true);
-    setCreateGroupError(null);
-
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      setCreateGroupError('You must be signed in.');
-      setCreatingGroup(false);
-      return;
-    }
-
-    try {
-      // The current Chat schema uses chat_groups -> chat_channels ->
-      // chat_conversations(type=channel) for group conversations.
-      const { data: groupData, error: groupError } = await supabase
-        .from('chat_groups')
-        .insert({
-          name,
-          description,
-          visibility: 'private',
-          owner_id: user.id,
-        })
-        .select('id')
-        .single();
-      if (groupError || !groupData) throw groupError ?? new Error('Could not create group.');
-
-      const groupId = groupData.id;
-
-      const { error: memberError } = await supabase
-        .from('chat_group_members')
-        .insert({ group_id: groupId, user_id: user.id, role: 'owner' });
-      if (memberError) throw memberError;
-
-      const { data: channelData, error: channelError } = await supabase
-        .from('chat_channels')
-        .insert({
-          group_id: groupId,
-          name,
-          description,
-          position: 0,
-          is_default: true,
-          created_by: user.id,
-        })
-        .select('id')
-        .single();
-      if (channelError || !channelData) throw channelError ?? new Error('Could not create group channel.');
-
-      const { data: conversationData, error: conversationError } = await supabase
-        .from('chat_conversations')
-        .insert({
-          type: 'channel',
-          group_id: groupId,
-          channel_id: channelData.id,
-          created_by: user.id,
-        })
-        .select('id')
-        .single();
-      if (conversationError || !conversationData) throw conversationError ?? new Error('Could not create group conversation.');
-
-      const { error: conversationMemberError } = await supabase
-        .from('chat_conversation_members')
-        .insert({ conversation_id: conversationData.id, user_id: user.id });
-      if (conversationMemberError) throw conversationMemberError;
-
-      setNewGroupName('');
-      setNewGroupDescription('');
-      setCreateGroupOpen(false);
-      await loadGroups();
-      router.push(`/chat/group/${groupId}` as never);
-    } catch (error: any) {
-      console.error('CREATE GROUP ERROR:', error);
-      setCreateGroupError(error?.message || 'Could not create group.');
-    } finally {
-      setCreatingGroup(false);
-    }
-  };
-
-  /* =========================================================
-     LOAD FRIEND REQUESTS
-  ========================================================= */
-
-  const loadIncomingRequests =
-    useCallback(async () => {
-      setRequestsLoading(true);
-
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        setIncomingRequests([]);
-        setRequestsLoading(false);
-        return;
-      }
-
-      const {
-        data: requestRows,
-        error: requestError,
-      } = await supabase
-        .from('friend_requests')
-        .select(
-          'id, sender_id, created_at',
-        )
-        .eq(
-          'receiver_id',
-          user.id,
-        )
-        .eq(
-          'status',
-          'pending',
-        )
-        .order(
-          'created_at',
-          {
-            ascending: false,
-          },
-        );
-
-      if (requestError) {
-        console.error(
-          'LOAD FRIEND REQUESTS ERROR:',
-          requestError,
-        );
-
-        setIncomingRequests([]);
-        setRequestsLoading(false);
-        return;
-      }
-
-      const senderIds =
-        (requestRows ?? []).map(
-          (row: {
-            sender_id: string;
-          }) =>
-            row.sender_id,
-        );
-
-      if (!senderIds.length) {
-        setIncomingRequests([]);
-        setRequestsLoading(false);
-        return;
-      }
-
-      const {
-        data: profiles,
-        error: profileError,
-      } = await supabase
-        .from(
-          'social_profiles',
-        )
-        .select(
-          'user_id, display_name, username',
-        )
-        .in(
-          'user_id',
-          senderIds,
-        );
-
-      if (profileError) {
-        console.error(
-          'LOAD REQUEST PROFILES ERROR:',
-          profileError,
-        );
-
-        setIncomingRequests([]);
-        setRequestsLoading(false);
-        return;
-      }
-
-      const profileMap =
-        new Map<
-          string,
-          SocialProfile
-        >(
-          (
-            profiles ?? []
-          ).map(
-            (
-              profile: SocialProfile,
-            ) => [
-              profile.user_id,
-              profile,
-            ],
-          ),
-        );
-
-      setIncomingRequests(
-        (
-          requestRows ?? []
-        ).map(
-          (row: {
-            id: string;
-            sender_id: string;
-            created_at: string;
-          }) => ({
-            id: row.id,
-            sender_id:
-              row.sender_id,
-            sender:
-              profileMap.get(
-                row.sender_id,
-              ) ?? null,
-            created_at:
-              row.created_at,
-          }),
-        ),
-      );
-
+      setIncomingRequests([]);
       setRequestsLoading(false);
-    }, []);
+      return;
+    }
+
+    const { data: requestRows } = await supabase
+      .from('friend_requests')
+      .select('id, sender_id, created_at')
+      .eq('receiver_id', user.id)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false });
+
+    const senderIds = (requestRows ?? []).map((row: { sender_id: string }) => row.sender_id);
+    if (!senderIds.length) {
+      setIncomingRequests([]);
+      setRequestsLoading(false);
+      return;
+    }
+
+    const { data: profiles } = await supabase
+      .from('social_profiles')
+      .select('user_id, display_name, username')
+      .in('user_id', senderIds);
+
+    const profileMap = new Map<string, SocialProfile>(
+      (profiles ?? []).map((profile: SocialProfile) => [profile.user_id, profile]),
+    );
+
+    setIncomingRequests(
+      (requestRows ?? []).map((row: { id: string; sender_id: string; created_at: string }) => ({
+        id: row.id,
+        sender_id: row.sender_id,
+        sender: profileMap.get(row.sender_id) ?? null,
+        created_at: row.created_at,
+      })),
+    );
+    setRequestsLoading(false);
+  }, []);
 
   useEffect(() => {
     const requested = params.filter;
@@ -1766,33 +724,13 @@ export default function ChatScreen() {
     }
   }, [params.filter]);
 
-  /* =========================================================
-     REFRESH CHAT DATA WHEN THIS TAB IS SHOWN
-  ========================================================= */
-
   useFocusEffect(
     useCallback(() => {
       loadFriends();
       loadIncomingRequests();
-      setUserGroups([]);
-      setIncomingGroupInvites([]);
       loadChatTags();
-    }, [
-      loadFriends,
-      loadIncomingRequests,
-      loadChatTags,
-    ]),
+    }, [loadFriends, loadIncomingRequests, loadChatTags]),
   );
-
-  /* =========================================================
-     LOAD STREAK RECIPIENTS ALREADY SENT TODAY
-
-     A recipient is marked sent only when this exact streak
-     message was already sent to that person today.
-
-     This allows sharing again on a new day or when the streak
-     message changes because the streak count/habit changes.
-  ========================================================= */
 
   const loadSentStreakRecipients = useCallback(async () => {
     if (!flexMode || !streakMessage) {
@@ -1812,10 +750,7 @@ export default function ChatScreen() {
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
 
-    const {
-      data: messageRows,
-      error: messageError,
-    } = await supabase
+    const { data: messageRows } = await supabase
       .from('chat_messages')
       .select('conversation_id')
       .eq('sender_id', user.id)
@@ -1823,84 +758,38 @@ export default function ChatScreen() {
       .gte('created_at', startOfToday.toISOString())
       .is('deleted_at', null);
 
-    if (messageError) {
-      console.error(
-        'LOAD SENT STREAK MESSAGES ERROR:',
-        messageError,
-      );
-      setSentStreakRecipients([]);
-      return;
-    }
-
     const conversationIds = [
-      ...new Set(
-        (messageRows ?? [])
-          .map((row: any) => row.conversation_id)
-          .filter(Boolean),
-      ),
+      ...new Set((messageRows ?? []).map((row: any) => row.conversation_id).filter(Boolean)),
     ];
-
     if (!conversationIds.length) {
       setSentStreakRecipients([]);
       return;
     }
 
-    const {
-      data: directConversations,
-      error: conversationError,
-    } = await supabase
+    const { data: directConversations } = await supabase
       .from('chat_conversations')
       .select('id')
       .eq('type', 'direct')
       .in('id', conversationIds);
 
-    if (conversationError) {
-      console.error(
-        'LOAD SENT STREAK CONVERSATIONS ERROR:',
-        conversationError,
-      );
-      setSentStreakRecipients([]);
-      return;
-    }
-
-    const directIds = (directConversations ?? []).map(
-      (row: any) => row.id,
-    );
-
+    const directIds = (directConversations ?? []).map((row: any) => row.id);
     if (!directIds.length) {
       setSentStreakRecipients([]);
       return;
     }
 
-    const {
-      data: memberRows,
-      error: memberError,
-    } = await supabase
+    const { data: memberRows } = await supabase
       .from('chat_conversation_members')
       .select('conversation_id, user_id')
       .in('conversation_id', directIds);
 
-    if (memberError) {
-      console.error(
-        'LOAD SENT STREAK RECIPIENT MEMBERS ERROR:',
-        memberError,
-      );
-      setSentStreakRecipients([]);
-      return;
-    }
-
     const recipientIds = [
       ...new Set(
         (memberRows ?? [])
-          .filter(
-            (row: any) =>
-              row.user_id &&
-              row.user_id !== user.id,
-          )
+          .filter((row: any) => row.user_id && row.user_id !== user.id)
           .map((row: any) => row.user_id),
       ),
     ];
-
     setSentStreakRecipients(recipientIds);
   }, [flexMode, streakMessage]);
 
@@ -1912,322 +801,145 @@ export default function ChatScreen() {
       setFlexError(null);
       return;
     }
-
     setSelectedRecipients([]);
     setFlexError(null);
     void loadSentStreakRecipients();
-  }, [
-    flexMode,
-    streakMessage,
-    loadSentStreakRecipients,
-  ]);
+  }, [flexMode, streakMessage, loadSentStreakRecipients]);
 
-  /* =========================================================
-     COMBINED CHAT LIST
-  ========================================================= */
+  const allChats = useMemo(() => [...userFriends], [userFriends]);
 
-  const allChats = useMemo(
-    () => [...userFriends],
-    [userFriends],
-  );
+  const filteredChats = useMemo(() => {
+    const lowered = query.toLowerCase().trim();
+    const byName = allChats.filter(
+      (chat) => chat.name.toLowerCase().includes(lowered) || chat.detail.toLowerCase().includes(lowered),
+    );
 
-  /* =========================================================
-     FILTERED CHAT LIST
-  ========================================================= */
-
-  const filteredChats =
-    useMemo(() => {
-      const lowered =
-        query
-          .toLowerCase()
-          .trim();
-
-      const byName =
-        allChats.filter(
-          (chat) =>
-            chat.name.toLowerCase().includes(lowered) ||
-            chat.detail.toLowerCase().includes(lowered),
-        );
-
-      const existingProfileIds = new Set(allChats.map((chat) => chat.profileId).filter(Boolean));
-      const peopleMatches = lowered
-        ? searchableFriends.filter((person) =>
+    const existingProfileIds = new Set(allChats.map((chat) => chat.profileId).filter(Boolean));
+    const peopleMatches = lowered
+      ? searchableFriends.filter(
+          (person) =>
             !existingProfileIds.has(person.profileId) &&
             (person.name.toLowerCase().includes(lowered) || person.detail.toLowerCase().includes(lowered)),
-          )
-        : [];
+        )
+      : [];
 
-      const combinedByName = [...byName, ...peopleMatches];
+    const combinedByName = [...byName, ...peopleMatches];
+    const byBaseFilter =
+      filter === 'Unread' ? combinedByName.filter((chat) => !!chat.unread) : combinedByName;
 
-      const byBaseFilter =
-        filter === 'Unread'
-          ? combinedByName.filter(
-              (chat) => !!chat.unread,
-            )
-          : combinedByName;
+    if (selectedTagIds.length === 0) return byBaseFilter;
+    return byBaseFilter.filter((chat) => selectedTagIds.every((tagId) => isChatTagged(chat, tagId)));
+  }, [allChats, searchableFriends, query, filter, selectedTagIds, chatTagAssignments]);
 
-      if (selectedTagIds.length === 0) {
-        return byBaseFilter;
-      }
+  const flexRecipients = useMemo(() => {
+    const lowered = flexSearch.toLowerCase().trim();
+    if (!lowered) return userFriends;
+    return userFriends.filter(
+      (friend) => friend.name.toLowerCase().includes(lowered) || friend.detail.toLowerCase().includes(lowered),
+    );
+  }, [userFriends, flexSearch]);
 
-      return byBaseFilter.filter((chat) =>
-        selectedTagIds.every((tagId) =>
-          isChatTagged(chat, tagId),
-        ),
-      );
-    }, [
-      allChats,
-      searchableFriends,
-      query,
-      filter,
-      selectedTagIds,
-      chatTagAssignments,
-    ]);
+  const toggleFlexRecipient = (profileId: string) => {
+    setFlexError(null);
+    if (sentStreakRecipients.includes(profileId)) return;
+    setSelectedRecipients((previous) =>
+      previous.includes(profileId) ? previous.filter((id) => id !== profileId) : [...previous, profileId],
+    );
+  };
 
-  /* =========================================================
-     FLEX FRIEND LIST
+  const cancelFlexMode = () => {
+    setSelectedRecipients([]);
+    setFlexSearch('');
+    setFlexError(null);
 
-     Only direct friends are selectable.
-     Sidekick and groups are not recipients.
-  ========================================================= */
+    // Clear Share Streak route params before leaving this screen.
+    // Expo Router can retain tab route params when the user returns to Chat;
+    // without clearing them, the normal Chat tab can reopen in Share Streak mode.
+    router.setParams({
+      shareStreak: 'false',
+      flex: 'false',
+      streak: '',
+      habitTitle: '',
+      habitName: '',
+      frequency: '',
+    } as never);
 
-  const flexRecipients =
-    useMemo(() => {
-      const lowered =
-        flexSearch
-          .toLowerCase()
-          .trim();
+    const validFrequencies = ['daily', 'weekly', 'monthly', 'annually'];
+    const returnFrequency = validFrequencies.includes(streakFrequency) ? streakFrequency : 'daily';
+    const cameFromHabit =
+      Boolean(habitTitle) &&
+      (params.shareStreak === '1' || params.shareStreak === 'true' || typeof params.streak === 'string');
 
-      if (!lowered) {
-        return userFriends;
-      }
+    if (cameFromHabit) {
+      router.replace({
+        pathname: '/(tabs)/habits',
+        params: { frequency: returnFrequency },
+      } as never);
+      return;
+    }
+    router.replace('/(tabs)' as never);
+  };
 
-      return userFriends.filter(
-        (friend) =>
-          friend.name
-            .toLowerCase()
-            .includes(
-              lowered,
-            ) ||
-          friend.detail
-            .toLowerCase()
-            .includes(
-              lowered,
-            ),
-      );
-    }, [
-      userFriends,
-      flexSearch,
-    ]);
+  const sendFlexMessage = async () => {
+    if (flexSending || !selectedRecipients.length) return;
+    if (!streakMessage) {
+      setFlexError('you have a zero day streak.');
+      return;
+    }
 
-  /* =========================================================
-     TOGGLE FLEX RECIPIENT
-  ========================================================= */
+    setFlexSending(true);
+    setFlexError(null);
 
-  const toggleFlexRecipient =
-    (profileId: string) => {
-      setFlexError(null);
+    try {
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
 
-      if (sentStreakRecipients.includes(profileId)) {
+      if (authError || !user) {
+        setFlexError('You must be signed in to share your streak.');
         return;
       }
 
-      setSelectedRecipients(
-        (previous) =>
-          previous.includes(profileId)
-            ? previous.filter(
-                (id) =>
-                  id !== profileId,
-              )
-            : [
-                ...previous,
-                profileId,
-              ],
-      );
-    };
+      let sendError: any = null;
+      const successfullySentRecipientIds: string[] = [];
 
-  /* =========================================================
-     CANCEL FLEX MODE
-  ========================================================= */
+      for (const recipientId of selectedRecipients) {
+        if (sentStreakRecipients.includes(recipientId)) continue;
+        const { id: conversationId, error: conversationError } = await ensureDirectConversation(user.id, recipientId);
+        if (conversationError || !conversationId) {
+          sendError = conversationError || new Error('Could not open direct conversation.');
+          break;
+        }
 
-  const cancelFlexMode =
-    () => {
-      setSelectedRecipients([]);
-      setFlexSearch('');
-      setFlexError(null);
+        const result = await sendChatMessage(conversationId, user.id, streakMessage);
+        if (result.error) {
+          sendError = result.error;
+          break;
+        }
+        successfullySentRecipientIds.push(recipientId);
+      }
 
-      router.replace(
-        '/(tabs)' as never,
-      );
-    };
+      if (successfullySentRecipientIds.length) {
+        setSentStreakRecipients((previous) => [...new Set([...previous, ...successfullySentRecipientIds])]);
+        setSelectedRecipients((previous) => previous.filter((id) => !successfullySentRecipientIds.includes(id)));
+      }
 
-  /* =========================================================
-     SEND FLEX MESSAGE
-
-     IMPORTANT:
-     Your existing chat screen only loads/open chats;
-     it does not expose the existing message-table schema.
-
-     Therefore we do not invent a Supabase table here.
-
-     Instead, after selection, this passes the selected
-     recipients + prepared message to the direct-chat route.
-
-     The existing chat/[id].tsx can then consume:
-
-       composeMessage
-       autoSend
-
-     without changing normal chat behavior.
-  ========================================================= */
-
-  const sendFlexMessage =
-    async () => {
-      if (
-        flexSending ||
-        !selectedRecipients.length
-      ) {
+      if (sendError) {
+        setFlexError(sendError.message || 'Could not send your streak message.');
         return;
       }
-
-      if (!streakMessage) {
-        setFlexError(
-          'you have a zero day streak.',
-        );
-        return;
-      }
-
-      setFlexSending(true);
       setFlexError(null);
+    } catch {
+      setFlexError('Could not send your streak message. Please try again.');
+    } finally {
+      setFlexSending(false);
+    }
+  };
 
-      try {
-        const {
-          data: { user },
-          error: authError,
-        } = await supabase.auth.getUser();
-
-        if (authError || !user) {
-          setFlexError(
-            'You must be signed in to share your streak.',
-          );
-          return;
-        }
-
-        let sendError: any = null;
-        const successfullySentRecipientIds: string[] = [];
-
-        for (const recipientId of selectedRecipients) {
-          if (sentStreakRecipients.includes(recipientId)) {
-            continue;
-          }
-
-          // Conversation creation/restoration happens only now,
-          // when the user actually presses Send.
-          const {
-            id: conversationId,
-            error: conversationError,
-          } = await ensureDirectConversation(
-            user.id,
-            recipientId,
-          );
-
-          if (
-            conversationError ||
-            !conversationId
-          ) {
-            sendError =
-              conversationError ||
-              new Error(
-                'Could not open direct conversation.',
-              );
-            break;
-          }
-
-          const result =
-            await sendChatMessage(
-              conversationId,
-              user.id,
-              streakMessage,
-            );
-
-          if (result.error) {
-            sendError = result.error;
-            break;
-          }
-
-          successfullySentRecipientIds.push(
-            recipientId,
-          );
-        }
-
-        if (successfullySentRecipientIds.length) {
-          setSentStreakRecipients(
-            (previous) => [
-              ...new Set([
-                ...previous,
-                ...successfullySentRecipientIds,
-              ]),
-            ],
-          );
-
-          // Remove successful sends from the pending selection.
-          // They remain visually checked as sent.
-          setSelectedRecipients(
-            (previous) =>
-              previous.filter(
-                (id) =>
-                  !successfullySentRecipientIds.includes(id),
-              ),
-          );
-        }
-
-        if (sendError) {
-          console.error(
-            'FLEX MESSAGE SEND ERROR:',
-            sendError,
-          );
-
-          setFlexError(
-            sendError.message ||
-              'Could not send your streak message.',
-          );
-
-          return;
-        }
-
-        setFlexError(null);
-
-        // Stay on the Share your streak page. Sent recipients
-        // remain marked and cannot be selected again today.
-      } catch (error) {
-        console.error(
-          'FLEX MESSAGE SEND EXCEPTION:',
-          error,
-        );
-
-        setFlexError(
-          'Could not send your streak message. Please try again.',
-        );
-      } finally {
-        setFlexSending(false);
-      }
-    };
-
-  /* =========================================================
-     SEARCH USERS BY USERNAME
-  ========================================================= */
-
-  const searchUsers = async (
-    text: string,
-  ) => {
+  const searchUsers = async (text: string) => {
     setFriendQuery(text);
-
-    const cleaned =
-      text
-        .trim()
-        .replace(/^@/, '')
-        .toLowerCase();
-
+    const cleaned = text.trim().replace(/^@/, '').toLowerCase();
     if (!cleaned) {
       setFriendResults([]);
       setSentRequestIds([]);
@@ -2244,970 +956,283 @@ export default function ChatScreen() {
       const {
         data: { user },
         error: authError,
-      } =
-        await supabase.auth.getUser();
+      } = await supabase.auth.getUser();
 
-      if (authError) {
+      if (authError || !user) {
         setFriendResults([]);
-        setFriendError(
-          `Authentication error: ${authError.message}`,
-        );
+        setFriendError('You must be signed in.');
         return;
       }
 
-      if (!user) {
-        setFriendResults([]);
-        setFriendError(
-          'You must be signed in.',
-        );
-        return;
-      }
-
-      const {
-        data,
-        error: searchError,
-      } = await supabase
-        .from(
-          'social_profiles',
-        )
-        .select(
-          'id, user_id, display_name, username',
-        )
-        .ilike(
-          'username',
-          `%${cleaned}%`,
-        )
-        .neq(
-          'user_id',
-          user.id,
-        )
+      const { data, error: searchError } = await supabase
+        .from('social_profiles')
+        .select('id, user_id, display_name, username')
+        .ilike('username', `%${cleaned}%`)
+        .neq('user_id', user.id)
         .limit(10);
 
       if (searchError) {
-        console.error(
-          'USER SEARCH ERROR:',
-          searchError,
-        );
-
         setFriendResults([]);
-        setFriendError(
-          `Search error: ${searchError.message}`,
-        );
+        setFriendError(`Search error: ${searchError.message}`);
         return;
       }
 
       const profiles = (data ?? []) as SocialProfile[];
-
       setFriendResults(profiles);
 
-      // Load existing friendships for the users currently shown.
-      // Existing friends take priority over both "Sent" and "Add".
-      const resultIds = profiles
-        .map((profile) => profile.user_id)
-        .filter(Boolean);
-
+      const resultIds = profiles.map((profile) => profile.user_id).filter(Boolean);
       if (resultIds.length) {
-        const {
-          data: friendshipRows,
-          error: friendshipError,
-        } = await supabase
+        const { data: friendshipRows } = await supabase
           .from('friendships')
           .select('user_id, friend_user_id')
           .or(`user_id.eq.${user.id},friend_user_id.eq.${user.id}`);
 
-        if (friendshipError) {
-          console.error(
-            'LOAD SEARCH FRIENDSHIPS ERROR:',
-            friendshipError,
-          );
-          setExistingFriendIds([]);
-        } else {
-          const friendIds = (friendshipRows ?? [])
-            .map((row: { user_id: string; friend_user_id: string }) =>
-              row.user_id === user.id
-                ? row.friend_user_id
-                : row.user_id,
-            )
-            .filter((friendId: string) =>
-              resultIds.includes(friendId),
-            );
+        const friendIds = (friendshipRows ?? [])
+          .map((row: { user_id: string; friend_user_id: string }) =>
+            row.user_id === user.id ? row.friend_user_id : row.user_id,
+          )
+          .filter((friendId: string) => resultIds.includes(friendId));
 
-          setExistingFriendIds([...new Set(friendIds)]);
-        }
-      } else {
-        setExistingFriendIds([]);
-      }
+        setExistingFriendIds([...new Set(friendIds)]);
 
-      // Load outgoing pending requests for the users currently shown.
-      // Reuse the resultIds list above so it is not declared twice.
-      if (resultIds.length) {
-        const {
-          data: pendingRows,
-          error: pendingError,
-        } = await supabase
+        const { data: pendingRows } = await supabase
           .from('friend_requests')
           .select('receiver_id')
           .eq('sender_id', user.id)
           .eq('status', 'pending')
           .in('receiver_id', resultIds);
 
-        if (pendingError) {
-          console.error(
-            'LOAD OUTGOING FRIEND REQUESTS ERROR:',
-            pendingError,
-          );
-        } else {
-          setSentRequestIds(
-            (pendingRows ?? [])
-              .map((row: { receiver_id: string }) => row.receiver_id)
-              .filter(Boolean),
-          );
-        }
+        setSentRequestIds((pendingRows ?? []).map((row: { receiver_id: string }) => row.receiver_id).filter(Boolean));
       } else {
+        setExistingFriendIds([]);
         setSentRequestIds([]);
       }
-    } catch (error) {
-      console.error(
-        'FRIEND SEARCH EXCEPTION:',
-        error,
-      );
-
+    } catch {
       setFriendResults([]);
-      setFriendError(
-        'Something went wrong while searching.',
-      );
+      setFriendError('Something went wrong while searching.');
     } finally {
       setFriendSearching(false);
     }
   };
 
-  /* =========================================================
-     SEND FRIEND REQUEST
-  ========================================================= */
+  const sendFriendRequest = async (friendUserId: string) => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
+      setFriendError('You must be logged in.');
+      return;
+    }
+    if (existingFriendIds.includes(friendUserId) || sentRequestIds.includes(friendUserId)) return;
 
-  const sendFriendRequest =
-    async (
-      friendUserId: string,
-    ) => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+    setSendingRequestId(friendUserId);
+    setFriendError(null);
 
-      if (!user) {
-        setFriendError(
-          'You must be logged in.',
-        );
-        return;
-      }
+    const { error: requestError } = await supabase.from('friend_requests').insert({
+      sender_id: user.id,
+      receiver_id: friendUserId,
+      status: 'pending',
+    });
 
-      if (
-        existingFriendIds.includes(friendUserId) ||
-        sentRequestIds.includes(friendUserId)
-      ) {
-        return;
-      }
-
-      setSendingRequestId(
-        friendUserId,
-      );
-
-      setFriendError(null);
-
-      const {
-        data: existingPending,
-        error: existingError,
-      } = await supabase
-        .from(
-          'friend_requests',
-        )
-        .select(
-          'id, status',
-        )
-        .eq(
-          'sender_id',
-          user.id,
-        )
-        .eq(
-          'receiver_id',
-          friendUserId,
-        )
-        .eq(
-          'status',
-          'pending',
-        )
-        .maybeSingle();
-
-      if (existingError) {
-        setFriendError(
-          'Could not check the friend request.',
-        );
-        setSendingRequestId(null);
-        return;
-      }
-
-      if (existingPending) {
-        setFriendError(
-          'A friend request has already been sent.',
-        );
-        setSendingRequestId(null);
-        return;
-      }
-
-      const {
-        data: reversePending,
-        error: reverseError,
-      } = await supabase
-        .from(
-          'friend_requests',
-        )
-        .select(
-          'id, sender_id',
-        )
-        .eq(
-          'sender_id',
-          friendUserId,
-        )
-        .eq(
-          'receiver_id',
-          user.id,
-        )
-        .eq(
-          'status',
-          'pending',
-        )
-        .maybeSingle();
-
-      if (reverseError) {
-        setFriendError(
-          'Could not check existing requests.',
-        );
-        setSendingRequestId(null);
-        return;
-      }
-
-      if (reversePending) {
-        setFriendError(
-          'This person has already sent you a friend request. Check your pending requests.',
-        );
-        setSendingRequestId(null);
-        return;
-      }
-
-      const {
-        data: alreadyFriend,
-        error: friendshipError,
-      } = await supabase
-        .from('friendships')
-        .select('id')
-        .eq(
-          'user_id',
-          user.id,
-        )
-        .eq(
-          'friend_user_id',
-          friendUserId,
-        )
-        .maybeSingle();
-
-      if (friendshipError) {
-        setFriendError(
-          'Could not check the friendship.',
-        );
-        setSendingRequestId(null);
-        return;
-      }
-
-      if (alreadyFriend) {
-        setFriendError(
-          'You are already friends with this person.',
-        );
-        setSendingRequestId(null);
-        return;
-      }
-
-      const {
-        error: requestError,
-      } = await supabase
-        .from(
-          'friend_requests',
-        )
-        .insert({
-          sender_id:
-            user.id,
-          receiver_id:
-            friendUserId,
-          status:
-            'pending',
-        });
-
-      if (requestError) {
-        setFriendError(
-          requestError.message ||
-            'Could not send friend request.',
-        );
-        setSendingRequestId(null);
-        return;
-      }
-
-      // Keep the person in the results and change the button to "Sent".
-      setSentRequestIds(
-        (previous) =>
-          previous.includes(friendUserId)
-            ? previous
-            : [...previous, friendUserId],
-      );
-
+    if (requestError) {
+      setFriendError(requestError.message || 'Could not send friend request.');
       setSendingRequestId(null);
-    };
+      return;
+    }
 
-  /* =========================================================
-     ACCEPT FRIEND REQUEST
-  ========================================================= */
+    setSentRequestIds((previous) => (previous.includes(friendUserId) ? previous : [...previous, friendUserId]));
+    setSendingRequestId(null);
+  };
 
-  const acceptFriendRequest =
-    async (
-      request: IncomingRequest,
-    ) => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        setFriendError(
-          'You must be logged in.',
-        );
-        return;
-      }
-
-      setRequestActionId(
-        request.id,
-      );
-
-      setFriendError(null);
-
-      const {
-        error,
-      } = await supabase.rpc(
-        'accept_friend_request',
-        {
-          request_id:
-            request.id,
-        },
-      );
-
-      if (error) {
-        setFriendError(
-          `Could not accept friend request: ${error.message}`,
-        );
-
-        setRequestActionId(null);
-        return;
-      }
-
-      setIncomingRequests(
-        (previous) =>
-          previous.filter(
-            (item) =>
-              item.id !==
-              request.id,
-          ),
-      );
-
-      await loadFriends();
-
+  const acceptFriendRequest = async (request: IncomingRequest) => {
+    setRequestActionId(request.id);
+    setFriendError(null);
+    const { error } = await supabase.rpc('accept_friend_request', { request_id: request.id });
+    if (error) {
+      setFriendError(`Could not accept friend request: ${error.message}`);
       setRequestActionId(null);
-    };
+      return;
+    }
+    setIncomingRequests((previous) => previous.filter((item) => item.id !== request.id));
+    await loadFriends();
+    setRequestActionId(null);
+  };
 
-  /* =========================================================
-     DECLINE FRIEND REQUEST
-  ========================================================= */
+  const declineFriendRequest = async (request: IncomingRequest) => {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
 
-  const declineFriendRequest =
-    async (
-      request: IncomingRequest,
-    ) => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+    setRequestActionId(request.id);
+    await supabase.from('friend_requests').update({ status: 'declined' }).eq('id', request.id).eq('receiver_id', user.id);
+    setIncomingRequests((previous) => previous.filter((item) => item.id !== request.id));
+    setRequestActionId(null);
+  };
 
-      if (!user) {
-        return;
-      }
-
-      setRequestActionId(
-        request.id,
-      );
-
-      const {
-        error,
-      } = await supabase
-        .from(
-          'friend_requests',
-        )
-        .update({
-          status:
-            'declined',
-        })
-        .eq(
-          'id',
-          request.id,
-        )
-        .eq(
-          'receiver_id',
-          user.id,
-        );
-
-      if (error) {
-        setFriendError(
-          error.message ||
-            'Could not decline the request.',
-        );
-
-        setRequestActionId(null);
-        return;
-      }
-
-      setIncomingRequests(
-        (previous) =>
-          previous.filter(
-            (item) =>
-              item.id !==
-              request.id,
-          ),
-      );
-
-      setRequestActionId(null);
-    };
-
-  /* =========================================================
-     OPEN NORMAL CHAT
-  ========================================================= */
-
-  const openChat = async (
-    chat: ChatItem,
-  ) => {
+  const openChat = async (chat: ChatItem) => {
     if (flexMode) {
-      if (
-        chat.category !==
-          'direct' ||
-        !chat.profileId
-      ) {
-        return;
-      }
-
-      toggleFlexRecipient(
-        chat.profileId,
-      );
-
+      if (chat.category !== 'direct' || !chat.profileId) return;
+      toggleFlexRecipient(chat.profileId);
       return;
     }
 
     const sourceFilter = filter ?? 'All';
-
-    /*
-     * Direct chats must be marked as read before navigating away.
-     * The previous code only did this for groups, which is why the
-     * unread counter stayed visible after opening a direct chat.
-     */
-    if (
-      chat.category ===
-        'direct' &&
-      chat.profileId
-    ) {
+    if (chat.category === 'direct' && chat.profileId) {
       if (myUserId) {
         try {
-          const directConversation =
-            await ensureDirectConversation(
-              myUserId,
-              chat.profileId,
-            );
-
+          const directConversation = await ensureDirectConversation(myUserId, chat.profileId);
           if (directConversation.id) {
-            const readNow =
-              new Date().toISOString();
-
-            /*
-             * Update local state immediately so the unread badge
-             * disappears without waiting for Supabase or a refresh.
-             */
-            setReadChatAt((previous) => ({
-              ...previous,
-              [directConversation.id!]: readNow,
-            }));
-
-            /*
-             * Persist the read position in Supabase.
-             */
-            void markConversationRead(
-              directConversation.id,
-              myUserId,
-            );
+            const readNow = new Date().toISOString();
+            setReadChatAt((previous) => ({ ...previous, [directConversation.id!]: readNow }));
+            void markConversationRead(directConversation.id, myUserId);
           }
-        } catch (error) {
-          console.error(
-            'MARK DIRECT CHAT READ ERROR:',
-            error,
-          );
-        }
+        } catch {}
       }
-
-      router.push(
-        {
-          pathname: `/chat/${chat.profileId}`,
-          params: {
-            from: sourceFilter,
-          },
-        } as never,
-      );
-
-      return;
-    }
-
-    /*
-     * Groups already have their conversation resolved here.
-     * Keep that existing behavior, while also updating the local
-     * read state immediately.
-     */
-    if (chat.category === 'groups') {
-      const groupId = chat.id.replace(
-        /^group-/,
-        '',
-      );
-
-      if (myUserId) {
-        try {
-          const groupConversation =
-            await ensureGroupConversation(
-              groupId,
-              myUserId,
-            );
-
-          if (groupConversation.id) {
-            const readNow =
-              new Date().toISOString();
-
-            setReadChatAt((previous) => ({
-              ...previous,
-              [groupConversation.id!]: readNow,
-            }));
-
-            void markConversationRead(
-              groupConversation.id,
-              myUserId,
-            );
-          }
-        } catch (error) {
-          console.error(
-            'MARK GROUP CHAT READ ERROR:',
-            error,
-          );
-        }
-      }
-    }
-
-    if (chat.route) {
-      if (chat.category === 'groups') {
-        router.push(
-          {
-            pathname: chat.route,
-            params: {
-              from: sourceFilter,
-            },
-          } as never,
-        );
-      } else {
-        router.push(
-          chat.route as never,
-        );
-      }
+      router.push({
+        pathname: `/chat/${chat.profileId}`,
+        params: { from: sourceFilter },
+      } as never);
     }
   };
-
-  /* =========================================================
-     OPEN CREATE GROUP
-  ========================================================= */
-
-  const openCreateGroup = () => {
-    setCreateGroupOpen(true);
-    setNewGroupName('');
-    setNewGroupDescription('');
-    setCreateGroupError(null);
-  };
-
-  /* =========================================================
-     COLORS
-  ========================================================= */
-
-  const C = isDark
-    ? {
-        bg: '#090909',
-        card: '#111111',
-        border: '#2A2A2A',
-        text: isBlackDark ? '#FFFFFF' : '#F4F2EE',
-        muted: isBlackDark ? '#FFFFFF' : '#AAA59D',
-        input: '#171717',
-        inputBorder: '#363636',
-        divider: '#292929',
-      }
-    : {
-        bg: '#FBFAF8',
-        card: '#FFFFFF',
-        border: '#ECE9E4',
-        text: '#292824',
-        muted: '#88857E',
-        input: '#FFFFFF',
-        inputBorder: '#E1DED8',
-        divider: '#F0EEEA',
-      };
-
-  /* =========================================================
-     RENDER
-  ========================================================= */
 
   return (
-    <SafeAreaView
-      style={[
-        styles.safe,
-        {
-          backgroundColor:
-            C.bg,
-        },
-      ]}
-    >
-      {/* =====================================================
-          FLEX MODE HEADER
-      ===================================================== */}
+    <SafeAreaView style={[styles.safe, { backgroundColor: pageBg }]}>
+      <StatusBar barStyle={isAccentPureBlack ? 'light-content' : 'dark-content'} backgroundColor={pageBg} />
 
-      {flexMode ? (
-        <View
-          style={[
-            styles.flexHeader,
-            {
-              backgroundColor:
-                C.bg,
-            },
-          ]}
+      {/* Header */}
+      <View style={styles.header}>
+        <Pressable
+          onPress={() => {
+            if (flexMode) cancelFlexMode();
+            else router.push('/modules');
+          }}
+          style={({ pressed }) => [styles.backBtn, pressed && styles.pressedBtn]}
+          hitSlop={12}
         >
-          <View
-            style={
-              styles.flexHeaderTop
-            }
+          <ChevronLeft color="#FFFFFF" size={22} strokeWidth={2.8} />
+        </Pressable>
+        <Text style={styles.headerTitle} numberOfLines={1}>
+          {flexMode ? 'SHARE STREAK' : 'CHATS'}
+        </Text>
+        <Pressable
+          onPress={() => setMenuOpen(true)}
+          style={({ pressed }) => [styles.bellBtn, pressed && styles.pressedBtn]}
+          hitSlop={12}
+        >
+          <MoreVertical color="#000000" size={22} strokeWidth={2.5} />
+        </Pressable>
+      </View>
+
+      <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
+        <Pressable style={styles.menuShade} onPress={() => setMenuOpen(false)}>
+          <Pressable
+            style={[styles.menuCard, { backgroundColor: isDark ? '#121212' : '#FFFFFF', borderColor: '#000000' }]}
+            onPress={(event) => event.stopPropagation()}
           >
-            <View
-              style={{
-                flex: 1,
-              }}
-            >
-              <Text
-                style={[
-                  styles.flexTitle,
-                  {
-                    color: C.text,
-                  },
-                ]}
-              >
-                Share your streak
-              </Text>
-
-              <Text
-                style={[
-                  styles.flexSubtitle,
-                  {
-                    color:
-                      C.muted,
-                  },
-                ]}
-              >
-                Select who you want
-                to send it to
-              </Text>
-            </View>
-
             <Pressable
-              onPress={
-                cancelFlexMode
-              }
-              hitSlop={12}
+              onPress={() => {
+                setMenuOpen(false);
+                router.push('/(tabs)/profile');
+              }}
+              style={styles.menuItem}
             >
-              <X
-                color={C.muted}
-                size={22}
-              />
+              <Text style={[styles.menuItemText, { color: isDark ? '#FFFFFF' : '#000000' }]}>Settings</Text>
             </Pressable>
-          </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
+      {/* Top Search & Filter Bar */}
+      {!flexMode && (
+        <View style={styles.frozenHeader}>
           {streakMessage ? (
-            <View
-              style={[
-                styles.streakPreview,
-                {
-                  backgroundColor:
-                    isDark
-                      ? '#171717'
-                      : '#FFFFFF',
-                  borderColor:
-                    C.border,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.streakPreviewLabel,
-                  {
-                    color:
-                      C.muted,
-                  },
-                ]}
-              >
-                MESSAGE
-              </Text>
-
-              <Text
-                style={[
-                  styles.streakPreviewText,
-                  {
-                    color:
-                      C.text,
-                  },
-                ]}
-              >
-                {streakMessage}
+            <View style={[styles.streakBanner, { backgroundColor: isDark ? '#121212' : '#FFFFFF', borderColor: '#000000' }]}>
+              <Text style={[styles.streakBannerText, { color: isDark ? '#FFFFFF' : '#000000' }]}>
+                Sharing streak: {habitTitle} ({streakCount} {streakUnit})
               </Text>
             </View>
           ) : null}
 
-          <View
-            style={[
-              styles.search,
-              {
-                backgroundColor:
-                  C.input,
-                borderColor:
-                  C.inputBorder,
-              },
-            ]}
-          >
-            <Search
-              color={C.muted}
-              size={18}
-            />
-
-            <TextInput
-              value={flexSearch}
-              onChangeText={
-                setFlexSearch
-              }
-              placeholder="Search people..."
-              placeholderTextColor={
-                C.muted
-              }
-              style={[
-                styles.searchInput,
-                {
-                  color:
-                    C.text,
-                },
-              ]}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-          </View>
-
-          <View
-            style={
-              styles.selectionCountRow
-            }
-          >
-            <Text
-              style={[
-                styles.selectionCount,
-                {
-                  color:
-                    C.muted,
-                },
-              ]}
-            >
-              {selectedRecipients.length}{' '}
-              selected
-            </Text>
-          </View>
-        </View>
-      ) : (
-        /* ===================================================
-           NORMAL HEADER
-        =================================================== */
-
-        <View
-          style={
-            styles.frozenHeader
-          }
-        >
-          <View
-            style={
-              styles.searchRow
-            }
-          >
-            <View
-              style={[
-                styles.search,
-                {
-                  flex: 1,
-                  backgroundColor:
-                    C.input,
-                  borderColor:
-                    C.inputBorder,
-                },
-              ]}
-            >
-              <Search
-                color={C.muted}
-                size={18}
-              />
-
-              <TextInput
-                value={query}
-                onChangeText={
-                  setQuery
-                }
-                placeholder="Search conversations..."
-                placeholderTextColor={
-                  C.muted
-                }
-                style={[
-                  styles.searchInput,
-                  {
-                    color:
-                      C.text,
-                  },
-                ]}
-              />
+          <View style={styles.searchRow}>
+            <View style={styles.searchWrapper}>
+              <View style={styles.searchShadowBackdrop} />
+              <View style={[styles.search, { backgroundColor: '#FFFFFF' }]}>
+                <Search color="#52525B" size={18} />
+                <TextInput
+                  value={query}
+                  onChangeText={setQuery}
+                  placeholder="Search conversations..."
+                  placeholderTextColor="#71717A"
+                  style={[styles.searchInput, { color: '#000000' }]}
+                />
+                {query.length > 0 ? (
+                  <Pressable onPress={() => setQuery('')} hitSlop={8}>
+                    <X color="#000000" size={16} />
+                  </Pressable>
+                ) : null}
+              </View>
             </View>
 
             <Pressable
               onPress={() => {
-                setFriendSearchOpen(
-                  true,
-                );
+                setFriendSearchOpen(true);
                 setFriendQuery('');
-                setFriendResults(
-                  [],
-                );
-                setFriendError(
-                  null,
-                );
+                setFriendResults([]);
+                setFriendError(null);
               }}
-              style={[
+              style={({ pressed }) => [
                 styles.addFriendBtn,
-                {
-                  backgroundColor:
-                    accentForeground,
-                },
+                { backgroundColor: '#FFFFFF', borderColor: '#000000' },
+                pressed && styles.pressedBtn,
               ]}
               hitSlop={8}
             >
-              <UserPlus
-                color="#FFFFFF"
-                size={20}
-              />
+              <UserPlus color="#000000" size={20} />
             </Pressable>
           </View>
 
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={
-              false
-            }
-            contentContainerStyle={
-              styles.filters
-            }
-          >
-            {filters.map(
-              (item) => (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
+            {filters.map((item) => {
+              const isSelected = filter === item;
+              return (
                 <Pressable
                   key={item}
-                  onPress={() =>
-                    setFilter((previous) =>
-                      previous === item
-                        ? null
-                        : item,
-                    )
-                  }
-                  style={[
+                  onPress={() => setFilter((previous) => (previous === item ? null : item))}
+                  style={({ pressed }) => [
                     styles.filter,
                     {
-                      backgroundColor:
-                        C.input,
-                      borderColor:
-                        C.inputBorder,
+                      backgroundColor: isSelected ? pageBg : isDark ? '#121212' : '#FFFFFF',
+                      borderColor: '#000000',
                     },
-                    filter ===
-                      item && {
-                      backgroundColor:
-                        accentForeground,
-                      borderColor:
-                        accentForeground,
-                    },
+                    pressed && styles.pressedBtn,
                   ]}
                 >
-                  <Text
-                    style={[
-                      styles.filterText,
-                      {
-                        color:
-                          C.muted,
-                      },
-                      filter ===
-                        item && {
-                        color:
-                          '#FFFFFF',
-                      },
-                    ]}
-                  >
+                  <Text style={[styles.filterText, { color: isSelected ? '#000000' : isDark ? '#FFFFFF' : '#000000' }]}>
                     {item}
                   </Text>
                 </Pressable>
-              ),
-            )}
+              );
+            })}
 
             {chatTags.map((tag) => {
-              const selected =
-                selectedTagIds.includes(tag.id);
-
+              const selected = selectedTagIds.includes(tag.id);
               return (
                 <Pressable
                   key={tag.id}
-                  onPress={() =>
-                    toggleTagFilter(tag.id)
-                  }
+                  onPress={() => toggleTagFilter(tag.id)}
                   onLongPress={() => handleTagLongPress(tag)}
-                  style={[
+                  style={({ pressed }) => [
                     styles.filter,
                     {
-                      backgroundColor:
-                        C.input,
-                      borderColor:
-                        C.inputBorder,
+                      backgroundColor: selected ? pageBg : isDark ? '#121212' : '#FFFFFF',
+                      borderColor: '#000000',
                     },
-                    selected && {
-                      backgroundColor:
-                        accentForeground,
-                      borderColor:
-                        accentForeground,
-                    },
+                    pressed && styles.pressedBtn,
                   ]}
                 >
                   <Text
-                    style={[
-                      styles.filterText,
-                      {
-                        color:
-                          C.muted,
-                      },
-                      selected && {
-                        color:
-                          '#FFFFFF',
-                      },
-                    ]}
+                    style={[styles.filterText, { color: selected ? '#000000' : isDark ? '#FFFFFF' : '#000000' }]}
                     numberOfLines={1}
                   >
                     {tag.name}
@@ -3218,1630 +1243,416 @@ export default function ChatScreen() {
 
             <Pressable
               onPress={openAddTag}
-              style={[
+              style={({ pressed }) => [
                 styles.filter,
                 styles.addTagFilter,
-                {
-                  borderColor:
-                    accentForeground,
-                  backgroundColor:
-                    C.input,
-                },
+                { borderColor: '#000000', backgroundColor: isDark ? '#121212' : '#FFFFFF' },
+                pressed && styles.pressedBtn,
               ]}
             >
-              <Plus
-                color={isBlackDark ? '#FFFFFF' : accentForeground}
-                size={14}
-                strokeWidth={2.5}
-              />
-              <Text
-                style={[
-                  styles.filterText,
-                  {
-                    color:
-                      isBlackDark
-                        ? '#FFFFFF'
-                        : accentForeground,
-                  },
-                ]}
-              >
-                Add tag
-              </Text>
+              <Plus color={isDark ? '#FFFFFF' : '#000000'} size={14} strokeWidth={2.5} />
+              <Text style={[styles.filterText, { color: isDark ? '#FFFFFF' : '#000000' }]}>Add tag</Text>
             </Pressable>
           </ScrollView>
         </View>
       )}
 
-      {/* =====================================================
-          CONTENT
-      ===================================================== */}
+      {flexMode && (
+        <View style={styles.flexHeader}>
+          {streakMessage ? (
+            <View style={[styles.streakPreview, { backgroundColor: isDark ? '#121212' : '#FFFFFF', borderColor: '#000000' }]}>
+              <Text style={[styles.streakPreviewLabel, { color: isDark ? '#A1A1AA' : '#52525B' }]}>MESSAGE</Text>
+              <Text style={[styles.streakPreviewText, { color: isDark ? '#FFFFFF' : '#000000' }]}>{streakMessage}</Text>
+            </View>
+          ) : null}
 
-<ScrollView
-  contentContainerStyle={[
-    styles.chatScrollContent,
-    flexMode &&
-      styles.flexContent,
-  ]}
-  showsVerticalScrollIndicator={
-    false
-  }
->
-        {/* ===================================================
-            FLEX RECIPIENT LIST
-        =================================================== */}
+          <View style={styles.searchWrapper}>
+            <View style={styles.searchShadowBackdrop} />
+            <View style={[styles.search, { backgroundColor: '#FFFFFF' }]}>
+              <Search color="#52525B" size={18} />
+              <TextInput
+                value={flexSearch}
+                onChangeText={setFlexSearch}
+                placeholder="Search people..."
+                placeholderTextColor="#71717A"
+                style={[styles.searchInput, { color: '#000000' }]}
+              />
+              {flexSearch.length > 0 ? (
+                <Pressable onPress={() => setFlexSearch('')} hitSlop={8}>
+                  <X color="#000000" size={16} />
+                </Pressable>
+              ) : null}
+            </View>
+          </View>
+          <Text style={[styles.selectionCount, { color: isDark ? '#FFFFFF' : '#000000' }]}>
+            {selectedRecipients.length} selected
+          </Text>
+        </View>
+      )}
 
+      <ScrollView contentContainerStyle={[styles.chatScrollContent, flexMode && styles.flexContent]} showsVerticalScrollIndicator={false}>
         {flexMode ? (
           <>
-            {flexError ? (
-              <Text
-                style={[
-                  styles.flexError,
-                  {
-                    color:
-                      '#E05252',
-                  },
-                ]}
-              >
-                {flexError}
-              </Text>
-            ) : null}
-
-            <View
-              style={[
-                styles.chatList,
-                {
-                  backgroundColor:
-                    C.card,
-                  borderColor:
-                    C.border,
-                },
-              ]}
-            >
-              {flexRecipients.length >
-              0 ? (
-                flexRecipients.map(
-                  (friend) => {
-                    const isSent =
-                      !!friend.profileId &&
-                      sentStreakRecipients.includes(
-                        friend.profileId,
-                      );
-
-                    const selected =
-                      !!friend.profileId &&
-                      (
-                        selectedRecipients.includes(
-                          friend.profileId,
-                        ) || isSent
-                      );
-
+            {flexError ? <Text style={styles.flexError}>{flexError}</Text> : null}
+            {flexRecipients.length > 0 ? (
+              <View style={styles.cardContainer}>
+                <View style={styles.cardShadowBackdrop} />
+                <View style={[styles.list, { backgroundColor: isDark ? '#121212' : '#FFFFFF', borderColor: '#000000' }]}>
+                  {flexRecipients.map((friend, i) => {
+                    const isSent = !!friend.profileId && sentStreakRecipients.includes(friend.profileId);
+                    const selected = !!friend.profileId && (selectedRecipients.includes(friend.profileId) || isSent);
                     return (
                       <Pressable
-                        key={
-                          friend.id
-                        }
+                        key={friend.id}
                         disabled={isSent}
-                        onPress={() =>
-                          friend.profileId &&
-                          toggleFlexRecipient(
-                            friend.profileId,
-                          )
-                        }
+                        onPress={() => friend.profileId && toggleFlexRecipient(friend.profileId)}
                         style={({ pressed }) => [
-                          styles.chatRow,
-                          {
-                            borderBottomColor:
-                              C.divider,
-                          },
-                          pressed &&
-                            !isSent &&
-                            styles.pressed,
-                          selected && {
-                            backgroundColor:
-                              isDark
-                                ? '#1D241F'
-                                : '#F5FAF6',
-                          },
+                          styles.row,
+                          i < flexRecipients.length - 1 && [styles.rowBorder, { borderBottomColor: isDark ? '#27272A' : '#E4E4E7' }],
+                          pressed && !isSent && styles.pressed,
                         ]}
                       >
                         {friend.sidekickId ? (
-                          <View
-                            style={[
-                              styles.avatar,
-                              styles.sidekickAvatarContainer,
-                            ]}
-                          >
-                            <SidekickAvatar
-                              sidekickId={friend.sidekickId}
-                              size={38}
-                            />
+                          <View style={[styles.avatar, styles.sidekickAvatarContainer]}>
+                            <SidekickAvatar sidekickId={friend.sidekickId} size={38} />
                           </View>
                         ) : (
-                          <View
-                            style={[
-                              styles.avatar,
-                              { backgroundColor: accentForeground },
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.avatarText,
-                                { color: '#FFFFFF' },
-                              ]}
-                            >
-                              {friend.icon}
-                            </Text>
+                          <View style={[styles.avatar, { backgroundColor: pageBg }]}>
+                            <Text style={[styles.avatarText, { color: '#000000' }]}>{friend.icon}</Text>
                           </View>
                         )}
-
-                        <View
-                          style={
-                            styles.chatCopy
-                          }
-                        >
-                          <Text
-                            style={[
-                              styles.chatName,
-                              {
-                                color:
-                                  C.text,
-                              },
-                            ]}
-                          >
-                            {
-                              friend.name
-                            }
-                          </Text>
-
-                          <Text
-                            style={[
-                              styles.chatDetail,
-                              {
-                                color:
-                                  C.muted,
-                              },
-                            ]}
-                          >
-                            {
-                              friend.detail
-                            }
+                        <View style={styles.rowCopy}>
+                          <Text style={[styles.rowTitle, { color: isDark ? '#FFFFFF' : '#000000' }]}>{friend.name}</Text>
+                          <Text style={[styles.rowUrl, { color: isDark ? '#A1A1AA' : '#52525B' }]} numberOfLines={1}>
+                            {friend.detail}
                           </Text>
                         </View>
-
-                        <View
-                          style={{
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            gap: 10,
-                          }}
-                        >
-                          {isSent ? (
-                            <Text
-                              style={[
-                                styles.flexSentLabel,
-                                {
-                                  color:
-                                    accentForeground,
-                                },
-                              ]}
-                            >
-                              Sent
-                            </Text>
-                          ) : null}
-
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                          {isSent ? <Text style={[styles.flexSentLabel, { color: isDark ? '#A1A1AA' : '#52525B' }]}>Sent</Text> : null}
                           <View
                             style={[
                               styles.selectionCircle,
-                              {
-                                borderColor:
-                                  selected
-                                    ? accentForeground
-                                    : C.inputBorder,
-                                backgroundColor:
-                                  selected
-                                    ? accentForeground
-                                    : 'transparent',
-                              },
+                              { borderColor: '#000000', backgroundColor: selected ? pageBg : '#FFFFFF' },
                             ]}
                           >
-                            {selected ? (
-                              <Check
-                                color="#FFFFFF"
-                                size={16}
-                                strokeWidth={3}
-                              />
-                            ) : null}
+                            {selected ? <Check color="#000000" size={14} strokeWidth={3} /> : null}
                           </View>
                         </View>
                       </Pressable>
                     );
-                  },
-                )
-              ) : (
-                <View
-                  style={
-                    styles.flexEmpty
-                  }
-                >
-                  <Text
-                    style={[
-                      styles.empty,
-                      {
-                        color:
-                          C.muted,
-                      },
-                    ]}
-                  >
-                    {userFriends.length ===
-                    0
-                      ? 'You do not have any friends to share with yet.'
-                      : 'No people match your search.'}
-                  </Text>
+                  })}
                 </View>
-              )}
-            </View>
+              </View>
+            ) : (
+              <View style={styles.empty}>
+                <Text style={[styles.emptyText, { color: isDark ? '#A1A1AA' : '#52525B' }]}>
+                  {userFriends.length === 0 ? 'You do not have any friends to share with yet.' : 'No people match your search.'}
+                </Text>
+              </View>
+            )}
           </>
         ) : (
           <>
-            {/* ===============================================
-                FRIEND REQUESTS
-            =============================================== */}
-
-            {incomingRequests.length >
-              0 && (
-              <View
-                style={[
-                  styles.requestsCard,
-                  {
-                    backgroundColor:
-                      C.card,
-                    borderColor:
-                      C.border,
-                  },
-                ]}
-              >
-                <View
-                  style={
-                    styles.requestsHeader
-                  }
-                >
-                  <View>
-                    <Text
-                      style={[
-                        styles.requestsTitle,
-                        {
-                          color:
-                            C.text,
-                        },
-                      ]}
-                    >
-                      FRIEND REQUESTS
-                    </Text>
-
-                    <Text
-                      style={[
-                        styles.requestsSubtitle,
-                        {
-                          color:
-                            C.muted,
-                        },
-                      ]}
-                    >
-                      People who want
-                      to connect with
-                      you
-                    </Text>
+            {incomingRequests.length > 0 && (
+              <View style={styles.cardContainer}>
+                <View style={styles.cardShadowBackdrop} />
+                <View style={[styles.list, { backgroundColor: isDark ? '#121212' : '#FFFFFF', borderColor: '#000000', paddingVertical: 12 }]}>
+                  <View style={styles.requestsHeader}>
+                    <Text style={[styles.requestsTitle, { color: isDark ? '#FFFFFF' : '#000000' }]}>FRIEND REQUESTS</Text>
+                    <View style={[styles.requestCount, { backgroundColor: pageBg }]}>
+                      <Text style={styles.requestCountText}>{incomingRequests.length}</Text>
+                    </View>
                   </View>
-
-                  <View
-                    style={[
-                      styles.requestCount,
-                      {
-                        backgroundColor:
-                          accentForeground,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={
-                        styles.requestCountText
-                      }
-                    >
-                      {
-                        incomingRequests.length
-                      }
-                    </Text>
-                  </View>
-                </View>
-
-                {incomingRequests.map(
-                  (request) => (
+                  {incomingRequests.map((request, i) => (
                     <View
-                      key={
-                        request.id
-                      }
+                      key={request.id}
                       style={[
-                        styles.requestRow,
-                        {
-                          borderTopColor:
-                            C.divider,
-                        },
+                        styles.row,
+                        i < incomingRequests.length - 1 && [styles.rowBorder, { borderBottomColor: isDark ? '#27272A' : '#E4E4E7' }],
                       ]}
                     >
-                      <View
-                        style={[
-                          styles.friendAvatar,
-                          {
-                            backgroundColor:
-                              accentForeground,
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={
-                            styles.friendAvatarText
-                          }
-                        >
-                          {(
-                            request
-                              .sender
-                              ?.display_name ||
-                            '?'
-                          )
-                            .slice(
-                              0,
-                              1,
-                            )
-                            .toUpperCase()}
+                      <View style={[styles.avatar, { backgroundColor: pageBg }]}>
+                        <Text style={[styles.avatarText, { color: '#000000' }]}>
+                          {(request.sender?.display_name || '?').slice(0, 1).toUpperCase()}
                         </Text>
                       </View>
-
-                      <View
-                        style={
-                          styles.requestCopy
-                        }
-                      >
-                        <Text
-                          style={[
-                            styles.requestName,
-                            {
-                              color:
-                                C.text,
-                            },
-                          ]}
-                        >
-                          {request
-                            .sender
-                            ?.display_name ||
-                            'Unknown user'}
+                      <View style={styles.rowCopy}>
+                        <Text style={[styles.rowTitle, { color: isDark ? '#FFFFFF' : '#000000' }]}>
+                          {request.sender?.display_name || 'Unknown user'}
                         </Text>
-
-                        <Text
-                          style={[
-                            styles.requestUsername,
-                            {
-                              color:
-                                C.muted,
-                            },
-                          ]}
-                        >
-                          @
-                          {request
-                            .sender
-                            ?.username ||
-                            'unknown'}
+                        <Text style={[styles.rowUrl, { color: isDark ? '#A1A1AA' : '#52525B' }]}>
+                          @{request.sender?.username || 'unknown'}
                         </Text>
                       </View>
-
-                      <View
-                        style={
-                          styles.requestButtons
-                        }
-                      >
+                      <View style={styles.requestButtons}>
                         <Pressable
-                          disabled={
-                            requestActionId ===
-                            request.id
-                          }
-                          onPress={() =>
-                            acceptFriendRequest(
-                              request,
-                            )
-                          }
-                          style={[
-                            styles.acceptBtn,
-                            {
-                              backgroundColor:
-                                accentForeground,
-                            },
-                          ]}
+                          disabled={requestActionId === request.id}
+                          onPress={() => acceptFriendRequest(request)}
+                          style={[styles.acceptBtn, { backgroundColor: '#000000', borderColor: pageBg }]}
                         >
-                          {requestActionId ===
-                          request.id ? (
-                            <ActivityIndicator
-                              size="small"
-                              color="#FFFFFF"
-                            />
+                          {requestActionId === request.id ? (
+                            <ActivityIndicator size="small" color={pageBg} />
                           ) : (
-                            <Check
-                              color="#FFFFFF"
-                              size={15}
-                            />
+                            <Check color={pageBg} size={15} />
                           )}
                         </Pressable>
-
                         <Pressable
-                          disabled={
-                            requestActionId ===
-                            request.id
-                          }
-                          onPress={() =>
-                            declineFriendRequest(
-                              request,
-                            )
-                          }
-                          style={[
-                            styles.declineBtn,
-                            {
-                              backgroundColor:
-                                C.card,
-                              borderColor:
-                                C.inputBorder,
-                            },
-                          ]}
+                          disabled={requestActionId === request.id}
+                          onPress={() => declineFriendRequest(request)}
+                          style={[styles.declineBtn, { backgroundColor: isDark ? '#27272A' : '#F4F4F5', borderColor: '#000000' }]}
                         >
-                          <X
-                            color={
-                              C.muted
-                            }
-                            size={15}
-                          />
+                          <X color={isDark ? '#FFFFFF' : '#000000'} size={15} />
                         </Pressable>
                       </View>
                     </View>
-                  ),
-                )}
+                  ))}
+                </View>
               </View>
             )}
 
-            {/* ===============================================
-                CONVERSATION LIST
-            =============================================== */}
-
-            <View
-              style={[
-                styles.chatList,
-                {
-                  backgroundColor:
-                    C.card,
-                  borderColor:
-                    C.border,
-                },
-              ]}
-            >
-              {filteredChats.map(
-                (chat) => (
-                  <Pressable
-                    key={chat.id}
-                    onPress={() =>
-                      openChat(chat)
-                    }
-                    style={({ pressed }) => [
-                      styles.chatRow,
-                      {
-                        borderBottomColor:
-                          C.divider,
-                      },
-                      pressed &&
-                        styles.pressed,
-                    ]}
-                  >
-                    {chat.category === 'direct' && chat.sidekickId ? (
-                      <View
-                        style={[
-                          styles.avatar,
-                          styles.sidekickAvatarContainer,
-                        ]}
-                      >
-                        <SidekickAvatar
-                          sidekickId={chat.sidekickId}
-                          size={38}
-                        />
-                      </View>
-                    ) : (
-                      <View
-                        style={[
-                          styles.avatar,
-                          { backgroundColor: accentForeground },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.avatarText,
-                            { color: '#FFFFFF' },
-                          ]}
-                        >
-                          {chat.icon}
-                        </Text>
-                      </View>
-                    )}
-
-                    <View
-                      style={
-                        styles.chatCopy
-                      }
-                    >
-                      <View
-                        style={
-                          styles.chatNameLine
-                        }
-                      >
-                        <Text
-                          style={[
-                            styles.chatName,
-                            {
-                              color:
-                                C.text,
-                            },
-                          ]}
-                        >
-                          {
-                            chat.name
-                          }
-                        </Text>
-
-                      </View>
-
-                      <Text
-                        style={[
-                          styles.chatDetail,
-                          {
-                            color:
-                              C.muted,
-                          },
-                        ]}
-                        numberOfLines={
-                          1
-                        }
-                      >
-                        {
-                          chat.detail
-                        }
-                      </Text>
-                    </View>
-
-                    <View
-                      style={
-                        styles.chatMeta
-                      }
-                    >
-                      <Text
-                        style={[
-                          styles.time,
-                          {
-                            color:
-                              C.muted,
-                          },
-                        ]}
-                      >
-                        {
-                          chat.time
-                        }
-                      </Text>
-
-                      {chat.unread ? (
-                        <View
-                          style={[
-                            styles.unread,
-                            {
-                              backgroundColor:
-                                accentForeground,
-                            },
-                          ]}
-                        >
-                          <Text
-                            style={
-                              styles.unreadText
-                            }
-                          >
-                            {chat.unread}
-                          </Text>
-                        </View>
-                      ) : chat.time &&
-                        chat.lastMessageSenderId === myUserId &&
-                        chat.lastMessageRead ? (
-                        <CheckCheck
-                          color={isBlackDark ? '#FFFFFF' : accentForeground}
-                          size={15}
-                          strokeWidth={2.2}
-                        />
-                      ) : null}
-                    </View>
-                  </Pressable>
-                ),
-              )}
-            </View>
-
-            {requestsLoading &&
-              incomingRequests.length ===
-                0 && (
-                <View
-                  style={
-                    styles.requestLoading
-                  }
-                >
-                  <ActivityIndicator
-                    size="small"
-                    color={
-                      accentForeground
-                    }
-                  />
-                </View>
-              )}
-
-
-
-            {filteredChats.length ===
-              0 &&
-              !groupsLoading && (
-                <View
-                  style={styles.emptyState}
-                >
-                  {userFriends.length ===
-                    0 &&
-                  !query.trim() &&
-                  filter === 'All' ? (
-                    <>
-                      <Text
-                        style={[
-                          styles.emptyTitle,
-                          {
-                            color:
-                              C.text,
-                          },
-                        ]}
-                      >
-                        No friends added yet
-                      </Text>
-
-                      <Text
-                        style={[
-                          styles.emptySubtitle,
-                          {
-                            color:
-                              C.muted,
-                          },
-                        ]}
-                      >
-                        Click + to add friends and start chatting.
-                      </Text>
-                    </>
-                  ) : (
-                    <Text
-                      style={[
-                        styles.empty,
-                        {
-                          color:
-                            C.muted,
-                        },
+            {filteredChats.length > 0 ? (
+              <View style={styles.cardContainer}>
+                <View style={styles.cardShadowBackdrop} />
+                <View style={[styles.list, { backgroundColor: isDark ? '#121212' : '#FFFFFF', borderColor: '#000000' }]}>
+                  {filteredChats.map((chat, i) => (
+                    <Pressable
+                      key={chat.id}
+                      onPress={() => openChat(chat)}
+                      style={({ pressed }) => [
+                        styles.row,
+                        i < filteredChats.length - 1 && [styles.rowBorder, { borderBottomColor: isDark ? '#27272A' : '#E4E4E7' }],
+                        pressed && styles.pressed,
                       ]}
                     >
-                      No conversations
-                      match your
-                      filters.
-                    </Text>
-                  )}
+                      {chat.category === 'direct' && chat.sidekickId ? (
+                        <View style={[styles.avatar, styles.sidekickAvatarContainer]}>
+                          <SidekickAvatar sidekickId={chat.sidekickId} size={38} />
+                        </View>
+                      ) : (
+                        <View style={[styles.avatar, { backgroundColor: pageBg }]}>
+                          <Text style={[styles.avatarText, { color: '#000000' }]}>{chat.icon}</Text>
+                        </View>
+                      )}
+                      <View style={styles.rowCopy}>
+                        <Text style={[styles.rowTitle, { color: isDark ? '#FFFFFF' : '#000000' }]}>{chat.name}</Text>
+                        <Text style={[styles.rowUrl, { color: isDark ? '#A1A1AA' : '#52525B' }]} numberOfLines={1}>
+                          {chat.detail}
+                        </Text>
+                      </View>
+                      <View style={styles.chatMeta}>
+                        <Text style={[styles.time, { color: isDark ? '#A1A1AA' : '#52525B' }]}>{chat.time}</Text>
+                        {chat.unread ? (
+                          <View style={[styles.unread, { backgroundColor: pageBg }]}>
+                            <Text style={styles.unreadText}>{chat.unread}</Text>
+                          </View>
+                        ) : chat.time && chat.lastMessageSenderId === myUserId && chat.lastMessageRead ? (
+                          <CheckCheck color={isDark ? '#A1A1AA' : '#52525B'} size={15} strokeWidth={2.2} />
+                        ) : null}
+                      </View>
+                    </Pressable>
+                  ))}
                 </View>
-              )}
+              </View>
+            ) : null}
+
+            {requestsLoading && incomingRequests.length === 0 && (
+              <View style={styles.requestLoading}>
+                <ActivityIndicator size="small" color={isDark ? '#FFFFFF' : '#000000'} />
+              </View>
+            )}
+
+            {filteredChats.length === 0 && !requestsLoading && (
+              <View style={styles.empty}>
+                <Text style={[styles.emptyText, { color: isDark ? '#A1A1AA' : '#52525B' }]}>
+                  {userFriends.length === 0 && !query.trim() && filter === 'All'
+                    ? 'No friends added yet. Click + to add friends and start chatting.'
+                    : 'No conversations match your filters.'}
+                </Text>
+              </View>
+            )}
           </>
         )}
       </ScrollView>
 
-      {/* =====================================================
-          FLEX SEND BAR
-      ===================================================== */}
-
       {flexMode ? (
-        <View
-          style={[
-            styles.flexBottomBar,
-            {
-              backgroundColor:
-                C.card,
-              borderTopColor:
-                C.border,
-            },
-          ]}
-        >
-          <View
-            style={{
-              flex: 1,
-            }}
-          >
-            <Text
-              style={[
-                styles.flexBottomTitle,
-                {
-                  color:
-                    C.text,
-                },
-              ]}
-            >
-              {selectedRecipients.length ===
-              0
+        <View style={[styles.flexBottomBar, { backgroundColor: isDark ? '#18181B' : '#FFFFFF', borderTopColor: '#000000' }]}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.flexBottomTitle, { color: isDark ? '#FFFFFF' : '#000000' }]}>
+              {selectedRecipients.length === 0
                 ? 'Select people'
-                : `${selectedRecipients.length} ${
-                    selectedRecipients.length ===
-                    1
-                      ? 'person'
-                      : 'people'
-                  } selected`}
+                : `${selectedRecipients.length} ${selectedRecipients.length === 1 ? 'person' : 'people'} selected`}
             </Text>
-
-            <Text
-              style={[
-                styles.flexBottomSubtitle,
-                {
-                  color:
-                    C.muted,
-                },
-              ]}
-            >
-              Your streak will be
-              shared with everyone
-              you select. People already
-              sent this streak today stay
-              marked as sent.
+            <Text style={[styles.flexBottomSubtitle, { color: isDark ? '#A1A1AA' : '#52525B' }]}>
+              Your streak will be shared with everyone you select.
             </Text>
           </View>
-
           <Pressable
-            disabled={
-              flexSending ||
-              selectedRecipients.length ===
-                0
-            }
-            onPress={
-              sendFlexMessage
-            }
-            style={[
+            disabled={flexSending || selectedRecipients.length === 0}
+            onPress={sendFlexMessage}
+            style={({ pressed }) => [
               styles.flexSendButton,
-              {
-                backgroundColor:
-                  accentForeground,
-              },
-              (flexSending ||
-                selectedRecipients.length ===
-                  0) && {
-                opacity: 0.45,
-              },
+              { backgroundColor: '#000000', borderWidth: 2, borderColor: pageBg },
+              (flexSending || selectedRecipients.length === 0) && { opacity: 0.45 },
+              pressed && styles.pressedBtn,
             ]}
           >
             {flexSending ? (
-              <ActivityIndicator
-                color="#FFFFFF"
-                size="small"
-              />
+              <ActivityIndicator color={pageBg} size="small" />
             ) : (
               <>
-                <Send
-                  color="#FFFFFF"
-                  size={17}
-                />
-
-                <Text
-                  style={
-                    styles.flexSendText
-                  }
-                >
-                  Send
-                </Text>
+                <Send color={pageBg} size={17} />
+                <Text style={[styles.flexSendText, { color: pageBg }]}>Send</Text>
               </>
             )}
           </Pressable>
         </View>
       ) : null}
 
-      {/* =====================================================
-          ADD TAG MODAL
-      ===================================================== */}
-
-      <Modal
-        visible={showAddTagModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => { setShowAddTagModal(false); setEditingTagId(null); }}
-      >
-        <Pressable
-          style={styles.friendModalShade}
-          onPress={() =>
-            setShowAddTagModal(false)
-          }
-        />
-
-        <View
-          style={[
-            styles.friendSheet,
-            {
-              backgroundColor: C.card,
-            },
-          ]}
-        >
-          <View
-            style={styles.friendSheetHeader}
-          >
-            <Text
-              style={[
-                styles.friendSheetTitle,
-                {
-                  color: C.text,
-                },
-              ]}
-            >
-              {editingTagId ? 'Edit tag' : 'Add tag'}
-            </Text>
-
-            <Pressable
-              onPress={() =>
-                setShowAddTagModal(false)
-              }
-              hitSlop={12}
-            >
-              <X
-                color={C.muted}
-                size={22}
-              />
-            </Pressable>
-          </View>
-
-          <View
-            style={[
-              styles.search,
-              {
-                backgroundColor: C.input,
-                borderColor: C.inputBorder,
-              },
-            ]}
-          >
-            <TextInput
-              value={newTagName}
-              onChangeText={(text) => {
-                setNewTagName(text.slice(0, 20));
-                if (addTagError) {
-                  setAddTagError(null);
-                }
-              }}
-              placeholder="Tag name"
-              placeholderTextColor={C.muted}
-              style={[
-                styles.searchInput,
-                {
-                  color: C.text,
-                },
-              ]}
-              maxLength={20}
-              autoFocus
-              autoCapitalize="sentences"
-              autoCorrect={false}
-              onSubmitEditing={createChatTag}
-            />
-          </View>
-
-          <View
-            style={styles.tagCharacterRow}
-          >
-            <Text
-              style={[
-                styles.tagCharacterCount,
-                {
-                  color: C.muted,
-                },
-              ]}
-            >
-              {newTagName.length}/20
-            </Text>
-          </View>
-
-          {addTagError ? (
-            <Text style={styles.friendError}>
-              {addTagError}
-            </Text>
-          ) : null}
-
+      {/* Add Tag Modal */}
+      <Modal visible={showAddTagModal} transparent animationType="fade" onRequestClose={() => setShowAddTagModal(false)}>
+        <Pressable style={styles.centeredModalBackdrop} onPress={() => setShowAddTagModal(false)}>
           <Pressable
-            onPress={createChatTag}
-            disabled={addingTag || !newTagName.trim()}
-            style={[
-              styles.createGroupBtn,
-              {
-                backgroundColor: accentForeground,
-              },
-              (addingTag || !newTagName.trim()) && {
-                opacity: 0.5,
-              },
-            ]}
+            style={[styles.centeredModalCard, { backgroundColor: isDark ? '#18181B' : '#FFFFFF' }]}
+            onPress={(e) => e.stopPropagation()}
           >
-            {addingTag ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <Text style={styles.createGroupBtnText}>
-                {editingTagId ? 'Save changes' : 'Add tag'}
-              </Text>
-            )}
+            <View style={styles.modalTitleRow}>
+              <Text style={[styles.modalTitle, { color: pageBg }]}>{editingTagId ? 'Edit tag' : 'Add tag'}</Text>
+              <Pressable onPress={() => setShowAddTagModal(false)} hitSlop={12}>
+                <X color={isDark ? '#FFFFFF' : '#000000'} size={21} strokeWidth={2.5} />
+              </Pressable>
+            </View>
 
-          </Pressable>
-        </View>
-      </Modal>
-
-      {/* =====================================================
-          CHAT TAG ASSIGNMENT MODAL
-      ===================================================== */}
-
-      <Modal
-        visible={!!tagChat}
-        transparent
-        animationType="slide"
-        onRequestClose={closeTagChat}
-      >
-        <Pressable
-          style={styles.friendModalShade}
-          onPress={closeTagChat}
-        />
-
-        <View
-          style={[
-            styles.friendSheet,
-            {
-              backgroundColor: C.card,
-            },
-          ]}
-        >
-          <View
-            style={styles.friendSheetHeader}
-          >
-            <View style={{ flex: 1, marginRight: 12 }}>
-              <Text
-                style={[
-                  styles.friendSheetTitle,
-                  { color: C.text },
-                ]}
-                numberOfLines={1}
-              >
-                Tags
-              </Text>
-              {tagChat ? (
-                <Text
-                  style={[
-                    styles.tagModalSubtitle,
-                    { color: C.muted },
-                  ]}
-                  numberOfLines={1}
-                >
-                  {tagChat.name}
-                </Text>
+            <View style={[styles.search, { backgroundColor: '#FFFFFF', marginBottom: 8 }]}>
+              <TextInput
+                value={newTagName}
+                onChangeText={(text) => {
+                  setNewTagName(text.slice(0, 20));
+                  if (addTagError) setAddTagError(null);
+                }}
+                placeholder="Tag name"
+                placeholderTextColor="#71717A"
+                style={[styles.searchInput, { color: '#000000' }]}
+                maxLength={20}
+                autoFocus
+                onSubmitEditing={createChatTag}
+              />
+              {newTagName.length > 0 ? (
+                <Pressable onPress={() => setNewTagName('')} hitSlop={8}>
+                  <X color="#000000" size={16} />
+                </Pressable>
               ) : null}
             </View>
 
-            <Pressable
-              onPress={closeTagChat}
-              hitSlop={12}
-            >
-              <X
-                color={C.muted}
-                size={22}
-              />
-            </Pressable>
-          </View>
+            <Text style={[styles.tagCharacterCount, { color: isDark ? '#A1A1AA' : '#52525B' }]}>
+              {newTagName.length}/20
+            </Text>
 
-          {chatTags.length === 0 ? (
-            <Text
-              style={[
-                styles.friendHint,
-                { color: C.muted },
+            {addTagError ? <Text style={styles.errorText}>{addTagError}</Text> : null}
+
+            <Pressable
+              onPress={createChatTag}
+              disabled={addingTag || !newTagName.trim()}
+              style={({ pressed }) => [
+                styles.saveButton,
+                { backgroundColor: '#000000', borderWidth: 2, borderColor: pageBg, marginTop: 16 },
+                (addingTag || !newTagName.trim()) && { opacity: 0.5 },
+                pressed && styles.pressedBtn,
               ]}
             >
-              You haven't created any tags yet.
-            </Text>
-          ) : (
-            <View>
-              {chatTags.map((tag) => {
-                const assigned =
-                  tagChat
-                    ? isChatTagged(tagChat, tag.id)
-                    : false;
+              {addingTag ? (
+                <ActivityIndicator color={pageBg} />
+              ) : (
+                <Text style={[styles.saveText, { color: pageBg }]}>{editingTagId ? 'Save changes' : 'Add tag'}</Text>
+              )}
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
+      {/* Add Friend Modal */}
+      <Modal visible={friendSearchOpen} transparent animationType="fade" onRequestClose={() => setFriendSearchOpen(false)}>
+        <Pressable style={styles.centeredModalBackdrop} onPress={() => setFriendSearchOpen(false)}>
+          <Pressable
+            style={[styles.centeredModalCard, { backgroundColor: isDark ? '#18181B' : '#FFFFFF' }]}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={styles.modalTitleRow}>
+              <Text style={[styles.modalTitle, { color: pageBg }]}>Find friends</Text>
+              <Pressable onPress={() => setFriendSearchOpen(false)} hitSlop={12}>
+                <X color={isDark ? '#FFFFFF' : '#000000'} size={21} strokeWidth={2.5} />
+              </Pressable>
+            </View>
+
+            <View style={[styles.search, { backgroundColor: '#FFFFFF', marginBottom: 12 }]}>
+              <Search color="#52525B" size={18} />
+              <TextInput
+                value={friendQuery}
+                onChangeText={searchUsers}
+                placeholder="Search by username..."
+                placeholderTextColor="#71717A"
+                style={[styles.searchInput, { color: '#000000' }]}
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoFocus
+              />
+              {friendQuery.length > 0 ? (
+                <Pressable onPress={() => searchUsers('')} hitSlop={8}>
+                  <X color="#000000" size={16} />
+                </Pressable>
+              ) : null}
+            </View>
+
+            {friendError ? <Text style={styles.errorText}>{friendError}</Text> : null}
+            {friendSearching ? <ActivityIndicator color={pageBg} style={{ marginTop: 20 }} /> : null}
+
+            <ScrollView style={{ maxHeight: 280 }} showsVerticalScrollIndicator={false}>
+              {friendResults.map((profile, i) => {
+                const isFriend = existingFriendIds.includes(profile.user_id);
+                const isRequested = sentRequestIds.includes(profile.user_id);
+                const isSending = sendingRequestId === profile.user_id;
                 return (
-                  <Pressable
-                    key={tag.id}
-                    onPress={() =>
-                      tagChat &&
-                      setChatTagAssignment(
-                        tagChat,
-                        tag,
-                        !assigned,
-                      )
-                    }
+                  <View
+                    key={profile.user_id}
                     style={[
-                      styles.tagAssignmentRow,
-                      {
-                        borderBottomColor: C.divider,
-                      },
+                      styles.row,
+                      i < friendResults.length - 1 && [styles.rowBorder, { borderBottomColor: isDark ? '#27272A' : '#E4E4E7' }],
                     ]}
                   >
-                    <View
-                      style={[
-                        styles.tagCheckbox,
-                        {
-                          borderColor: assigned
-                            ? accentForeground
-                            : C.inputBorder,
-                          backgroundColor: assigned
-                            ? accentForeground
-                            : 'transparent',
-                        },
-                      ]}
-                    >
-                      {assigned ? (
-                        <Check
-                          color="#FFFFFF"
-                          size={14}
-                          strokeWidth={2.5}
-                        />
-                      ) : null}
+                    <View style={[styles.avatar, { backgroundColor: pageBg }]}>
+                      <Text style={[styles.avatarText, { color: '#000000' }]}>
+                        {(profile.display_name || '?').slice(0, 1).toUpperCase()}
+                      </Text>
                     </View>
-
-                    <Text
-                      style={[
-                        styles.tagAssignmentText,
-                        { color: C.text },
+                    <View style={styles.rowCopy}>
+                      <Text style={[styles.rowTitle, { color: isDark ? '#FFFFFF' : '#000000' }]}>{profile.display_name}</Text>
+                      <Text style={[styles.rowUrl, { color: isDark ? '#A1A1AA' : '#52525B' }]}>@{profile.username}</Text>
+                    </View>
+                    <Pressable
+                      disabled={isSending || isFriend || isRequested}
+                      onPress={() => sendFriendRequest(profile.user_id)}
+                      style={({ pressed }) => [
+                        styles.sendFriendBtn,
+                        { backgroundColor: '#000000', borderWidth: 2, borderColor: pageBg },
+                        (isFriend || isRequested) && { opacity: 0.6 },
+                        pressed && styles.pressedBtn,
                       ]}
-                      numberOfLines={1}
                     >
-                      {tag.name}
-                    </Text>
-                  </Pressable>
+                      {isSending ? (
+                        <ActivityIndicator size="small" color={pageBg} />
+                      ) : isFriend ? (
+                        <Text style={[styles.sendFriendText, { color: pageBg }]}>Friends</Text>
+                      ) : isRequested ? (
+                        <Text style={[styles.sendFriendText, { color: pageBg }]}>Sent</Text>
+                      ) : (
+                        <Text style={[styles.sendFriendText, { color: pageBg }]}>Add</Text>
+                      )}
+                    </Pressable>
+                  </View>
                 );
               })}
-            </View>
-          )}
-
-          {tagModalError ? (
-            <Text style={styles.friendError}>
-              {tagModalError}
-            </Text>
-          ) : null}
-
-          <Pressable
-            onPress={() => {
-              closeTagChat();
-              openAddTag();
-            }}
-            style={[
-              styles.createGroupBtn,
-              {
-                backgroundColor: accentForeground,
-              },
-            ]}
-          >
-            <Text style={styles.createGroupBtnText}>
-              + Create tag
-            </Text>
+            </ScrollView>
           </Pressable>
-        </View>
-      </Modal>
-
-      {/* =====================================================
-          ADD FRIEND MODAL
-      ===================================================== */}
-
-      <Modal
-        visible={
-          friendSearchOpen
-        }
-        transparent
-        animationType="fade"
-        onRequestClose={() =>
-          setFriendSearchOpen(
-            false,
-          )
-        }
-      >
-        <View style={styles.friendModalRoot}>
-          <Pressable
-            style={styles.friendModalBackdrop}
-            onPress={() =>
-              setFriendSearchOpen(false)
-            }
-          />
-
-          <KeyboardAvoidingView
-            behavior={
-              Platform.OS === 'ios'
-                ? 'padding'
-                : 'height'
-            }
-            style={styles.friendKeyboardContainer}
-          >
-          <View
-            style={[
-              styles.friendSheet,
-              {
-                backgroundColor:
-                  C.card,
-              },
-            ]}
-          >
-            <View
-              style={
-                styles.friendSheetHeader
-              }
-          >
-            <Text
-              style={[
-                styles.friendSheetTitle,
-                {
-                  color:
-                    C.text,
-                },
-              ]}
-            >
-              Find friends by
-              username
-            </Text>
-
-            <Pressable
-              onPress={() =>
-                setFriendSearchOpen(
-                  false,
-                )
-              }
-              hitSlop={12}
-            >
-              <X
-                color={C.muted}
-                size={22}
-              />
-            </Pressable>
-          </View>
-
-          <View
-            style={[
-              styles.search,
-              {
-                backgroundColor:
-                  C.input,
-                borderColor:
-                  C.inputBorder,
-              },
-            ]}
-          >
-            <Search
-              color={C.muted}
-              size={18}
-            />
-
-            <TextInput
-              value={
-                friendQuery
-              }
-              onChangeText={
-                searchUsers
-              }
-              placeholder="e.g. alex99"
-              placeholderTextColor={
-                C.muted
-              }
-              style={[
-                styles.searchInput,
-                {
-                  color:
-                    C.text,
-                },
-              ]}
-              autoCapitalize="none"
-              autoCorrect={false}
-              autoFocus
-            />
-          </View>
-
-          {friendError ? (
-            <Text
-              style={
-                styles.friendError
-              }
-            >
-              {friendError}
-            </Text>
-          ) : null}
-
-          {friendSearching ? (
-            <ActivityIndicator
-              color={
-                accentForeground
-              }
-              style={{
-                marginTop: 100,
-              }}
-            />
-          ) : null}
-
-          {!friendSearching &&
-            !friendError &&
-            friendResults.length ===
-              0 &&
-            friendQuery.trim()
-              .length > 0 && (
-              <Text
-                style={[
-                  styles.friendHint,
-                  {
-                    color:
-                      C.muted,
-                  },
-                ]}
-              >
-                No users found
-                with that
-                username.
-              </Text>
-            )}
-
-          <ScrollView
-            style={
-              styles.friendResults
-            }
-            showsVerticalScrollIndicator={
-              false
-            }
-          >
-            {friendResults.map(
-              (profile) => (
-                <View
-                  key={
-                    profile.user_id
-                  }
-                  style={[
-                    styles.friendResultRow,
-                    {
-                      borderBottomColor:
-                        C.divider,
-                    },
-                  ]}
-                >
-                  <View
-                    style={[
-                      styles.friendAvatar,
-                      {
-                        backgroundColor:
-                          accentForeground,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={
-                        styles.friendAvatarText
-                      }
-                    >
-                      {(
-                        profile.display_name ||
-                        '?'
-                      )
-                        .slice(
-                          0,
-                          1,
-                        )
-                        .toUpperCase()}
-                    </Text>
-                  </View>
-
-                  <View
-                    style={{
-                      flex: 1,
-                    }}
-                  >
-                    <Text
-                      style={[
-                        styles.friendName,
-                        {
-                          color:
-                            C.text,
-                        },
-                      ]}
-                    >
-                      {
-                        profile.display_name
-                      }
-                    </Text>
-
-                    <Text
-                      style={[
-                        styles.friendUsername,
-                        {
-                          color:
-                            C.muted,
-                        },
-                      ]}
-                    >
-                      @
-                      {
-                        profile.username
-                      }
-                    </Text>
-                  </View>
-
-                  <Pressable
-                    disabled={
-                      sendingRequestId ===
-                        profile.user_id ||
-                      existingFriendIds.includes(
-                        profile.user_id,
-                      ) ||
-                      sentRequestIds.includes(
-                        profile.user_id,
-                      )
-                    }
-                    onPress={() =>
-                      sendFriendRequest(
-                        profile.user_id,
-                      )
-                    }
-                    style={[
-                      styles.sendFriendBtn,
-                      {
-                        backgroundColor:
-                          accentForeground,
-                      },
-                    ]}
-                  >
-                    {sendingRequestId ===
-                    profile.user_id ? (
-                      <ActivityIndicator
-                        size="small"
-                        color="#FFFFFF"
-                      />
-                    ) : existingFriendIds.includes(
-                        profile.user_id,
-                      ) ? (
-                      <>
-                        <CheckCheck
-                          color="#FFFFFF"
-                          size={14}
-                        />
-
-                        <Text
-                          style={
-                            styles.sendFriendText
-                          }
-                        >
-                          Friends
-                        </Text>
-                      </>
-                    ) : sentRequestIds.includes(
-                        profile.user_id,
-                      ) ? (
-                      <>
-                        <Check
-                          color="#FFFFFF"
-                          size={14}
-                        />
-
-                        <Text
-                          style={
-                            styles.sendFriendText
-                          }
-                        >
-                          Sent
-                        </Text>
-                      </>
-                    ) : (
-                      <>
-                        <Send
-                          color="#FFFFFF"
-                          size={14}
-                        />
-
-                        <Text
-                          style={
-                            styles.sendFriendText
-                          }
-                        >
-                          Add
-                        </Text>
-                      </>
-                    )}
-                  </Pressable>
-                </View>
-              ),
-            )}
-          </ScrollView>
-          </View>
-        </KeyboardAvoidingView>
-        </View>
-      </Modal>
-
-      {/* =====================================================
-          CREATE GROUP MODAL
-      ===================================================== */}
-
-      <Modal
-        visible={
-          createGroupOpen
-        }
-        transparent
-        animationType="slide"
-        onRequestClose={() =>
-          setCreateGroupOpen(
-            false,
-          )
-        }
-      >
-        <Pressable
-          style={
-            styles.friendModalShade
-          }
-          onPress={() =>
-            setCreateGroupOpen(
-              false,
-            )
-          }
-        />
-
-        <View
-          style={[
-            styles.friendSheet,
-            {
-              backgroundColor:
-                C.card,
-            },
-          ]}
-        >
-          <View
-            style={
-              styles.friendSheetHeader
-            }
-          >
-            <Text
-              style={[
-                styles.friendSheetTitle,
-                {
-                  color:
-                    C.text,
-                },
-              ]}
-            >
-              Create a group
-            </Text>
-
-            <Pressable
-              onPress={() =>
-                setCreateGroupOpen(
-                  false,
-                )
-              }
-              hitSlop={12}
-            >
-              <X
-                color={C.muted}
-                size={22}
-              />
-            </Pressable>
-          </View>
-
-          <View
-            style={[
-              styles.search,
-              {
-                backgroundColor:
-                  C.input,
-                borderColor:
-                  C.inputBorder,
-              },
-            ]}
-          >
-            <TextInput
-              value={
-                newGroupName
-              }
-              onChangeText={
-                setNewGroupName
-              }
-              placeholder="Group name"
-              placeholderTextColor={
-                C.muted
-              }
-              style={[
-                styles.searchInput,
-                {
-                  color:
-                    C.text,
-                },
-              ]}
-              autoFocus
-              onSubmitEditing={
-                handleCreateGroup
-              }
-            />
-          </View>
-
-          <View
-            style={[
-              styles.search,
-              {
-                backgroundColor: C.input,
-                borderColor: C.inputBorder,
-              },
-            ]}
-          >
-            <TextInput
-              value={newGroupDescription}
-              onChangeText={setNewGroupDescription}
-              placeholder="Group description (optional)"
-              placeholderTextColor={C.muted}
-              style={[styles.searchInput, { color: C.text }]}
-              multiline
-              maxLength={200}
-            />
-          </View>
-
-          {createGroupError ? (
-            <Text
-              style={
-                styles.friendError
-              }
-            >
-              {
-                createGroupError
-              }
-            </Text>
-          ) : null}
-
-          <Pressable
-            onPress={
-              handleCreateGroup
-            }
-            disabled={
-              creatingGroup ||
-              !newGroupName.trim()
-            }
-            style={[
-              styles.createGroupBtn,
-              {
-                backgroundColor:
-                  accentForeground,
-              },
-              (creatingGroup ||
-                !newGroupName.trim()) && {
-                opacity: 0.5,
-              },
-            ]}
-          >
-            {creatingGroup ? (
-              <ActivityIndicator
-                color="#FFFFFF"
-              />
-            ) : (
-              <Text
-                style={
-                  styles.createGroupBtnText
-                }
-              >
-                Create Group
-              </Text>
-            )}
-          </Pressable>
-
-          <Text
-            style={[
-              styles.friendHint,
-              {
-                color:
-                  C.muted,
-              },
-            ]}
-          >
-            You'll be the admin. You can rename the group and edit its description after it is created.
-          </Text>
-        </View>
+        </Pressable>
       </Modal>
     </SafeAreaView>
   );
@@ -4851,659 +1662,149 @@ function formatChatTime(value: string) {
   return new Date(value).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
-/* =========================================================
-   STYLES
-========================================================= */
+const styles = StyleSheet.create({
+  safe: { flex: 1 },
+  pressedBtn: { transform: [{ translateX: 2 }, { translateY: 2 }] },
 
-const FONT =
-  'Poppins_400Regular';
-
-const FONT_MED =
-  'Poppins_500Medium';
-
-const FONT_SEMI =
-  'Poppins_600SemiBold';
-
-const FONT_BOLD =
-  'Poppins_700Bold';
-
-const styles =
-  StyleSheet.create({
-    safe: {
-      flex: 1,
-    },
-
-    frozenHeader: {
-      paddingHorizontal: 16,
-      paddingTop: 30,
-      paddingVertical: 12,
-    },
-
-    searchRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-    },
-
-    search: {
-      height: 48,
-      borderRadius: 14,
-      borderWidth: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 14,
-      gap: 10,
-    },
-
-    searchInput: {
-      flex: 1,
-      fontFamily: FONT,
-      fontSize: 14,
-    },
-
-    addFriendBtn: {
-      width: 48,
-      height: 48,
-      borderRadius: 14,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-
-    filters: {
-      gap: 8,
-      paddingVertical: 14,
-    },
-
-    filter: {
-      paddingHorizontal: 18,
-      height: 32,
-      borderRadius: 10,
-      borderWidth: 1,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-
-    filterText: {
-      fontFamily:
-        FONT_MED,
-      fontSize: 12,
-    },
-
-    addTagFilter: {
-      flexDirection: 'row',
-      gap: 5,
-      paddingHorizontal: 13,
-    },
-
-    tagCharacterRow: {
-      alignItems: 'flex-end',
-      marginTop: 5,
-    },
-
-    tagCharacterCount: {
-      fontFamily: FONT,
-      fontSize: 10,
-    },
-
-    tagModalSubtitle: {
-      fontFamily: FONT,
-      fontSize: 11,
-      marginTop: 2,
-    },
-
-    tagAssignmentRow: {
-      minHeight: 48,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-      borderBottomWidth: 1,
-    },
-
-    tagCheckbox: {
-      width: 22,
-      height: 22,
-      borderRadius: 7,
-      borderWidth: 1.5,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-
-    tagAssignmentText: {
-      flex: 1,
-      fontFamily: FONT_MED,
-      fontSize: 13,
-    },
-
-    chatScrollContent: {
-      paddingHorizontal: 16,
-      paddingBottom: 100,
-    },
-
-    flexContent: {
-      paddingBottom: 130,
-    },
-
-    chatScrollContentWithFab: {
-      paddingBottom: 150,
-    },
-
-    chatList: {
-      borderRadius: 18,
-      borderWidth: 1,
-      paddingHorizontal: 14,
-    },
-
-    chatRow: {
-      minHeight: 78,
-      flexDirection: 'row',
-      alignItems: 'center',
-      borderBottomWidth: 1,
-      gap: 12,
-    },
-
-    pressed: {
-      opacity: 0.7,
-    },
-
-    avatar: {
-      width: 48,
-      height: 48,
-      borderRadius: 15,
-      alignItems: 'center',
-      justifyContent: 'center',
-      overflow: 'hidden',
-    },
-
-    sidekickAvatarContainer: {
-      backgroundColor: '#FFFFFF',
-      padding: 5,
-    },
-
-    avatarText: {
-      fontFamily:
-        FONT_BOLD,
-      fontSize: 16,
-    },
-
-    chatCopy: {
-      flex: 1,
-      gap: 5,
-    },
-
-    chatNameLine: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 7,
-    },
-
-    chatName: {
-      fontFamily:
-        FONT_SEMI,
-      fontSize: 14,
-    },
-
-    chatDetail: {
-      fontFamily: FONT,
-      fontSize: 12,
-    },
-
-    chatMeta: {
-      height: 40,
-      justifyContent:
-        'space-between',
-      alignItems:
-        'flex-end',
-    },
-
-    time: {
-      fontFamily: FONT,
-      fontSize: 10,
-    },
-
-    unread: {
-      minWidth: 17,
-      height: 17,
-      borderRadius: 8.5,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-
-    unreadText: {
-      color: '#FFF',
-      fontFamily:
-        FONT_BOLD,
-      fontSize: 10,
-    },
-
-    emptyState: {
+  header: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 32,
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 10,
+    zIndex: 100,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: '#000000',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#000000',
+  },
+  headerTitle: { fontFamily: 'Poppins-ExtraBold', fontSize: 20, letterSpacing: 1, color: '#000000', textAlign: 'center', flex: 1 },
+  bellBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  menuShade: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'flex-end', paddingTop: 64, paddingRight: 20 },
+  menuCard: { borderRadius: 12, borderWidth: 3, paddingVertical: 6, minWidth: 150 },
+  menuItem: { paddingVertical: 12, paddingHorizontal: 16 },
+  menuItemText: { fontFamily: 'Poppins-Bold', fontSize: 14 },
+
+  frozenHeader: { paddingHorizontal: 18, paddingTop: 4, paddingBottom: 6 },
+  flexHeader: { paddingHorizontal: 18, paddingTop: 10, paddingBottom: 10 },
+
+  streakBanner: {
+    borderWidth: 2,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  streakBannerText: { fontFamily: 'Poppins-Bold', fontSize: 12, textAlign: 'center' },
+
+  streakPreview: {
+    borderWidth: 2,
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 12,
+  },
+  streakPreviewLabel: { fontFamily: 'Poppins-ExtraBold', fontSize: 9, letterSpacing: 1.2, marginBottom: 4 },
+  streakPreviewText: { fontFamily: 'Poppins-SemiBold', fontSize: 13, lineHeight: 18 },
+
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  searchWrapper: { position: 'relative', flex: 1 },
+  searchShadowBackdrop: { position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 },
+  search: { height: 48, borderRadius: 12, borderWidth: 2, borderColor: '#000000', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, gap: 10, zIndex: 2 },
+  searchInput: { flex: 1, fontFamily: 'Poppins-Medium', fontSize: 14 },
+
+  addFriendWrapper: { position: 'relative', width: 48, height: 48 },
+  addFriendShadowBackdrop: { position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 },
+  addFriendBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#000000',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
   },
 
-  emptyTitle: {
-    fontFamily: 'Poppins_600SemiBold',
-    fontSize: 16,
-    textAlign: 'center',
-    marginBottom: 6,
+  filters: { gap: 12, paddingVertical: 12, paddingLeft: 4 },
+  filterWrapper: { position: 'relative', height: 36 },
+  filterShadowBackdrop: { position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 10 },
+  filter: { paddingHorizontal: 16, height: 36, borderRadius: 10, borderWidth: 2, justifyContent: 'center', alignItems: 'center', zIndex: 2 },
+  filterText: { fontFamily: 'Poppins-Bold', fontSize: 12 },
+  addTagFilter: { flexDirection: 'row', gap: 5, paddingHorizontal: 12 },
+  chatScrollContent: { paddingHorizontal: 18, paddingTop: 4, paddingBottom: 90 },
+  flexContent: { paddingBottom: 130 },
+
+  cardContainer: { position: 'relative', width: '100%', marginBottom: 14 },
+  cardShadowBackdrop: { position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 16 },
+  list: { borderRadius: 16, borderWidth: 3, paddingHorizontal: 14 },
+  row: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 },
+  rowBorder: { borderBottomWidth: 2 },
+  pressed: { opacity: 0.7 },
+
+  avatar: { width: 42, height: 42, borderRadius: 12, borderWidth: 2, borderColor: '#000000', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  sidekickAvatarContainer: { backgroundColor: '#FFFFFF', padding: 4 },
+  avatarText: { fontFamily: 'Poppins-ExtraBold', fontSize: 16 },
+
+  rowCopy: { flex: 1, gap: 3 },
+  rowTitle: { fontFamily: 'Poppins-ExtraBold', fontSize: 15 },
+  rowUrl: { fontFamily: 'Poppins-Medium', fontSize: 12 },
+
+  chatMeta: { height: 38, justifyContent: 'space-between', alignItems: 'flex-end' },
+  time: { fontFamily: 'Poppins-Medium', fontSize: 10 },
+  unread: { minWidth: 20, height: 20, borderRadius: 6, borderWidth: 1.5, borderColor: '#000000', alignItems: 'center', justifyContent: 'center' },
+  unreadText: { fontFamily: 'Poppins-ExtraBold', fontSize: 10, color: '#000000' },
+
+  empty: { paddingVertical: 40, alignItems: 'center' },
+  emptyText: { fontFamily: 'Poppins-Medium', fontSize: 13, textAlign: 'center' },
+
+  requestsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 8 },
+  requestsTitle: { fontFamily: 'Poppins-ExtraBold', fontSize: 12, letterSpacing: 0.5 },
+  requestCount: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, borderWidth: 1.5, borderColor: '#000000' },
+  requestCountText: { fontFamily: 'Poppins-ExtraBold', fontSize: 11, color: '#000000' },
+  requestButtons: { flexDirection: 'row', gap: 6 },
+  acceptBtn: { width: 36, height: 36, borderRadius: 10, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  declineBtn: { width: 36, height: 36, borderRadius: 10, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  requestLoading: { paddingVertical: 20, alignItems: 'center' },
+
+  selectionCircle: { width: 24, height: 24, borderRadius: 7, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+  flexSentLabel: { fontFamily: 'Poppins-Bold', fontSize: 12 },
+  selectionCount: { fontFamily: 'Poppins-Bold', fontSize: 12, marginTop: 8 },
+  flexError: { fontFamily: 'Poppins-Bold', fontSize: 12, color: '#EF4444', marginBottom: 10 },
+
+  flexBottomBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    borderTopWidth: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
   },
+  flexBottomTitle: { fontFamily: 'Poppins-ExtraBold', fontSize: 13 },
+  flexBottomSubtitle: { fontFamily: 'Poppins-Medium', fontSize: 10, marginTop: 2 },
+  flexSendButton: { borderRadius: 12, paddingVertical: 12, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  flexSendText: { fontFamily: 'Poppins-ExtraBold', fontSize: 14 },
 
-  emptySubtitle: {
-    fontFamily: 'Poppins_400Regular',
-    fontSize: 13,
-    textAlign: 'center',
-  },
+  centeredModalBackdrop: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.8)', paddingHorizontal: 20 },
+  centeredModalCard: { width: '100%', maxWidth: 400, borderRadius: 24, borderWidth: 3, borderColor: '#000000', paddingTop: 22, paddingBottom: 26, paddingHorizontal: 22, shadowColor: '#000000', shadowOffset: { width: 6, height: 6 }, shadowOpacity: 1, shadowRadius: 0, elevation: 8 },
+  modalTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
+  modalTitle: { fontFamily: 'Poppins-ExtraBold', fontSize: 20, flex: 1, marginRight: 12 },
 
-  empty: {
-      textAlign: 'center',
-      fontFamily: FONT,
-      marginTop: 30,
-      lineHeight: 20,
-    },
+  tagCharacterCount: { fontFamily: 'Poppins-Medium', fontSize: 11, textAlign: 'right', marginBottom: 8 },
+  errorText: { fontFamily: 'Poppins-Bold', fontSize: 12, color: '#EF4444', marginTop: 4 },
+  saveButton: { borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  saveText: { fontFamily: 'Poppins-ExtraBold', fontSize: 15, letterSpacing: 0.5 },
 
-    /* =====================================================
-       FLEX MODE
-    ===================================================== */
-
-    flexHeader: {
-      paddingHorizontal: 16,
-      paddingTop: 50,
-      paddingBottom: 10,
-    },
-
-    flexHeaderTop: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      marginBottom: 16,
-    },
-
-    flexTitle: {
-      fontFamily:
-        FONT_BOLD,
-      fontSize: 22,
-    },
-
-    flexSubtitle: {
-      fontFamily: FONT,
-      fontSize: 12,
-      marginTop: 3,
-    },
-
-    streakPreview: {
-      borderWidth: 1,
-      borderRadius: 15,
-      padding: 14,
-      marginBottom: 12,
-    },
-
-    streakPreviewLabel: {
-      fontFamily:
-        FONT_BOLD,
-      fontSize: 9,
-      letterSpacing: 1.3,
-      marginBottom: 5,
-    },
-
-    streakPreviewText: {
-      fontFamily:
-        FONT_MED,
-      fontSize: 13,
-      lineHeight: 19,
-    },
-
-    selectionCountRow: {
-      paddingTop: 9,
-      paddingHorizontal: 2,
-    },
-
-    selectionCount: {
-      fontFamily:
-        FONT_MED,
-      fontSize: 11,
-    },
-
-    selectionCircle: {
-      width: 26,
-      height: 26,
-      borderRadius: 13,
-      borderWidth: 2,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-
-    flexSentLabel: {
-      fontFamily: FONT_MED,
-      fontSize: 11,
-    },
-
-    flexEmpty: {
-      paddingVertical: 35,
-      paddingHorizontal: 20,
-    },
-
-    flexError: {
-      fontFamily: FONT_MED,
-      fontSize: 12,
-      marginBottom: 10,
-      lineHeight: 18,
-    },
-
-    flexBottomBar: {
-      position: 'absolute',
-      left: 0,
-      right: 0,
-      bottom: 0,
-      paddingHorizontal: 18,
-      paddingTop: 13,
-      paddingBottom: 15,
-      borderTopWidth: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 14,
-    },
-
-    flexBottomTitle: {
-      fontFamily:
-        FONT_BOLD,
-      fontSize: 13,
-    },
-
-    flexBottomSubtitle: {
-      fontFamily: FONT,
-      fontSize: 10,
-      lineHeight: 15,
-      marginTop: 2,
-    },
-
-    flexSendButton: {
-      minWidth: 92,
-      height: 44,
-      borderRadius: 13,
-      paddingHorizontal: 15,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 7,
-    },
-
-    flexSendText: {
-      color: '#FFFFFF',
-      fontFamily:
-        FONT_BOLD,
-      fontSize: 13,
-    },
-
-    /* =====================================================
-       REQUESTS
-    ===================================================== */
-
-    requestsCard: {
-      borderRadius: 18,
-      borderWidth: 1,
-      padding: 14,
-      marginBottom: 14,
-    },
-
-    requestsHeader: {
-      flexDirection: 'row',
-      justifyContent:
-        'space-between',
-      alignItems: 'center',
-      marginBottom: 8,
-    },
-
-    requestsTitle: {
-      fontFamily:
-        FONT_BOLD,
-      fontSize: 11,
-      letterSpacing: 1.2,
-    },
-
-    requestsSubtitle: {
-      fontFamily: FONT,
-      fontSize: 11,
-      marginTop: 3,
-    },
-
-    requestCount: {
-      minWidth: 26,
-      height: 26,
-      borderRadius: 13,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-
-    requestCountText: {
-      color: '#FFFFFF',
-      fontFamily:
-        FONT_BOLD,
-      fontSize: 11,
-    },
-
-    requestRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-      paddingVertical: 10,
-      borderTopWidth: 1,
-    },
-
-    requestCopy: {
-      flex: 1,
-    },
-
-    requestName: {
-      fontFamily:
-        FONT_SEMI,
-      fontSize: 13.5,
-    },
-
-    requestUsername: {
-      fontFamily: FONT,
-      fontSize: 11.5,
-      marginTop: 2,
-    },
-
-    requestButtons: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-    },
-
-    acceptBtn: {
-      width: 34,
-      height: 34,
-      borderRadius: 10,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-
-    declineBtn: {
-      width: 34,
-      height: 34,
-      borderRadius: 10,
-      borderWidth: 1,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-
-    requestLoading: {
-      paddingVertical: 12,
-      alignItems: 'center',
-    },
-
-    /* =====================================================
-       AVATARS
-    ===================================================== */
-
-    friendAvatar: {
-      width: 40,
-      height: 40,
-      borderRadius: 14,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-
-    friendAvatarText: {
-      fontFamily:
-        FONT_BOLD,
-      fontSize: 15,
-      color: '#FFFFFF',
-    },
-
-    /* =====================================================
-       ADD GROUP
-    ===================================================== */
-
-    addGroupFab: {
-      position: 'absolute',
-      bottom: 20,
-      alignSelf: 'center',
-      width: 56,
-      height: 56,
-      borderRadius: 28,
-      alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: '#000',
-      shadowOpacity: 0.25,
-      shadowRadius: 8,
-      shadowOffset: { width: 0, height: 4 },
-      elevation: 6,
-    },
-
-    /* =====================================================
-       FRIEND MODAL
-    ===================================================== */
-
-    friendModalRoot: {
-      flex: 1,
-      position: 'relative',
-      backgroundColor: 'transparent',
-    },
-
-    friendModalBackdrop: {
-      ...StyleSheet.absoluteFillObject,
-      backgroundColor: 'rgba(0,0,0,0.4)',
-    },
-
-    // Shared backdrop style used by the friend, tag, and group modals.
-    friendModalShade: {
-      ...StyleSheet.absoluteFillObject,
-      backgroundColor: 'rgba(0,0,0,0.4)',
-    },
-
-    friendKeyboardContainer: {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      right: 0,
-      height: '88%',
-      justifyContent: 'flex-start',
-      padding: 0,
-    },
-
-    friendSheet: {
-      width: '100%',
-      height: '100%',
-      borderTopLeftRadius: 0,
-      borderTopRightRadius: 0,
-      borderBottomLeftRadius: 26,
-      borderBottomRightRadius: 26,
-      padding: 24,
-      paddingBottom: 24,
-      overflow: 'hidden',
-    },
-
-    friendSheetHeader: {
-      flexDirection: 'row',
-      justifyContent:
-        'space-between',
-      alignItems: 'center',
-      marginBottom: 16,
-    },
-
-    friendSheetTitle: {
-      fontFamily:
-        FONT_BOLD,
-      fontSize: 18,
-      flex: 1,
-      marginRight: 12,
-    },
-
-    friendError: {
-      color: '#E05252',
-      fontFamily: FONT,
-      fontSize: 13,
-      marginTop: 8,
-      lineHeight: 18,
-    },
-
-    friendHint: {
-      fontFamily: FONT,
-      fontSize: 13,
-      marginTop: 12,
-      textAlign: 'center',
-    },
-
-    friendResults: {
-      flex: 1,
-      marginTop: 12,
-    },
-
-    friendResultRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingVertical: 12,
-      borderBottomWidth: 1,
-      gap: 12,
-    },
-
-    friendName: {
-      fontFamily:
-        FONT_SEMI,
-      fontSize: 14,
-    },
-
-    friendUsername: {
-      fontFamily: FONT,
-      fontSize: 12,
-      marginTop: 2,
-    },
-
-    sendFriendBtn: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 5,
-      paddingHorizontal: 12,
-      minWidth: 64,
-      height: 32,
-      borderRadius: 10,
-    },
-
-    sendFriendText: {
-      color: '#FFFFFF',
-      fontFamily:
-        FONT_SEMI,
-      fontSize: 12,
-    },
-
-    /* =====================================================
-       CREATE GROUP
-    ===================================================== */
-
-    createGroupBtn: {
-      marginTop: 16,
-      borderRadius: 14,
-      paddingVertical: 14,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-
-    createGroupBtnText: {
-      fontFamily:
-        FONT_BOLD,
-      fontSize: 15,
-      color: '#FFFFFF',
-    },
-  });
+  sendFriendBtn: { paddingHorizontal: 14, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  sendFriendText: { fontFamily: 'Poppins-ExtraBold', fontSize: 12 },
+});

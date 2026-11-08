@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   View,
@@ -71,36 +72,37 @@ function getRankDisplay(rank: number): string {
   return `#${rank}`;
 }
 
+function isAccentBlack(color?: string): boolean {
+  if (!color) return false;
+  const normalized = color.trim().toLowerCase();
+  return (
+    normalized === '#000000' ||
+    normalized === '#000' ||
+    normalized === 'black' ||
+    normalized === 'rgb(0,0,0)' ||
+    normalized === 'rgba(0,0,0,1)'
+  );
+}
+
 export default function LeaderboardScreen() {
   const {
     isDark,
     accentForeground,
+    accentColor: rawAccent,
     onAccent,
-  } = useApp();
+  } = useApp() as any;
+
+  const pageBg = rawAccent || accentForeground || '#FDE047';
+  const isAccentPureBlack = isAccentBlack(pageBg);
 
   const colors = {
-    background: isDark
-      ? '#090909'
-      : '#FBFAF8',
-
-    card: isDark
-      ? '#151515'
-      : '#FFFFFF',
-
-    border: isDark
-      ? '#2A2A2A'
-      : '#ECE9E4',
-
-    text: isDark
-      ? '#F4F2EE'
-      : '#27241F',
-
-    muted: isDark
-      ? '#AAA59D'
-      : '#8F8A82',
-
-    accent: accentForeground,
-
+    background: pageBg,
+    card: isDark ? '#121212' : '#FFFFFF',
+    cardText: isDark ? '#FFFFFF' : '#000000',
+    cardMuted: isDark ? '#A1A1AA' : '#52525B',
+    border: '#000000',
+    text: '#000000',
+    accent: pageBg,
     onAccent,
   };
 
@@ -147,17 +149,6 @@ export default function LeaderboardScreen() {
           return;
         }
 
-        /*
-         * FRIENDS
-         *
-         * friendships uses:
-         * user_id
-         * friend_user_id
-         *
-         * A friendship can have the current
-         * user in either column, so check both.
-         */
-
         const {
           data: friendRows,
           error: friendError,
@@ -181,11 +172,6 @@ export default function LeaderboardScreen() {
           setLoading(false);
           return;
         }
-
-        /*
-         * Extract the OTHER person from each
-         * friendship row.
-         */
 
         const friendIds = [
           ...new Set(
@@ -216,11 +202,6 @@ export default function LeaderboardScreen() {
           ),
         ];
 
-        /*
-         * Include yourself so you always appear
-         * alongside your friends.
-         */
-
         const scopedIds = [
           currentUserId,
           ...friendIds.filter(
@@ -228,10 +209,6 @@ export default function LeaderboardScreen() {
               id !== currentUserId
           ),
         ];
-
-        /*
-         * PROFILES
-         */
 
         const {
           data: profileRows,
@@ -267,13 +244,6 @@ export default function LeaderboardScreen() {
               'Player'
           );
         }
-
-        /*
-         * GAME SCORES
-         *
-         * Only retrieve scores belonging to
-         * yourself and your friends.
-         */
 
         let query = supabase
           .from('game_scores')
@@ -317,10 +287,6 @@ export default function LeaderboardScreen() {
           return;
         }
 
-        /*
-         * AGGREGATE SCORES
-         */
-
         const totals =
           new Map<
             string,
@@ -337,10 +303,6 @@ export default function LeaderboardScreen() {
           if (!playerId) {
             continue;
           }
-
-          /*
-           * Never count abandoned games.
-           */
 
           if (
             score.result ===
@@ -413,11 +375,6 @@ export default function LeaderboardScreen() {
           }
         }
 
-        /*
-         * Add yourself/friends even if they have
-         * not played the selected game yet.
-         */
-
         for (
           const playerId of
             scopedIds
@@ -450,15 +407,6 @@ export default function LeaderboardScreen() {
             );
           }
         }
-
-        /*
-         * SORT
-         *
-         * 1. Points
-         * 2. Wins
-         * 3. Games played
-         * 4. Name
-         */
 
         const sorted = [
           ...totals.values(),
@@ -534,6 +482,11 @@ export default function LeaderboardScreen() {
         },
       ]}
     >
+      <StatusBar
+        barStyle={isAccentPureBlack ? 'light-content' : 'dark-content'}
+        backgroundColor={colors.background}
+      />
+
       {/* Header */}
 
       <View
@@ -545,13 +498,13 @@ export default function LeaderboardScreen() {
           },
         ]}
       >
+        <View style={styles.shadowBackdropSmall}>
+          <View style={styles.shadowBackdropSmallInner} />
+        </View>
         <Pressable
-          style={[
+          style={({ pressed }) => [
             styles.headerBack,
-            {
-              backgroundColor:
-                colors.accent,
-            },
+            pressed && styles.pressedBtn,
           ]}
           onPress={() =>
             router.back()
@@ -560,7 +513,7 @@ export default function LeaderboardScreen() {
           <ChevronLeft
             color="#FFFFFF"
             size={22}
-            strokeWidth={2.4}
+            strokeWidth={2.8}
           />
         </Pressable>
 
@@ -568,8 +521,7 @@ export default function LeaderboardScreen() {
           style={[
             styles.headerTitle,
             {
-              color:
-                isDark ? '#FFFFFF' : accentForeground,
+              color: '#000000',
             },
           ]}
         >
@@ -583,79 +535,57 @@ export default function LeaderboardScreen() {
         >
           <Trophy
             size={22}
-            color={
-              colors.accent
-            }
+            color="#000000"
+            strokeWidth={2.5}
           />
         </View>
       </View>
 
-      {/* Game filters */}
+      {/* Independent Game Filters */}
 
       <ScrollView
         horizontal
-        showsHorizontalScrollIndicator={
-          false
-        }
-        contentContainerStyle={
-          styles.filterRow
-        }
-        style={[
-          styles.filterScroll,
-          {
-            borderBottomColor:
-              colors.border,
-          },
-        ]}
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.filterRow}
+        style={styles.filterScroll}
       >
-        {GAME_FILTERS.map(
-          (game) => (
-            <Pressable
-              key={game.key}
-              onPress={() =>
-                setFilter(
-                  game.key
-                )
-              }
-              style={[
-                styles.filterPill,
-                {
-                  borderColor:
-                    colors.border,
-                  backgroundColor:
-                    colors.card,
-                },
-                filter ===
-                  game.key && {
-                  backgroundColor:
-                    colors.accent,
-                  borderColor:
-                    colors.accent,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.filterPillText,
+        {GAME_FILTERS.map((game) => {
+          const selected = filter === game.key;
+          return (
+            <div key={game.key} style={styles.filterWrapper}>
+              <div style={styles.filterShadowBackdrop} />
+              <Pressable
+                onPress={() => setFilter(game.key)}
+                style={({ pressed }) => [
+                  styles.filterPill,
                   {
-                    color:
-                      colors.muted,
+                    borderColor: '#000000',
+                    backgroundColor: selected
+                      ? '#000000'
+                      : '#FFFFFF',
                   },
-                  filter ===
-                    game.key && {
-                    color:
-                      colors.onAccent,
-                  },
+                  pressed && styles.pressedBtn,
                 ]}
               >
-                {game.label}
-              </Text>
-            </Pressable>
-          )
-        )}
+                <Text
+                  style={[
+                    styles.filterPillText,
+                    {
+                      color: selected
+                        ? pageBg
+                        : '#000000',
+                    },
+                  ]}
+                >
+                  {game.label}
+                </Text>
+              </Pressable>
+            </div>
+          );
+        })}
       </ScrollView>
 
-      {/* Leaderboard */}
+      {/* Leaderboard Card Board */}
 
       <ScrollView
         style={styles.scroll}
@@ -676,8 +606,7 @@ export default function LeaderboardScreen() {
               style={[
                 styles.mutedText,
                 {
-                  color:
-                    colors.muted,
+                  color: '#000000',
                 },
               ]}
             >
@@ -693,17 +622,15 @@ export default function LeaderboardScreen() {
           >
             <Trophy
               size={36}
-              color={
-                colors.muted
-              }
+              color="#000000"
+              strokeWidth={2.5}
             />
 
             <Text
               style={[
                 styles.emptyText,
                 {
-                  color:
-                    colors.text,
+                  color: '#000000',
                 },
               ]}
             >
@@ -714,8 +641,7 @@ export default function LeaderboardScreen() {
               style={[
                 styles.mutedText,
                 {
-                  color:
-                    colors.muted,
+                  color: '#000000',
                 },
               ]}
             >
@@ -726,152 +652,161 @@ export default function LeaderboardScreen() {
           </View>
         ) : (
           <View
-            style={[
-              styles.card,
-              {
-                backgroundColor:
-                  colors.card,
-                borderColor:
-                  colors.border,
-              },
-            ]}
+            style={
+              styles.cardContainer
+            }
           >
-            {rows.map(
-              (
-                entry,
-                index
-              ) => {
-                const rank =
-                  index + 1;
+            <View style={styles.cardShadowBackdrop} />
+            <View
+              style={[
+                styles.card,
+                {
+                  backgroundColor:
+                    colors.card,
+                  borderColor:
+                    colors.border,
+                },
+              ]}
+            >
+              {rows.map(
+                (
+                  entry,
+                  index
+                ) => {
+                  const rank =
+                    index + 1;
 
-                const isMe =
-                  entry.player_id ===
-                  myId;
+                  const isMe =
+                    entry.player_id ===
+                    myId;
 
-                return (
-                  <View
-                    key={
-                      entry.player_id
-                    }
-                    style={[
-                      styles.row,
-
-                      {
-                        backgroundColor:
-                          isMe
-                            ? colors.accent
-                            : colors.card,
-                      },
-
-                      index <
-                        rows.length -
-                          1 && {
-                        borderBottomWidth:
-                          1,
-
-                        borderBottomColor:
-                          isMe
-                            ? colors.onAccent
-                            : colors.border,
-                      },
-                    ]}
-                  >
-                    {/* Rank */}
-
-                    <Text
+                  return (
+                    <View
+                      key={
+                        entry.player_id
+                      }
                       style={[
-                        styles.rank,
+                        styles.row,
+
                         {
-                          color:
+                          backgroundColor:
                             isMe
-                              ? colors.onAccent
-                              : colors.text,
+                              ? pageBg
+                              : colors.card,
                         },
 
-                        rank <= 3 &&
-                          styles.medalRank,
+                        index <
+                          rows.length -
+                            1 && {
+                          borderBottomWidth:
+                            2,
+
+                          borderBottomColor:
+                            isMe
+                              ? '#000000'
+                              : colors.border,
+                        },
                       ]}
                     >
-                      {getRankDisplay(
-                        rank
-                      )}
-                    </Text>
+                      {/* Rank */}
 
-                    {/* Player */}
-
-                    <View
-                      style={
-                        styles.rowMiddle
-                      }
-                    >
                       <Text
                         style={[
-                          styles.playerName,
+                          styles.rank,
                           {
                             color:
                               isMe
-                                ? colors.onAccent
-                                : colors.text,
+                                ? '#000000'
+                                : colors.cardText,
                           },
+
+                          rank <= 3 &&
+                            styles.medalRank,
                         ]}
-                        numberOfLines={
-                          1
+                      >
+                        {getRankDisplay(
+                          rank
+                        )}
+                      </Text>
+
+                      {/* Player */}
+
+                      <View
+                        style={
+                          styles.rowMiddle
                         }
                       >
-                        {entry.display_name ??
-                          'Player'}
+                        <Text
+                          style={[
+                            styles.playerName,
+                            {
+                              color:
+                                isMe
+                                  ? '#000000'
+                                  : colors.cardText,
+                            },
+                          ]}
+                          numberOfLines={
+                            1
+                          }
+                        >
+                          {entry.display_name ??
+                            'Player'}
 
-                        {isMe
-                          ? ' (You)'
-                          : ''}
-                      </Text>
+                          {isMe
+                            ? ' (You)'
+                            : ''}
+                        </Text>
+
+                        <Text
+                          style={[
+                            styles.gameStats,
+                            {
+                              color:
+                                isMe
+                                  ? '#000000'
+                                  : colors.cardMuted,
+
+                              opacity:
+                                isMe
+                                  ? 0.85
+                                  : 1,
+                            },
+                          ]}
+                        >
+                          {entry.wins}
+                          W ·{' '}
+                          {entry.draws}
+                          D ·{' '}
+                          {
+                            entry.games_played
+                          }{' '}
+                          played
+                        </Text>
+                      </View>
+
+                      {/* Score */}
 
                       <Text
                         style={[
-                          styles.gameStats,
+                          styles.score,
                           {
                             color:
                               isMe
-                                ? colors.onAccent
-                                : colors.muted,
-
-                            opacity:
-                              isMe
-                                ? 0.9
-                                : 1,
+                                ? '#000000'
+                                : isDark
+                                  ? pageBg
+                                  : '#000000',
                           },
                         ]}
                       >
-                        {entry.wins}
-                        W ·{' '}
-                        {entry.draws}
-                        D ·{' '}
-                        {
-                          entry.games_played
-                        }{' '}
-                        played
+                        {entry.total_points.toLocaleString()}
                       </Text>
                     </View>
-
-                    {/* Score */}
-
-                    <Text
-                      style={[
-                        styles.score,
-                        {
-                          color:
-                            isMe
-                              ? colors.onAccent
-                              : colors.text,
-                        },
-                      ]}
-                    >
-                      {entry.total_points.toLocaleString()}
-                    </Text>
-                  </View>
-                );
-              }
-            )}
+                  );
+                }
+              )}
+            </View>
           </View>
         )}
       </ScrollView>
@@ -883,6 +818,9 @@ const styles =
   StyleSheet.create({
     container: {
       flex: 1,
+    },
+    pressedBtn: {
+      transform: [{ translateX: 2 }, { translateY: 2 }],
     },
 
     header: {
@@ -896,23 +834,23 @@ const styles =
         'space-between',
 
       paddingHorizontal:
-        16,
+        20,
 
-      paddingTop: 28,
+      paddingTop: 12,
 
-      paddingVertical:
-        14,
+      paddingBottom: 10,
 
-      borderBottomWidth:
-        1,
+      zIndex: 100,
     },
 
     headerBack: {
-      width: 38,
+      width: 40,
 
-      height: 38,
+      height: 40,
 
-      borderRadius: 19,
+      borderRadius: 8,
+
+      backgroundColor: '#000000',
 
       alignItems:
         'center',
@@ -921,8 +859,22 @@ const styles =
         'center',
     },
 
+    shadowBackdropSmall: {
+      position: 'absolute',
+      top: 16,
+      left: 24,
+      width: 40,
+      height: 40,
+      backgroundColor: '#000000',
+      borderRadius: 8,
+    },
+    shadowBackdropSmallInner: {
+      width: '100%',
+      height: '100%',
+    },
+
     headerRight: {
-      width: 38,
+      width: 40,
 
       alignItems:
         'center',
@@ -935,46 +887,47 @@ const styles =
       fontFamily:
         'Poppins-ExtraBold',
 
-      fontSize: 16,
+      fontSize: 20,
 
-      letterSpacing: 1.5,
+      letterSpacing: 1,
     },
 
     filterScroll: {
       flexGrow: 0,
-
-      borderBottomWidth:
-        1,
+      marginVertical: 6,
     },
 
     filterRow: {
-      flexDirection:
-        'row',
+      flexDirection: 'row',
+      gap: 12,
+      paddingHorizontal: 20,
+      paddingVertical: 6,
+    },
 
-      gap: 8,
+    filterWrapper: {
+      position: 'relative',
+    },
 
-      paddingHorizontal:
-        16,
-
-      paddingVertical:
-        12,
+    filterShadowBackdrop: {
+      position: 'absolute',
+      top: 4,
+      left: 4,
+      right: -4,
+      bottom: -4,
+      backgroundColor: '#000000',
+      borderRadius: 8,
     },
 
     filterPill: {
-      paddingHorizontal:
-        14,
-
-      paddingVertical:
-        7,
-
-      borderRadius: 18,
-
-      borderWidth: 1,
+      paddingHorizontal: 16,
+      paddingVertical: 9,
+      borderRadius: 8,
+      borderWidth: 2,
     },
 
     filterPillText: {
       fontFamily:
-        'Poppins-Medium',
+        'Poppins-Bold',
 
       fontSize: 12,
     },
@@ -984,15 +937,32 @@ const styles =
     },
 
     scrollContent: {
-      padding: 16,
+      paddingHorizontal: 18,
+
+      paddingTop: 8,
 
       paddingBottom: 40,
     },
 
-    card: {
-      borderRadius: 12,
+    cardContainer: {
+      position: 'relative',
+      width: '100%',
+    },
 
-      borderWidth: 1,
+    cardShadowBackdrop: {
+      position: 'absolute',
+      top: 4,
+      left: 4,
+      right: -7,
+      bottom: -7,
+      backgroundColor: '#000000',
+      borderRadius: 16,
+    },
+
+    card: {
+      borderRadius: 16,
+
+      borderWidth: 3,
 
       overflow: 'hidden',
     },
@@ -1008,18 +978,18 @@ const styles =
         16,
 
       paddingVertical:
-        12,
+        14,
 
       gap: 12,
     },
 
     rank: {
       fontFamily:
-        'Poppins-Bold',
+        'Poppins-ExtraBold',
 
-      fontSize: 14,
+      fontSize: 15,
 
-      width: 32,
+      width: 36,
 
       textAlign:
         'left',
@@ -1039,23 +1009,23 @@ const styles =
 
     playerName: {
       fontFamily:
-        'Poppins-Medium',
+        'Poppins-ExtraBold',
 
-      fontSize: 14,
+      fontSize: 15,
     },
 
     gameStats: {
       fontFamily:
-        'Poppins-Regular',
+        'Poppins-Medium',
 
       fontSize: 11,
     },
 
     score: {
       fontFamily:
-        'Poppins-Bold',
+        'Poppins-ExtraBold',
 
-      fontSize: 15,
+      fontSize: 16,
 
       textAlign:
         'right',
@@ -1078,14 +1048,14 @@ const styles =
 
     emptyText: {
       fontFamily:
-        'Poppins-SemiBold',
+        'Poppins-Bold',
 
       fontSize: 16,
     },
 
     mutedText: {
       fontFamily:
-        'Poppins-Regular',
+        'Poppins-Medium',
 
       fontSize: 13,
 

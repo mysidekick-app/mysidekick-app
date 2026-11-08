@@ -1,16 +1,7 @@
+import { useCallback, useEffect, useState } from 'react';
 import {
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
-
-import { SafeAreaView } from 'react-native-safe-area-context';
-
-import {
+  Activity,
+  ArrowRight,
   ChevronLeft,
   Grid3X3,
   Hash,
@@ -19,24 +10,26 @@ import {
   Trophy,
   X,
 } from 'lucide-react-native';
-
+import {
+  Modal,
+  Pressable,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 
 import { useApp } from '@/components/AppProvider';
-
 import { supabase } from '@/lib/supabase';
 
-import { useEffect, useState } from 'react';
-
-type GameKey =
-  | 'tictactoe'
-  | 'sudoku'
-  | 'wordsearch'
-  | 'sequence';
-
+type GameKey = 'tictactoe' | 'sudoku' | 'wordsearch' | 'sequence';
 type Mode = 'computer' | 'friend';
-
 type Difficulty = 'easy' | 'medium' | 'hard';
+type FilterType = 'all' | 'multiplayer' | 'solo';
 
 interface GameDef {
   key: GameKey;
@@ -59,135 +52,71 @@ interface ActiveGame {
   expiresAt: number;
 }
 
-const MULTIPLAYER_GAMES: GameDef[] = [
-  {
-    key: 'tictactoe',
-    name: 'Tic-Tac-Toe',
-    icon: Grid3X3,
-    multiplayer: true,
-  },
+const ALL_GAMES: GameDef[] = [
+  { key: 'tictactoe', name: 'Tic-Tac-Toe', icon: Grid3X3, multiplayer: true },
+  { key: 'sudoku', name: 'Sudoku', icon: Hash, multiplayer: false },
+  { key: 'wordsearch', name: 'Word Search', icon: Search, multiplayer: false },
+  { key: 'sequence', name: 'Sequence', icon: TrendingUp, multiplayer: false },
 ];
 
-const SOLO_GAMES: GameDef[] = [
-  {
-    key: 'sudoku',
-    name: 'Sudoku',
-    icon: Hash,
-    multiplayer: false,
-  },
-  {
-    key: 'wordsearch',
-    name: 'Word Search',
-    icon: Search,
-    multiplayer: false,
-  },
-  {
-    key: 'sequence',
-    name: 'Sequence',
-    icon: TrendingUp,
-    multiplayer: false,
-  },
-];
-
-const DIFFICULTIES: {
-  key: Difficulty;
-  label: string;
-}[] = [
-  {
-    key: 'easy',
-    label: 'Easy',
-  },
-  {
-    key: 'medium',
-    label: 'Medium',
-  },
-  {
-    key: 'hard',
-    label: 'Hard',
-  },
+const DIFFICULTIES: { key: Difficulty; label: string }[] = [
+  { key: 'easy', label: 'Easy' },
+  { key: 'medium', label: 'Medium' },
+  { key: 'hard', label: 'Hard' },
 ];
 
 const GAME_REQUEST_LIFETIME_MS = 10 * 60 * 1000;
 
-const GAME_NAMES: Record<GameKey, string> = {
-  tictactoe: 'Tic-Tac-Toe',
-  sudoku: 'Sudoku',
-  wordsearch: 'Word Search',
-  sequence: 'Sequence',
-};
-
 function initialsFor(name: string): string {
   const parts = name.trim().split(/\s+/);
-
   const first = parts[0]?.[0] ?? '?';
-
-  const second =
-    parts.length > 1
-      ? parts[parts.length - 1][0]
-      : '';
-
+  const second = parts.length > 1 ? parts[parts.length - 1][0] : '';
   return (first + second).toUpperCase();
 }
 
+function isAccentBlack(color?: string): boolean {
+  if (!color) return false;
+  const normalized = color.trim().toLowerCase();
+  return (
+    normalized === '#000000' ||
+    normalized === '#000' ||
+    normalized === 'black' ||
+    normalized === 'rgb(0,0,0)' ||
+    normalized === 'rgba(0,0,0,1)'
+  );
+}
+
 export default function GamesScreen() {
-  const {
-    isDark,
-    accentForeground,
-    accentWash,
-    onAccent,
-  } = useApp();
+  const { isDark, accentForeground, accentColor: rawAccent } = useApp() as any;
 
-  const colors = {
-    bg: isDark ? '#090909' : '#FBFAF8',
-    card: isDark ? '#151515' : '#FFFFFF',
-    border: isDark ? '#2A2A2A' : '#ECE9E4',
-    text: isDark ? '#F4F2EE' : '#27241F',
-    muted: isDark ? '#AAA59D' : '#8F8A82',
-    sheet: isDark ? '#151515' : '#FFFFFF',
-    accent: accentForeground,
-    accentWash,
-    onAccent,
-  };
+  const pageBg = rawAccent || accentForeground || '#FDE047';
+  const isAccentPureBlack = isAccentBlack(pageBg);
 
-  const [sheetVisible, setSheetVisible] =
-    useState(false);
+  const [filter, setFilter] = useState<FilterType>('all');
+  const [sheetVisible, setSheetVisible] = useState(false);
+  const [selectedGame, setSelectedGame] = useState<GameDef | null>(null);
+  const [mode, setMode] = useState<Mode>('computer');
+  const [difficulty, setDifficulty] = useState<Difficulty>('easy');
+  const [invitedFriend, setInvitedFriend] = useState<Friend | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [friendsLoading, setFriendsLoading] = useState(false);
+  const [friendSearch, setFriendSearch] = useState('');
+  const [activeGames, setActiveGames] = useState<ActiveGame[]>([]);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
-  const [selectedGame, setSelectedGame] =
-    useState<GameDef | null>(null);
-
-  const [mode, setMode] =
-    useState<Mode>('computer');
-
-  const [difficulty, setDifficulty] =
-    useState<Difficulty>('easy');
-
-  const [invitedFriend, setInvitedFriend] =
-    useState<Friend | null>(null);
-
-  const [loading, setLoading] =
-    useState(false);
-
-  const [friends, setFriends] =
-    useState<Friend[]>([]);
-
-  const [friendsLoading, setFriendsLoading] =
-    useState(false);
-
-  const [friendSearch, setFriendSearch] =
-    useState('');
-
-  const [activeGames, setActiveGames] =
-    useState<ActiveGame[]>([]);
-
-  const [, setMyId] =
-    useState<string | null>(null);
+  // Updated position rankings holder with only global and friends
+  const [positions] = useState<Record<string, { global: string; friends: string }>>({
+    tictactoe: { global: '#12', friends: '#1' },
+    sudoku: { global: '#8', friends: '#1' },
+    wordsearch: { global: '#24', friends: '#2' },
+    sequence: { global: '#15', friends: '#1' },
+  });
 
   useEffect(() => {
     loadFriends();
     loadActiveGames();
 
-    // Refresh the request list periodically so expired invitations disappear
-    // even when the Games screen remains open.
     const refreshTimer = setInterval(() => {
       loadActiveGames();
     }, 30000);
@@ -197,33 +126,20 @@ export default function GamesScreen() {
 
   async function loadFriends() {
     setFriendsLoading(true);
-
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
+      const { data: { user } } = await supabase.auth.getUser();
       const myUid = user?.id;
-
       if (!myUid) {
         setFriends([]);
         return;
       }
 
-      const { data: friendRows, error } =
-        await supabase
-          .from('friendships')
-          .select('user_id, friend_user_id')
-          .or(
-            `user_id.eq.${myUid},friend_user_id.eq.${myUid}`
-          );
+      const { data: friendRows, error } = await supabase
+        .from('friendships')
+        .select('user_id, friend_user_id')
+        .or(`user_id.eq.${myUid},friend_user_id.eq.${myUid}`);
 
       if (error) {
-        console.error(
-          'LOAD FRIENDS ERROR:',
-          error
-        );
-
         setFriends([]);
         return;
       }
@@ -231,9 +147,7 @@ export default function GamesScreen() {
       const friendIds = [
         ...new Set(
           (friendRows ?? []).map((r) =>
-            r.user_id === myUid
-              ? r.friend_user_id
-              : r.user_id
+            r.user_id === myUid ? r.friend_user_id : r.user_id
           )
         ),
       ];
@@ -243,37 +157,18 @@ export default function GamesScreen() {
         return;
       }
 
-      const {
-        data: profileRows,
-        error: profileError,
-      } = await supabase
+      const { data: profileRows } = await supabase
         .from('profiles')
         .select('user_id, display_name')
         .in('user_id', friendIds);
 
-      if (profileError) {
-        console.error(
-          'LOAD FRIEND PROFILES ERROR:',
-          profileError
-        );
-
-        setFriends([]);
-        return;
-      }
-
       setFriends(
         (profileRows ?? []).map((p) => ({
           id: p.user_id,
-          display_name:
-            p.display_name ?? 'Friend',
+          display_name: p.display_name ?? 'Friend',
         }))
       );
-    } catch (error) {
-      console.error(
-        'LOAD FRIENDS UNEXPECTED ERROR:',
-        error
-      );
-
+    } catch {
       setFriends([]);
     } finally {
       setFriendsLoading(false);
@@ -282,171 +177,75 @@ export default function GamesScreen() {
 
   async function loadActiveGames() {
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
+      const { data: { user } } = await supabase.auth.getUser();
       const myUid = user?.id;
-
-      setMyId(myUid ?? null);
-
       if (!myUid) {
         setActiveGames([]);
         return;
       }
 
-      const {
-        data: sessionRows,
-        error,
-      } = await supabase
+      const { data: sessionRows, error } = await supabase
         .from('game_sessions')
-        .select(
-          'id, game, created_by, opponent_id, turn_user_id, status, created_at'
-        )
+        .select('id, game, created_by, opponent_id, turn_user_id, status, created_at')
         .eq('mode', 'multiplayer')
         .eq('opponent_type', 'friend')
         .eq('status', 'active')
-        .neq('game', 'chess')
-        .or(
-          `created_by.eq.${myUid},opponent_id.eq.${myUid}`
-        );
+        .or(`created_by.eq.${myUid},opponent_id.eq.${myUid}`);
 
-      if (error) {
-        console.error(
-          'LOAD ACTIVE GAMES ERROR:',
-          error
-        );
-
+      if (error || !sessionRows) {
         setActiveGames([]);
         return;
       }
 
       const now = Date.now();
-      const rows = sessionRows ?? [];
-
-      // A friend invitation is valid for exactly 10 minutes from creation.
-      // Expired sessions are closed in Supabase as well as removed locally.
-      const expiredRows = rows.filter((r) => {
-        if (!r.created_at) return false;
-        return now - new Date(r.created_at).getTime() >= GAME_REQUEST_LIFETIME_MS;
+      const validRows = sessionRows.filter((r) => {
+        if (!r.created_at) return true;
+        return now - new Date(r.created_at).getTime() < GAME_REQUEST_LIFETIME_MS;
       });
-
-      if (expiredRows.length > 0) {
-        await Promise.all(
-          expiredRows.map((r) =>
-            supabase
-              .from('game_sessions')
-              .update({ status: 'expired', result: 'expired', turn_user_id: null })
-              .eq('id', r.id)
-              .eq('status', 'active')
-          )
-        );
-      }
-
-      const validRows = rows.filter(
-        (r) => !expiredRows.some((expired) => expired.id === r.id)
-      );
-
-      if (validRows.length === 0) {
-        setActiveGames([]);
-        return;
-      }
 
       const otherIds = [
         ...new Set(
           validRows
-            .map((r) =>
-              r.created_by === myUid
-                ? r.opponent_id
-                : r.created_by
-            )
+            .map((r) => (r.created_by === myUid ? r.opponent_id : r.created_by))
             .filter(Boolean)
         ),
       ];
 
-      if (otherIds.length === 0) {
-        setActiveGames([]);
-        return;
-      }
+      let nameById = new Map<string, string>();
+      if (otherIds.length > 0) {
+        const { data: profileRows } = await supabase
+          .from('profiles')
+          .select('user_id, display_name')
+          .in('user_id', otherIds as string[]);
 
-      const {
-        data: profileRows,
-        error: profileError,
-      } = await supabase
-        .from('profiles')
-        .select('user_id, display_name')
-        .in('user_id', otherIds as string[]);
-
-      if (profileError) {
-        console.error(
-          'LOAD ACTIVE GAME PROFILES ERROR:',
-          profileError
+        nameById = new Map(
+          (profileRows ?? []).map((p) => [p.user_id, p.display_name ?? 'Friend'])
         );
-
-        setActiveGames([]);
-        return;
       }
-
-      const nameById = new Map(
-        (profileRows ?? []).map((p) => [
-          p.user_id,
-          p.display_name ?? 'Friend',
-        ])
-      );
 
       setActiveGames(
-        validRows
-          .filter(
-            (r) =>
-              r.game === 'tictactoe'
-          )
-          .map((r) => {
-            const otherId =
-              r.created_by === myUid
-                ? r.opponent_id
-                : r.created_by;
-
-            return {
-              id: r.id,
-              game: r.game as GameKey,
-              opponentName:
-                nameById.get(otherId) ??
-                'Friend',
-              isMyTurn:
-                r.turn_user_id === myUid,
-              createdAt: r.created_at,
-              expiresAt: new Date(r.created_at).getTime() + GAME_REQUEST_LIFETIME_MS,
-            };
-          })
+        validRows.map((r) => {
+          const otherId = r.created_by === myUid ? r.opponent_id : r.created_by;
+          return {
+            id: r.id,
+            game: r.game as GameKey,
+            opponentName: nameById.get(otherId) ?? 'Friend',
+            isMyTurn: r.turn_user_id === myUid,
+            createdAt: r.created_at,
+            expiresAt: new Date(r.created_at).getTime() + GAME_REQUEST_LIFETIME_MS,
+          };
+        })
       );
-    } catch (error) {
-      console.error(
-        'LOAD ACTIVE GAMES UNEXPECTED ERROR:',
-        error
-      );
-
+    } catch {
       setActiveGames([]);
     }
   }
 
-  const [nowMs, setNowMs] = useState(() => Date.now());
-
   useEffect(() => {
     if (activeGames.length === 0) return;
-
-    const countdownTimer = setInterval(() => {
-      setNowMs(Date.now());
-    }, 1000);
-
+    const countdownTimer = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(countdownTimer);
   }, [activeGames.length]);
-
-  useEffect(() => {
-    const expired = activeGames.some((g) => g.expiresAt <= nowMs);
-    if (expired) {
-      loadActiveGames();
-    }
-  }, [nowMs]);
 
   function formatRequestTime(ms: number): string {
     const remaining = Math.max(0, ms);
@@ -459,20 +258,19 @@ export default function GamesScreen() {
   function openActiveGame(g: ActiveGame) {
     router.push({
       pathname: `/modules/games/${g.game}`,
-      params: {
-        sessionId: g.id,
-        opponent: 'friend',
-      },
+      params: { sessionId: g.id, opponent: 'friend' },
     });
   }
 
+  const filteredGames = ALL_GAMES.filter((g) => {
+    if (filter === 'multiplayer') return g.multiplayer;
+    if (filter === 'solo') return !g.multiplayer;
+    return true;
+  });
+
   const filteredFriends = friendSearch.trim()
     ? friends.filter((f) =>
-        f.display_name
-          .toLowerCase()
-          .includes(
-            friendSearch.trim().toLowerCase()
-          )
+        f.display_name.toLowerCase().includes(friendSearch.trim().toLowerCase())
       )
     : friends;
 
@@ -487,98 +285,28 @@ export default function GamesScreen() {
 
   function closeSheet() {
     if (loading) return;
-
     setSheetVisible(false);
     setSelectedGame(null);
   }
 
-  function toggleFriend(friend: Friend) {
-    setInvitedFriend((prev) =>
-      prev?.id === friend.id
-        ? null
-        : friend
-    );
-  }
-
   async function handleStart() {
     if (!selectedGame) return;
-
-    if (
-      selectedGame.multiplayer &&
-      mode === 'friend' &&
-      !invitedFriend
-    ) {
-      return;
-    }
-
+    if (selectedGame.multiplayer && mode === 'friend' && !invitedFriend) return;
     if (loading) return;
 
     setLoading(true);
-
     try {
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
-
-      if (userError) {
-        console.error(
-          'GET USER ERROR:',
-          userError
-        );
-
-        return;
-      }
-
+      const { data: { user } } = await supabase.auth.getUser();
       const createdBy = user?.id;
+      if (!createdBy) return;
 
-      if (!createdBy) {
-        console.error(
-          'START GAME ERROR: No authenticated user found.'
-        );
-
-        return;
-      }
-
-      const gameName = selectedGame.key;
-
-      const opponentType =
-        selectedGame.multiplayer
-          ? mode
-          : null;
-
-      const opponentId =
-        selectedGame.multiplayer &&
-        mode === 'friend'
-          ? invitedFriend?.id ?? null
-          : null;
-
-      console.log(
-        'STARTING GAME:',
-        gameName,
-        {
-          mode: selectedGame.multiplayer
-            ? 'multiplayer'
-            : 'solo',
-          opponentType,
-          opponentId,
-          difficulty,
-          createdBy,
-        }
-      );
-
-      const {
-        data: session,
-        error: sessionError,
-      } = await supabase
+      const { data: session, error: sessionError } = await supabase
         .from('game_sessions')
         .insert({
-          game: gameName,
-          mode: selectedGame.multiplayer
-            ? 'multiplayer'
-            : 'solo',
-          opponent_type: opponentType,
-          opponent_id: opponentId,
+          game: selectedGame.key,
+          mode: selectedGame.multiplayer ? 'multiplayer' : 'solo',
+          opponent_type: selectedGame.multiplayer ? mode : null,
+          opponent_id: selectedGame.multiplayer && mode === 'friend' ? invitedFriend?.id ?? null : null,
           difficulty,
           created_by: createdBy,
           status: 'active',
@@ -586,437 +314,201 @@ export default function GamesScreen() {
         .select('id')
         .single();
 
-      if (sessionError) {
-        console.error(
-          'CREATE GAME SESSION ERROR:',
-          sessionError
-        );
-
-        return;
-      }
-
-      if (!session?.id) {
-        console.error(
-          'CREATE GAME SESSION ERROR: No session ID returned.'
-        );
-
-        return;
-      }
+      if (sessionError || !session?.id) return;
 
       const sessionId = session.id;
-
-      console.log(
-        'GAME SESSION CREATED:',
-        sessionId
-      );
-
       setSheetVisible(false);
       setSelectedGame(null);
 
-      switch (gameName) {
-        case 'tictactoe':
-          router.push({
-            pathname:
-              '/modules/games/tictactoe',
-            params: {
-              sessionId,
-              opponent: mode,
-              difficulty,
-            },
-          });
-          break;
-
-        case 'sudoku':
-          router.push({
-            pathname:
-              '/modules/games/sudoku',
-            params: {
-              sessionId,
-              difficulty,
-            },
-          });
-          break;
-
-        case 'wordsearch':
-          router.push({
-            pathname:
-              '/modules/games/wordsearch',
-            params: {
-              sessionId,
-              difficulty,
-            },
-          });
-          break;
-
-        case 'sequence':
-          router.push({
-            pathname:
-              '/modules/games/sequence',
-            params: {
-              sessionId,
-              difficulty,
-            },
-          });
-          break;
-
-        default:
-          console.error(
-            'Unknown game:',
-            gameName
-          );
-      }
+      router.push({
+        pathname: `/modules/games/${selectedGame.key}`,
+        params: { sessionId, opponent: mode, difficulty },
+      });
     } catch (error) {
-      console.error(
-        'START GAME UNEXPECTED ERROR:',
-        error
-      );
+      console.error('START GAME ERROR:', error);
     } finally {
       setLoading(false);
     }
   }
 
-  function renderTile(game: GameDef) {
-    const Icon = game.icon;
-
-    return (
-      <Pressable
-        key={game.key}
-        style={({ pressed }) => [
-          styles.tile,
-          {
-            backgroundColor: colors.card,
-            borderColor: colors.border,
-          },
-          pressed && {
-            opacity: 0.75,
-          },
-        ]}
-        onPress={() => openSheet(game)}
-      >
-        <View
-          style={[
-            styles.tileIconWrap,
-            {
-              backgroundColor:
-                colors.accent,
-            },
-          ]}
-        >
-          <Icon
-            color="#FFFFFF"
-            size={24}
-          />
-        </View>
-
-        <Text
-          style={[
-            styles.tileName,
-            {
-              color: colors.text,
-            },
-          ]}
-        >
-          {game.name}
-        </Text>
-      </Pressable>
-    );
-  }
-
   return (
-    <SafeAreaView
-      style={[
-        styles.root,
-        {
-          backgroundColor:
-            colors.bg,
-        },
-      ]}
-    >
-      <View
-        style={[
-          styles.header,
-          {
-            borderBottomColor:
-              colors.border,
-          },
-        ]}
-      >
+    <SafeAreaView style={[styles.safe, { backgroundColor: pageBg }]}>
+      <StatusBar
+        barStyle={isAccentPureBlack ? 'light-content' : 'dark-content'}
+        backgroundColor={pageBg}
+      />
+
+      {/* STICKY HEADER */}
+      <View style={[styles.headerContainer, { backgroundColor: pageBg }]}>
         <Pressable
-          style={[
-            styles.headerBack,
-            {
-              backgroundColor:
-                colors.accent,
-            },
-          ]}
-          onPress={() =>
-            router.push('/modules')
-          }
+          onPress={() => router.push('/modules')}
+          style={({ pressed }) => [styles.neoBtn, pressed && styles.pressedBtn]}
+          hitSlop={12}
         >
-          <ChevronLeft
-            color="#FFFFFF"
-            size={22}
-            strokeWidth={2.4}
-          />
+          <ChevronLeft color="#FFFFFF" size={22} strokeWidth={2.8} />
         </Pressable>
 
-        <Text
-          style={[
-            styles.headerTitle,
-            {
-              color:
-                isDark ? '#FFFFFF' : accentForeground,
-            },
-          ]}
-        >
+        <Text style={styles.headerTitle} numberOfLines={1}>
           GAMES
         </Text>
 
         <Pressable
-          style={styles.headerBtn}
-          onPress={() =>
-            router.push(
-              '/modules/games/leaderboard'
-            )
-          }
+          onPress={() => router.push('/modules/games/leaderboard')}
+          style={({ pressed }) => [styles.trophyBtn, pressed && styles.pressedBtn]}
+          hitSlop={12}
         >
-          <Trophy
-            color={colors.text}
-            size={22}
-          />
+          <Trophy color="#000000" size={22} strokeWidth={2.5} />
         </Pressable>
       </View>
 
+      {/* FILTER PILLS WITH NEO-BRUTALIST DROP SHADOW */}
+      <View style={styles.filterContainer}>
+        {(['all', 'multiplayer', 'solo'] as FilterType[]).map((f) => {
+          const selected = filter === f;
+          return (
+            <View key={f} style={styles.filterWrapper}>
+              <View style={styles.filterShadowBackdrop} />
+              <Pressable
+                onPress={() => setFilter(f)}
+                style={({ pressed }) => [
+                  styles.filterPill,
+                  selected ? styles.filterPillActive : styles.filterPillInactive,
+                  pressed && styles.pressedBtn,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.filterPillText,
+                    { color: selected ? pageBg : '#000000' },
+                  ]}
+                >
+                  {f.toUpperCase()}
+                </Text>
+              </Pressable>
+            </View>
+          );
+        })}
+      </View>
+
+      {/* SCROLLABLE CARDS */}
       <ScrollView
-        contentContainerStyle={
-          styles.scroll
-        }
+        contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
         {activeGames.length > 0 && (
-          <>
-            <Text
-              style={[
-                styles.sectionLabel,
-                {
-                  color: colors.muted,
-                },
-              ]}
-            >
-              YOUR GAMES
-            </Text>
-
-            <View
-              style={{
-                gap: 8,
-                marginBottom: 24,
-              }}
-            >
-              {activeGames.map((g) => (
-                <Pressable
-                  key={g.id}
-                  onPress={() =>
-                    openActiveGame(g)
-                  }
-                  style={[
-                    styles.activeRow,
-                    {
-                      backgroundColor:
-                        colors.card,
-                      borderColor:
-                        colors.border,
-                    },
-                  ]}
-                >
-                  <View>
-                    <Text
-                      style={[
-                        styles.activeRowTitle,
-                        {
-                          color:
-                            colors.text,
-                        },
-                      ]}
-                    >
-                      {GAME_NAMES[g.game]} vs{' '}
-                      {g.opponentName}
-                    </Text>
-
-                    <Text
-                      style={[
-                        styles.activeRowSub,
-                        {
-                          color:
-                            colors.muted,
-                        },
-                      ]}
-                    >
-                      {g.isMyTurn
-                        ? 'Your turn'
-                        : 'Waiting for opponent'}
-                    </Text>
-
-                    <Text
-                      style={[
-                        styles.activeRowSub,
-                        { color: colors.accent, marginTop: 3 },
-                      ]}
-                    >
-                      Request expires in {formatRequestTime(g.expiresAt - nowMs)}
-                    </Text>
-                  </View>
-
-                  {g.isMyTurn && (
-                    <View
-                      style={[
-                        styles.turnDot,
-                        {
-                          backgroundColor:
-                            colors.accent,
-                        },
-                      ]}
-                    />
-                  )}
-                </Pressable>
-              ))}
-            </View>
-          </>
+          <View style={{ marginBottom: 20 }}>
+            <Text style={styles.activeSectionTitle}>ACTIVE MULTIPLAYER GAMES</Text>
+            {activeGames.map((g) => (
+              <Pressable
+                key={g.id}
+                onPress={() => openActiveGame(g)}
+                style={[styles.activeCard, { borderColor: '#FFFFFF', backgroundColor: '#121212' }]}
+              >
+                <View>
+                  <Text style={[styles.activeCardTitle, { color: pageBg }]}>
+                    {g.game.toUpperCase()} vs {g.opponentName}
+                  </Text>
+                  <Text style={styles.activeCardSub}>
+                    {g.isMyTurn ? 'Your turn' : 'Waiting for opponent'} · Expires in {formatRequestTime(g.expiresAt - nowMs)}
+                  </Text>
+                </View>
+                {g.isMyTurn && <View style={[styles.turnDot, { backgroundColor: pageBg }]} />}
+              </Pressable>
+            ))}
+          </View>
         )}
 
-        <Text
-          style={[
-            styles.sectionLabel,
-            {
-              color: colors.muted,
-            },
-          ]}
-        >
-          MULTIPLAYER
-        </Text>
+        <View style={styles.cardsStack}>
+          {filteredGames.map((m, index) => {
+            const pos = positions[m.key] || { global: '#--', friends: '#--' };
 
-        <View style={styles.grid}>
-          {MULTIPLAYER_GAMES.map(
-            renderTile
-          )}
-        </View>
+            return (
+              <View
+                key={m.key}
+                style={[
+                  styles.cardContainer,
+                  index > 0 && styles.overlappingCard,
+                ]}
+              >
+                <View style={styles.cardShadowBackdrop} />
+                <Pressable
+                  onPress={() => openSheet(m)}
+                  style={({ pressed }) => [
+                    styles.moduleCardBody,
+                    {
+                      backgroundColor: isDark ? '#000000' : '#FFFFFF',
+                      borderColor: '#000000',
+                    },
+                    pressed && styles.pressedBtn,
+                  ]}
+                >
+                  <View style={styles.cardLeftContent}>
+                    <Text
+                      style={[
+                        styles.moduleTitleText,
+                        { color: isDark ? '#FFFFFF' : '#000000' },
+                      ]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                    >
+                      {m.name.toUpperCase()}
+                    </Text>
+                    <View style={styles.arrowContainer}>
+                      <ArrowRight
+                        color={isDark ? '#FFFFFF' : '#000000'}
+                        size={22}
+                        strokeWidth={2.8}
+                      />
+                    </View>
+                  </View>
 
-        <Text
-          style={[
-            styles.sectionLabel,
-            {
-              marginTop: 24,
-              color: colors.muted,
-            },
-          ]}
-        >
-          SOLO
-        </Text>
-
-        <View style={styles.grid}>
-          {SOLO_GAMES.map(renderTile)}
+                  <View style={styles.positionsRow}>
+                    <View style={[styles.posBadge, { backgroundColor: pageBg }]}>
+                      <Text style={styles.posLabel}>Global</Text>
+                      <Text style={styles.posVal}>{pos.global}</Text>
+                    </View>
+                    <View style={[styles.posBadge, { backgroundColor: pageBg }]}>
+                      <Text style={styles.posLabel}>Friends</Text>
+                      <Text style={styles.posVal}>{pos.friends}</Text>
+                    </View>
+                  </View>
+                </Pressable>
+              </View>
+            );
+          })}
         </View>
       </ScrollView>
 
+      {/* GAME SETUP MODAL SHEET */}
       <Modal
         visible={sheetVisible}
         transparent
         animationType="slide"
-        onRequestClose={() => {
-          if (!loading) {
-            closeSheet();
-          }
-        }}
+        onRequestClose={closeSheet}
       >
-        <Pressable
-          style={styles.modalBackdrop}
-          onPress={() => {
-            if (!loading) {
-              closeSheet();
-            }
-          }}
-        />
-
-        <View
-          style={[
-            styles.sheet,
-            {
-              backgroundColor:
-                colors.sheet,
-            },
-          ]}
-        >
-          <View
-            style={styles.sheetHeader}
-          >
-            <Text
-              style={[
-                styles.sheetTitle,
-                {
-                  color: colors.accent,
-                },
-              ]}
-            >
+        <Pressable style={styles.sheetBackdrop} onPress={closeSheet} />
+        <View style={[styles.sheet, { backgroundColor: isDark ? '#18181B' : '#FFFFFF' }]}>
+          <View style={styles.sheetHeader}>
+            <Text style={[styles.sheetTitle, { color: pageBg }]}>
               {selectedGame?.name}
             </Text>
-
-            <Pressable
-              onPress={() => {
-                if (!loading) {
-                  closeSheet();
-                }
-              }}
-              style={[
-                styles.sheetClose,
-                {
-                  backgroundColor:
-                    colors.card,
-                },
-              ]}
-            >
-              <X
-                color={colors.muted}
-                size={20}
-              />
+            <Pressable onPress={closeSheet} hitSlop={12}>
+              <X color={isDark ? '#FFFFFF' : '#000000'} size={22} strokeWidth={2.5} />
             </Pressable>
           </View>
 
           {selectedGame?.multiplayer && (
-            <View
-              style={styles.pillRow}
-            >
+            <View style={styles.pillRow}>
               <Pressable
                 style={[
                   styles.pill,
-                  {
-                    borderColor:
-                      colors.border,
-                    backgroundColor:
-                      colors.card,
-                  },
-                  mode === 'computer' && {
-                    backgroundColor:
-                      colors.accent,
-                    borderColor:
-                      colors.accent,
-                  },
+                  mode === 'computer'
+                    ? { backgroundColor: pageBg, borderColor: pageBg }
+                    : { backgroundColor: isDark ? '#27272A' : '#F4F4F5', borderColor: '#000000' },
                 ]}
-                onPress={() =>
-                  setMode('computer')
-                }
+                onPress={() => setMode('computer')}
               >
-                <Text
-                  style={[
-                    styles.pillText,
-                    {
-                      color:
-                        colors.muted,
-                    },
-                    mode === 'computer' && {
-                      color:
-                        colors.onAccent,
-                    },
-                  ]}
-                >
+                <Text style={[styles.pillText, { color: mode === 'computer' ? '#000000' : (isDark ? '#FFFFFF' : '#000000') }]}>
                   VS Computer
                 </Text>
               </Pressable>
@@ -1024,346 +516,109 @@ export default function GamesScreen() {
               <Pressable
                 style={[
                   styles.pill,
-                  {
-                    borderColor:
-                      colors.border,
-                    backgroundColor:
-                      colors.card,
-                  },
-                  mode === 'friend' && {
-                    backgroundColor:
-                      colors.accent,
-                    borderColor:
-                      colors.accent,
-                  },
+                  mode === 'friend'
+                    ? { backgroundColor: pageBg, borderColor: pageBg }
+                    : { backgroundColor: isDark ? '#27272A' : '#F4F4F5', borderColor: '#000000' },
                 ]}
-                onPress={() =>
-                  setMode('friend')
-                }
+                onPress={() => setMode('friend')}
               >
-                <Text
-                  style={[
-                    styles.pillText,
-                    {
-                      color:
-                        colors.muted,
-                    },
-                    mode === 'friend' && {
-                      color:
-                        colors.onAccent,
-                    },
-                  ]}
-                >
+                <Text style={[styles.pillText, { color: mode === 'friend' ? '#000000' : (isDark ? '#FFFFFF' : '#000000') }]}>
                   Play with Friend
                 </Text>
               </Pressable>
             </View>
           )}
 
-          {(
-            !selectedGame?.multiplayer ||
-            mode === 'computer'
-          ) && (
+          {(!selectedGame?.multiplayer || mode === 'computer') && (
             <>
-              <Text
-                style={[
-                  styles.sheetSectionLabel,
-                  {
-                    color:
-                      colors.muted,
-                  },
-                ]}
-              >
+              <Text style={[styles.sheetSectionLabel, { color: isDark ? '#A1A1AA' : '#52525B' }]}>
                 DIFFICULTY
               </Text>
-
-              <View
-                style={styles.pillRow}
-              >
-                {DIFFICULTIES.map(
-                  (d) => (
-                    <Pressable
-                      key={d.key}
-                      style={[
-                        styles.pill,
-                        {
-                          borderColor:
-                            colors.border,
-                          backgroundColor:
-                            colors.card,
-                        },
-                        difficulty ===
-                          d.key && {
-                          backgroundColor:
-                            colors.accent,
-                          borderColor:
-                            colors.accent,
-                        },
-                      ]}
-                      onPress={() =>
-                        setDifficulty(
-                          d.key
-                        )
-                      }
-                    >
-                      <Text
-                        style={[
-                          styles.pillText,
-                          {
-                            color:
-                              colors.muted,
-                          },
-                          difficulty ===
-                            d.key && {
-                            color:
-                              colors.onAccent,
-                          },
-                        ]}
-                      >
-                        {d.label}
-                      </Text>
-                    </Pressable>
-                  )
-                )}
+              <View style={styles.pillRow}>
+                {DIFFICULTIES.map((d) => (
+                  <Pressable
+                    key={d.key}
+                    style={[
+                      styles.pill,
+                      difficulty === d.key
+                        ? { backgroundColor: pageBg, borderColor: pageBg }
+                        : { backgroundColor: isDark ? '#27272A' : '#F4F4F5', borderColor: '#000000' },
+                    ]}
+                    onPress={() => setDifficulty(d.key)}
+                  >
+                    <Text style={[styles.pillText, { color: difficulty === d.key ? '#000000' : (isDark ? '#FFFFFF' : '#000000') }]}>
+                      {d.label}
+                    </Text>
+                  </Pressable>
+                ))}
               </View>
             </>
           )}
 
-          {selectedGame?.multiplayer &&
-            mode === 'friend' && (
-              <>
-                <Text
-                  style={[
-                    styles.sheetSectionLabel,
-                    {
-                      color:
-                        colors.muted,
-                    },
-                  ]}
-                >
-                  INVITE FRIENDS
-                </Text>
+          {selectedGame?.multiplayer && mode === 'friend' && (
+            <>
+              <Text style={[styles.sheetSectionLabel, { color: isDark ? '#A1A1AA' : '#52525B' }]}>
+                INVITE FRIEND
+              </Text>
+              <View style={[styles.searchBar, { backgroundColor: isDark ? '#27272A' : '#F4F4F5', borderColor: '#000000' }]}>
+                <Search color={isDark ? '#A1A1AA' : '#52525B'} size={16} />
+                <TextInput
+                  style={[styles.searchInput, { color: isDark ? '#FFFFFF' : '#000000' }]}
+                  value={friendSearch}
+                  onChangeText={setFriendSearch}
+                  placeholder="Search friends..."
+                  placeholderTextColor={isDark ? '#A1A1AA' : '#52525B'}
+                />
+              </View>
 
-                <View
-                  style={[
-                    styles.searchBar,
-                    {
-                      backgroundColor:
-                        colors.card,
-                      borderColor:
-                        colors.border,
-                    },
-                  ]}
-                >
-                  <Search
-                    color={colors.muted}
-                    size={16}
-                  />
-
-                  <TextInput
-                    style={[
-                      styles.searchInput,
-                      {
-                        color:
-                          colors.text,
-                      },
-                    ]}
-                    value={friendSearch}
-                    onChangeText={
-                      setFriendSearch
-                    }
-                    placeholder="Search friends by name..."
-                    placeholderTextColor={
-                      colors.muted
-                    }
-                    autoCapitalize="none"
-                  />
-                </View>
-
-                {friendsLoading ? (
-                  <Text
-                    style={[
-                      styles.friendsHint,
-                      {
-                        color:
-                          colors.muted,
-                      },
-                    ]}
-                  >
-                    Loading friends…
-                  </Text>
-                ) : friends.length ===
-                  0 ? (
-                  <Text
-                    style={[
-                      styles.friendsHint,
-                      {
-                        color:
-                          colors.muted,
-                      },
-                    ]}
-                  >
-                    No friends yet — add
-                    some first!
-                  </Text>
-                ) : filteredFriends.length ===
-                  0 ? (
-                  <Text
-                    style={[
-                      styles.friendsHint,
-                      {
-                        color:
-                          colors.muted,
-                      },
-                    ]}
-                  >
-                    No matches for "
-                    {friendSearch}"
-                  </Text>
-                ) : (
-                  <ScrollView
-                    style={
-                      styles.friendsList
-                    }
-                    showsVerticalScrollIndicator={
-                      false
-                    }
-                  >
-                    {filteredFriends.map(
-                      (f) => {
-                        const selected =
-                          invitedFriend?.id ===
-                          f.id;
-
-                        return (
-                          <Pressable
-                            key={f.id}
-                            onPress={() =>
-                              toggleFriend(
-                                f
-                              )
-                            }
-                            style={[
-                              styles.friendRow,
-                              {
-                                borderColor:
-                                  colors.border,
-                                backgroundColor:
-                                  colors.card,
-                              },
-                              selected && {
-                                borderColor:
-                                  colors.accent,
-                              },
-                            ]}
-                          >
-                            <View
-                              style={[
-                                styles.avatar,
-                                {
-                                  backgroundColor:
-                                    colors.bg,
-                                  borderColor:
-                                    colors.border,
-                                },
-                                selected && {
-                                  borderColor:
-                                    colors.accent,
-                                },
-                              ]}
-                            >
-                              <Text
-                                style={[
-                                  styles.avatarText,
-                                  {
-                                    color:
-                                      colors.text,
-                                  },
-                                ]}
-                              >
-                                {initialsFor(
-                                  f.display_name
-                                )}
-                              </Text>
-                            </View>
-
-                            <Text
-                              style={[
-                                styles.friendRowName,
-                                {
-                                  color:
-                                    colors.text,
-                                },
-                              ]}
-                              numberOfLines={1}
-                            >
-                              {
-                                f.display_name
-                              }
-                            </Text>
-
-                            {selected && (
-                              <View
-                                style={[
-                                  styles.selectedDot,
-                                  {
-                                    backgroundColor:
-                                      colors.accent,
-                                  },
-                                ]}
-                              />
-                            )}
-                          </Pressable>
-                        );
-                      }
-                    )}
-                  </ScrollView>
-                )}
-              </>
-            )}
+              {friendsLoading ? (
+                <Text style={styles.friendsHint}>Loading friends…</Text>
+              ) : friends.length === 0 ? (
+                <Text style={styles.friendsHint}>No friends yet — add some first!</Text>
+              ) : (
+                <ScrollView style={styles.friendsList} showsVerticalScrollIndicator={false}>
+                  {filteredFriends.map((f) => {
+                    const selected = invitedFriend?.id === f.id;
+                    return (
+                      <Pressable
+                        key={f.id}
+                        onPress={() => setInvitedFriend(selected ? null : f)}
+                        style={[
+                          styles.friendRow,
+                          {
+                            backgroundColor: isDark ? '#27272A' : '#F4F4F5',
+                            borderColor: selected ? pageBg : '#000000',
+                          },
+                        ]}
+                      >
+                        <View style={[styles.avatar, { borderColor: '#000000' }]}>
+                          <Text style={[styles.avatarText, { color: isDark ? '#FFFFFF' : '#000000' }]}>
+                            {initialsFor(f.display_name)}
+                          </Text>
+                        </View>
+                        <Text style={[styles.friendRowName, { color: isDark ? '#FFFFFF' : '#000000' }]} numberOfLines={1}>
+                          {f.display_name}
+                        </Text>
+                        {selected && <View style={[styles.selectedDot, { backgroundColor: pageBg }]} />}
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              )}
+            </>
+          )}
 
           <Pressable
             style={({ pressed }) => [
               styles.startBtn,
-              {
-                backgroundColor:
-                  colors.accent,
-              },
-              pressed && {
-                opacity: 0.85,
-              },
-              loading && {
-                opacity: 0.6,
-              },
-              selectedGame?.multiplayer &&
-                mode === 'friend' &&
-                !invitedFriend && {
-                  opacity: 0.4,
-                },
+              { backgroundColor: '#000000', borderWidth: 2, borderColor: pageBg },
+              pressed && styles.pressedBtn,
             ]}
             onPress={handleStart}
-            disabled={
-              loading ||
-              !selectedGame ||
-              (selectedGame.multiplayer &&
-                mode === 'friend' &&
-                !invitedFriend)
-            }
+            disabled={loading}
           >
-            <Text
-              style={[
-                styles.startBtnText,
-                {
-                  color:
-                    colors.onAccent,
-                },
-              ]}
-            >
-              {loading
-                ? 'Starting…'
-                : selectedGame?.multiplayer
-                ? 'Start Match'
-                : 'Start Game'}
+            <Text style={[styles.startBtnText, { color: pageBg }]}>
+              {loading ? 'Starting…' : selectedGame?.multiplayer && mode === 'friend' ? 'Send Invitation' : 'Start Match'}
             </Text>
           </Pressable>
         </View>
@@ -1373,246 +628,305 @@ export default function GamesScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-  },
+  safe: { flex: 1 },
+  pressedBtn: { transform: [{ translateX: 2 }, { translateY: 2 }] },
 
-  header: {
+  headerContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 28,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 10,
+    zIndex: 100,
   },
-
-  headerBack: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  headerBtn: {
+  neoBtn: {
     width: 40,
     height: 40,
+    borderRadius: 8,
+    backgroundColor: '#000000',
     alignItems: 'center',
     justifyContent: 'center',
   },
-
+  trophyBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#000000',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   headerTitle: {
     fontFamily: 'Poppins-ExtraBold',
     fontSize: 20,
-    letterSpacing: 2,
+    letterSpacing: 1,
+    color: '#000000',
+    textAlign: 'center',
+    flex: 1,
   },
 
-  scroll: {
-    padding: 16,
-    paddingBottom: 48,
-  },
-
-  sectionLabel: {
-    fontFamily: 'Poppins-Medium',
-    fontSize: 11,
-    letterSpacing: 2,
-    marginBottom: 14,
-  },
-
-  grid: {
+  filterContainer: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    gap: 12,
   },
-
-  tile: {
-    flexBasis: '31%',
-    flexGrow: 0,
-    minHeight: 112,
-    borderRadius: 18,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    gap: 8,
+  filterWrapper: {
+    position: 'relative',
   },
-
-  tileIconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
+  filterShadowBackdrop: {
+    position: 'absolute',
+    top: 4,
+    left: 4,
+    right: -4,
+    bottom: -4,
+    backgroundColor: '#000000',
+    borderRadius: 8,
   },
-
-  tileName: {
+  filterPill: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#000000',
+  },
+  filterPillActive: {
+    backgroundColor: '#000000',
+  },
+  filterPillInactive: {
+    backgroundColor: '#FFFFFF',
+  },
+  filterPillText: {
     fontFamily: 'Poppins-Bold',
     fontSize: 11,
-    textAlign: 'center',
-    paddingHorizontal: 4,
+    letterSpacing: 0.5,
   },
 
-  activeRow: {
+  scrollContent: {
+    paddingHorizontal: 18,
+    paddingTop: 8,
+    paddingBottom: 50,
+  },
+  cardsStack: {
+    paddingTop: 4,
+  },
+  cardContainer: {
+    position: 'relative',
+    width: '100%',
+  },
+  overlappingCard: {
+    marginTop: 12,
+  },
+  cardShadowBackdrop: {
+    position: 'absolute',
+    top: 4,
+    left: 4,
+    right: -7,
+    bottom: -7,
+    backgroundColor: '#000000',
+    borderRadius: 16,
+  },
+  moduleCardBody: {
+    borderRadius: 16,
+    borderWidth: 3,
+    paddingVertical: 22,
+    paddingHorizontal: 20,
+    flexDirection: 'column',
+    justifyContent: 'space-between',
+    minHeight: 135,
+    gap: 14,
+  },
+  cardLeftContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    width: '100%',
   },
-
-  activeRowTitle: {
-    fontFamily: 'Poppins-SemiBold',
+  moduleTitleText: {
+    fontFamily: 'Poppins-ExtraBold',
+    fontSize: 22,
+    letterSpacing: 0.8,
+  },
+  arrowContainer: {
+    transform: [{ rotate: '-45deg' }],
+  },
+  positionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  posBadge: {
+    flex: 1,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: '#000000',
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+  },
+  posLabel: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 9,
+    color: '#000000',
+    opacity: 0.75,
+  },
+  posVal: {
+    fontFamily: 'Poppins-ExtraBold',
     fontSize: 13,
-  },
-
-  activeRowSub: {
-    fontFamily: 'Poppins-Regular',
-    fontSize: 11,
+    color: '#000000',
     marginTop: 2,
   },
 
+  activeSectionTitle: {
+    fontFamily: 'Poppins-ExtraBold',
+    fontSize: 12,
+    letterSpacing: 1,
+    color: '#000000',
+    marginBottom: 8,
+  },
+  activeCard: {
+    borderWidth: 2,
+    borderRadius: 14,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  activeCardTitle: {
+    fontFamily: 'Poppins-ExtraBold',
+    fontSize: 14,
+  },
+  activeCardSub: {
+    fontFamily: 'Poppins-Regular',
+    fontSize: 11,
+    color: '#A1A1AA',
+    marginTop: 2,
+  },
   turnDot: {
     width: 10,
     height: 10,
     borderRadius: 5,
   },
 
-  modalBackdrop: {
+  sheetBackdrop: {
     flex: 1,
-    backgroundColor:
-      'rgba(0,0,0,0.6)',
+    backgroundColor: 'rgba(0,0,0,0.5)',
   },
-
   sheet: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    paddingHorizontal: 24,
-    paddingTop: 24,
-    paddingBottom: 40,
-    gap: 16,
+    borderWidth: 3,
+    borderColor: '#000000',
+    paddingTop: 22,
+    paddingBottom: 34,
+    paddingHorizontal: 22,
+    maxHeight: '85%',
   },
-
   sheetHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
   },
-
   sheetTitle: {
-    fontFamily: 'Poppins-Bold',
+    fontFamily: 'Poppins-ExtraBold',
     fontSize: 20,
   },
-
-  sheetClose: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
   sheetSectionLabel: {
-    fontFamily: 'Poppins-Medium',
+    fontFamily: 'Poppins-Bold',
     fontSize: 11,
-    letterSpacing: 2,
-    marginBottom: -4,
+    letterSpacing: 0.5,
+    marginTop: 12,
+    marginBottom: 6,
   },
-
   pillRow: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 8,
     flexWrap: 'wrap',
   },
-
   pill: {
-    paddingHorizontal: 18,
+    paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
+    borderRadius: 10,
+    borderWidth: 2,
   },
-
   pillText: {
-    fontFamily: 'Poppins-Medium',
+    fontFamily: 'Poppins-Bold',
     fontSize: 13,
   },
-
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
+    borderWidth: 2,
+    borderRadius: 10,
+    paddingHorizontal: 12,
     paddingVertical: 10,
   },
-
   searchInput: {
     flex: 1,
-    fontFamily: 'Poppins-Regular',
+    fontFamily: 'Poppins-Medium',
     fontSize: 14,
     padding: 0,
   },
-
   friendsHint: {
-    fontFamily: 'Poppins-Regular',
+    fontFamily: 'Poppins-Medium',
     fontSize: 12,
     textAlign: 'center',
-    paddingVertical: 8,
+    paddingVertical: 12,
+    color: '#71717A',
   },
-
   friendsList: {
-    maxHeight: 180,
+    maxHeight: 160,
+    marginTop: 8,
   },
-
   friendRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginBottom: 8,
+    borderWidth: 2,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 6,
   },
-
   friendRowName: {
     flex: 1,
-    fontFamily: 'Poppins-Medium',
-    fontSize: 14,
+    fontFamily: 'Poppins-Bold',
+    fontSize: 13,
   },
-
   selectedDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
-
   avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
   },
-
   avatarText: {
-    fontFamily: 'Poppins-SemiBold',
-    fontSize: 13,
-  },
-
-  startBtn: {
-    borderRadius: 16,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginTop: 4,
-  },
-
-  startBtnText: {
     fontFamily: 'Poppins-Bold',
-    fontSize: 16,
+    fontSize: 12,
+  },
+  startBtn: {
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  startBtnText: {
+    fontFamily: 'Poppins-ExtraBold',
+    fontSize: 15,
+    letterSpacing: 0.5,
   },
 });

@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Modal,
   Pressable,
- 
+  StatusBar,
   StyleSheet,
   Text,
   View,
@@ -398,6 +398,28 @@ function computeMove(
   );
 }
 
+// ─── Theme Palettes ──────────────────────────────────────────────────────────
+
+const DARK_PALETTE = {
+  bg: '#090909',
+  card: '#121212',
+  cardBorder: '#000000',
+  text: '#FFFFFF',
+  muted: '#A1A1AA',
+  divider: '#262626',
+  inputBg: '#1E1E1E',
+};
+
+const LIGHT_PALETTE = {
+  bg: '#FBFAF8',
+  card: '#FFFFFF',
+  cardBorder: '#000000',
+  text: '#000000',
+  muted: '#52525B',
+  divider: '#E4E4E7',
+  inputBg: '#F4F4F5',
+};
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function TicTacToe() {
@@ -420,33 +442,16 @@ export default function TicTacToe() {
   const {
     isDark,
     accentForeground,
-    onAccent,
-  } = useApp();
+  } = useApp() as any;
 
-  const colors = {
-    bg: isDark
-      ? '#090909'
-      : '#FBFAF8',
+  const accent = accentForeground || '#FDE047';
+  const pageBg = accent;
 
-    card: isDark
-      ? '#151515'
-      : '#FFFFFF',
+  const COLORS = isDark
+    ? DARK_PALETTE
+    : LIGHT_PALETTE;
 
-    border: isDark
-      ? '#2A2A2A'
-      : '#ECE9E4',
-
-    text: isDark
-      ? '#F4F2EE'
-      : '#27241F',
-
-    muted: isDark
-      ? '#AAA59D'
-      : '#8F8A82',
-
-    accent: accentForeground,
-    onAccent,
-  };
+  const styles = makeStyles(COLORS);
 
   const opp: Opponent =
     params.opponent === 'friend'
@@ -456,7 +461,7 @@ export default function TicTacToe() {
   const isVsComputer =
     opp === 'computer';
 
-  // ─── Multiplayer state ────────────────────────────────────────────────────
+  // ─── Multiplayer state ────────────────────────────────────────────────    
 
   const [myId, setMyId] =
     useState<string | null>(null);
@@ -691,10 +696,6 @@ export default function TicTacToe() {
         return;
       }
 
-      // Use a unique channel name for each mounted screen instance.
-      // This prevents Supabase from reusing a previously subscribed channel
-      // when opening the same game again from Your Games.
-
       const channelName =
         `tictactoe_session_${sessionId}_${Date.now()}_${Math.random()
           .toString(36)
@@ -732,8 +733,6 @@ export default function TicTacToe() {
         );
       }
     };
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     isVsComputer,
     sessionId,
@@ -817,16 +816,6 @@ export default function TicTacToe() {
 
           return false;
         }
-
-        console.log(
-          'TIC-TAC-TOE SCORE SAVED:',
-          {
-            playerId,
-            result,
-            points: pts,
-            game: 'tictactoe',
-          },
-        );
 
         return true;
       },
@@ -1039,7 +1028,6 @@ export default function TicTacToe() {
           !winner &&
           isDraw(nextBoard);
 
-        // Normal move.
         if (
           !winner &&
           !drawn
@@ -1133,8 +1121,6 @@ export default function TicTacToe() {
           );
         }
 
-        // Only the client that successfully closes
-        // the active session records the scores.
         if (
           closed &&
           createdBy &&
@@ -1287,8 +1273,6 @@ export default function TicTacToe() {
 
   const handleExitPress =
     () => {
-      // Don't immediately leave.
-      // Always ask the player first.
       setExitModalVisible(
         true,
       );
@@ -1303,9 +1287,6 @@ export default function TicTacToe() {
 
   const handleConfirmExit =
     async () => {
-      // Mark this game as abandoned BEFORE leaving so no score can be
-      // written for an incomplete game and the realtime session is closed.
-
       exitConfirmedRef.current = true;
 
       setExitModalVisible(false);
@@ -1402,75 +1383,81 @@ export default function TicTacToe() {
     <SafeAreaView
       style={[
         styles.safe,
-        {
-          backgroundColor:
-            colors.bg,
-        },
+        { backgroundColor: pageBg },
       ]}
+      edges={['top', 'bottom']}
     >
+      <StatusBar barStyle="dark-content" backgroundColor={pageBg} />
+
       {/* Header */}
 
       <View
         style={[
           styles.header,
-          {
-            borderBottomColor:
-              colors.border,
-          },
+          { borderBottomColor: '#000000', paddingBottom: 10, paddingTop: 12 },
         ]}
       >
-        <Pressable
-          onPress={
-            handleExitPress
-          }
-          style={[
-            styles.headerBack,
-            {
-              backgroundColor:
-                colors.accent,
-            },
-          ]}
-          hitSlop={8}
-        >
-          <ChevronLeft
-            color="#FFFFFF"
-            size={22}
-            strokeWidth={2.4}
-          />
-        </Pressable>
+        <div style={{ position: 'relative' }}>
+          <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 8 }} />
+          <Pressable
+            onPress={
+              handleExitPress
+            }
+            style={({ pressed }) => [
+              styles.headerBack,
+              { backgroundColor: '#000000', borderColor: '#000000', borderWidth: 2 },
+              pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
+            ]}
+            hitSlop={12}
+          >
+            <ChevronLeft
+              color="#FFFFFF"
+              size={22}
+              strokeWidth={2.8}
+            />
+          </Pressable>
+        </div>
 
         <Text
           style={[
             styles.headerTitle,
             {
-              color:
-                isDark ? '#FFFFFF' : accentForeground,
+              color: '#000000',
+              fontFamily: 'Poppins-ExtraBold',
+              fontSize: 22,
             },
           ]}
         >
           TIC-TAC-TOE
         </Text>
 
-        <View
-          style={[
-            styles.levelBadge,
-            {
-              backgroundColor:
-                colors.accent,
-            },
-          ]}
-        >
-          <Text
-            style={[
-              styles.levelLabel,
-              {
-                color:
-                  colors.onAccent,
-              },
-            ]}
-          >
-            {difficultyLevel.toUpperCase()}
-          </Text>
+        <View style={styles.headerRight}>
+          <div style={{ position: 'relative' }}>
+            <div style={{ position: 'absolute', top: 3, left: 3, right: -3, bottom: -3, backgroundColor: '#000000', borderRadius: 8 }} />
+            <View
+              style={[
+                styles.levelBadge,
+                {
+                  backgroundColor: COLORS.card,
+                  borderColor: '#000000',
+                  borderWidth: 2,
+                  borderRadius: 8,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.levelLabel,
+                  {
+                    color: COLORS.text,
+                    fontFamily: 'Poppins-Bold',
+                  },
+                ]}
+              >
+                {difficultyLevel.toUpperCase()}
+              </Text>
+            </View>
+          </div>
         </View>
       </View>
 
@@ -1480,8 +1467,7 @@ export default function TicTacToe() {
         style={[
           styles.statusBar,
           {
-            borderBottomColor:
-              colors.border,
+            borderBottomColor: COLORS.divider,
           },
         ]}
       >
@@ -1489,8 +1475,8 @@ export default function TicTacToe() {
           style={[
             styles.statusText,
             {
-              color:
-                colors.text,
+              color: COLORS.text,
+              fontFamily: 'Poppins-Bold',
             },
           ]}
         >
@@ -1505,122 +1491,125 @@ export default function TicTacToe() {
           styles.boardContainer
         }
       >
-        <View
-          style={[
-            styles.board,
-            {
-              width:
-                actualBoardWidth,
-              height:
-                actualBoardWidth,
-            },
-          ]}
-        >
-          {Array.from(
-            {
-              length:
-                config.size,
-            },
-            (_, boardRow) => (
-              <View
-                key={boardRow}
-                style={
-                  styles.boardRow
-                }
-              >
-                {Array.from(
-                  {
-                    length:
-                      config.size,
-                  },
-                  (_, boardCol) => {
-                    const index =
-                      boardRow *
-                        config.size +
-                      boardCol;
+        <div style={{ position: 'relative' }}>
+          <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 16 }} />
+          <View
+            style={[
+              styles.gridContainer,
+              { backgroundColor: COLORS.card, borderColor: '#000000', borderWidth: 3, borderRadius: 16, padding: 8 },
+            ]}
+          >
+            <View
+              style={[
+                styles.board,
+                {
+                  width:
+                    actualBoardWidth,
+                  height:
+                    actualBoardWidth,
+                },
+              ]}
+            >
+              {Array.from(
+                {
+                  length:
+                    config.size,
+                },
+                (_, boardRow) => (
+                  <View
+                    key={boardRow}
+                    style={
+                      styles.boardRow
+                    }
+                  >
+                    {Array.from(
+                      {
+                        length:
+                          config.size,
+                      },
+                      (_, boardCol) => {
+                        const index =
+                          boardRow *
+                            config.size +
+                          boardCol;
 
-                    const cell =
-                      board[index];
+                        const cell =
+                          board[index];
 
-                    const isWinCell =
-                      winResult?.cells.includes(
-                        index,
-                      ) ?? false;
-
-                    return (
-                      <Pressable
-                        key={
-                          boardCol
-                        }
-                        onPress={() =>
-                          handleCellPress(
+                        const isWinCell =
+                          winResult?.cells.includes(
                             index,
-                          )
-                        }
-                        style={[
-                          styles.cell,
-                          {
-                            borderColor:
-                              colors.border,
-                          },
+                          ) ?? false;
 
-                          isWinCell && {
-                            backgroundColor:
-                              colors.accent,
-                          },
-                        ]}
-                      >
-                        {cell ===
-                          'X' && (
-                          <Text
-                            style={[
-                              styles.cellText,
-                              {
-                                color:
-                                  colors.accent,
+                        // Check if this cell is user input (X in solo, or myMark in multiplayer)
+                        const isUserInput = isVsComputer ? cell === 'X' : cell === myMark;
 
-                                fontSize:
-                                  cellSize *
-                                  0.45,
-                              },
-                            ]}
-                            numberOfLines={
-                              1
+                        return (
+                          <Pressable
+                            key={
+                              boardCol
                             }
-                          >
-                            X
-                          </Text>
-                        )}
-
-                        {cell ===
-                          'O' && (
-                          <Text
-                            style={[
-                              styles.cellText,
-                              {
-                                color:
-                                  colors.text,
-
-                                fontSize:
-                                  cellSize *
-                                  0.45,
-                              },
-                            ]}
-                            numberOfLines={
-                              1
+                            onPress={() =>
+                              handleCellPress(
+                                index,
+                              )
                             }
+                            style={({ pressed }) => [
+                              styles.cell,
+                              {
+                                backgroundColor: isWinCell ? accent : COLORS.card,
+                                borderColor: isDark ? '#27272A' : '#D4D4D8', // faint grey grid lines
+                              },
+                              pressed && { transform: [{ translateX: 1 }, { translateY: 1 }] },
+                            ]}
                           >
-                            O
-                          </Text>
-                        )}
-                      </Pressable>
-                    );
-                  },
-                )}
-              </View>
-            ),
-          )}
-        </View>
+                            {cell ===
+                              'X' && (
+                              <Text
+                                style={[
+                                  styles.cellText,
+                                  {
+                                    color: isUserInput ? '#EC4899' : '#000000',
+                                    fontSize:
+                                      cellSize *
+                                      0.45,
+                                    fontFamily: 'Poppins-ExtraBold',
+                                  },
+                                ]}
+                                numberOfLines={1}
+                              >
+                                X
+                              </Text>
+                            )}
+
+                            {cell ===
+                              'O' && (
+                              <Text
+                                style={[
+                                  styles.cellText,
+                                  {
+                                    color: isUserInput ? '#EC4899' : COLORS.text,
+                                    fontSize:
+                                      cellSize *
+                                      0.45,
+                                    fontFamily: 'Poppins-ExtraBold',
+                                  },
+                                ]}
+                                numberOfLines={1}
+                              >
+                                O
+                              </Text>
+                            )}
+                          </Pressable>
+                        );
+                      },
+                    )}
+                  </View>
+                ),
+              )}
+            </View>
+          </View>
+        </div>
       </View>
 
       {/* ───────────────────────────────────────────────────────────────────
@@ -1640,194 +1629,208 @@ export default function TicTacToe() {
             styles.overlay
           }
         >
-          <View
-            style={[
-              styles.modal,
-              {
-                backgroundColor:
-                  colors.card,
-
-                borderColor:
-                  colors.border,
-              },
-            ]}
-          >
-            {draw ? (
-              <>
-                <Text
-                  style={
-                    styles.modalEmoji
-                  }
-                >
-                  🤝
-                </Text>
-
-                <Text
-                  style={[
-                    styles.modalTitle,
-                    {
-                      color:
-                        colors.text,
-                    },
-                  ]}
-                >
-                  It's a Draw!
-                </Text>
-
-                <Text
-                  style={[
-                    styles.modalSub,
-                    {
-                      color:
-                        colors.muted,
-                    },
-                  ]}
-                >
-                  +{DRAW_POINTS}{' '}
-                  points
-                </Text>
-              </>
-            ) : (
-              isVsComputer
-                ? winResult?.winner ===
-                  'X'
-                : winResult?.winner ===
-                  myMark
-            ) ? (
-              <>
-                <Text
-                  style={
-                    styles.modalEmoji
-                  }
-                >
-                  🎉
-                </Text>
-
-                <Text
-                  style={[
-                    styles.modalTitle,
-                    {
-                      color:
-                        colors.accent,
-                    },
-                  ]}
-                >
-                  You Win!
-                </Text>
-
-                <Text
-                  style={[
-                    styles.modalSub,
-                    {
-                      color:
-                        colors.muted,
-                    },
-                  ]}
-                >
-                  +{winningPoints}{' '}
-                  points ·{' '}
-                  {difficultyLevel.toUpperCase()}
-                </Text>
-              </>
-            ) : (
-              <>
-                <Text
-                  style={
-                    styles.modalEmoji
-                  }
-                >
-                  😔
-                </Text>
-
-                <Text
-                  style={[
-                    styles.modalTitle,
-                    {
-                      color:
-                        colors.text,
-                    },
-                  ]}
-                >
-                  {isVsComputer
-                    ? 'Computer Wins!'
-                    : 'You Lost'}
-                </Text>
-
-                <Text
-                  style={[
-                    styles.modalSub,
-                    {
-                      color:
-                        colors.muted,
-                    },
-                  ]}
-                >
-                  Better luck next
-                  time
-                </Text>
-              </>
-            )}
-
+          <div style={{ position: 'relative', width: '100%', maxWidth: 360 }}>
+            <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 20 }} />
             <View
-              style={
-                styles.modalBtns
-              }
+              style={[
+                styles.modal,
+                {
+                  backgroundColor: COLORS.card,
+                  borderColor: '#000000',
+                  borderWidth: 3,
+                  borderRadius: 20,
+                },
+              ]}
             >
-              <Pressable
-                onPress={
-                  handlePlayAgain
-                }
-                style={[
-                  styles.btnPrimary,
-                  {
-                    backgroundColor:
-                      colors.accent,
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.btnPrimaryText,
-                    {
-                      color:
-                        colors.onAccent,
-                    },
-                  ]}
-                >
-                  {isVsComputer
-                    ? 'Play Again'
-                    : 'Back to Games'}
-                </Text>
-              </Pressable>
+              {draw ? (
+                <>
+                  <Text
+                    style={
+                      styles.modalEmoji
+                    }
+                  >
+                    🤝
+                  </Text>
 
-              {isVsComputer && (
-                <Pressable
-                  onPress={
-                    handleExitCompleted
-                  }
-                  style={[
-                    styles.btnSecondary,
-                    {
-                      backgroundColor:
-                        colors.border,
-                    },
-                  ]}
-                >
                   <Text
                     style={[
-                      styles.btnSecondaryText,
+                      styles.modalTitle,
                       {
-                        color:
-                          colors.text,
+                        color: COLORS.text,
+                        fontFamily: 'Poppins-ExtraBold',
                       },
                     ]}
                   >
-                    Exit Game
+                    It's a Draw!
                   </Text>
-                </Pressable>
+
+                  <Text
+                    style={[
+                      styles.modalSub,
+                      {
+                        color: COLORS.muted,
+                        fontFamily: 'Poppins-Medium',
+                      },
+                    ]}
+                  >
+                    +{DRAW_POINTS}{' '}
+                    points
+                  </Text>
+                </>
+              ) : (
+                isVsComputer
+                  ? winResult?.winner ===
+                    'X'
+                  : winResult?.winner ===
+                    myMark
+              ) ? (
+                <>
+                  <Text
+                    style={
+                      styles.modalEmoji
+                    }
+                  >
+                    🎉
+                  </Text>
+
+                  <Text
+                    style={[
+                      styles.modalTitle,
+                      {
+                        color: COLORS.text,
+                        fontFamily: 'Poppins-ExtraBold',
+                      },
+                    ]}
+                  >
+                    You Win!
+                  </Text>
+
+                  <Text
+                    style={[
+                      styles.modalSub,
+                      {
+                        color: COLORS.muted,
+                        fontFamily: 'Poppins-Medium',
+                      },
+                    ]}
+                  >
+                    +{winningPoints}{' '}
+                    points ·{' '}
+                    {difficultyLevel.toUpperCase()}
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <Text
+                    style={
+                      styles.modalEmoji
+                    }
+                  >
+                    😔
+                  </Text>
+
+                  <Text
+                    style={[
+                      styles.modalTitle,
+                      {
+                        color: COLORS.text,
+                        fontFamily: 'Poppins-ExtraBold',
+                      },
+                    ]}
+                  >
+                    {isVsComputer
+                      ? 'Computer Wins!'
+                      : 'You Lost'}
+                  </Text>
+
+                  <Text
+                    style={[
+                      styles.modalSub,
+                      {
+                        color: COLORS.muted,
+                        fontFamily: 'Poppins-Medium',
+                      },
+                    ]}
+                  >
+                    Better luck next
+                    time
+                  </Text>
+                </>
               )}
+
+              <View
+                style={
+                  styles.modalBtns
+                }
+              >
+                <div style={{ position: 'relative', width: '100%' }}>
+                  <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+                  <Pressable
+                    onPress={
+                      handlePlayAgain
+                    }
+                    style={({ pressed }) => [
+                      styles.btnPrimary,
+                      {
+                        backgroundColor: '#000000',
+                        borderColor: '#000000',
+                        borderWidth: 2.5,
+                        borderRadius: 12,
+                      },
+                      pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.btnPrimaryText,
+                        {
+                          color: '#FFFFFF',
+                          fontFamily: 'Poppins-ExtraBold',
+                        },
+                      ]}
+                    >
+                      {isVsComputer
+                        ? 'Play Again'
+                        : 'Back to Games'}
+                    </Text>
+                  </Pressable>
+                </div>
+
+                {isVsComputer && (
+                  <div style={{ position: 'relative', width: '100%' }}>
+                    <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+                    <Pressable
+                      onPress={
+                        handleExitCompleted
+                      }
+                      style={({ pressed }) => [
+                        styles.btnSecondary,
+                        {
+                          backgroundColor: COLORS.card,
+                          borderColor: '#000000',
+                          borderWidth: 2.5,
+                          borderRadius: 12,
+                        },
+                        pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.btnSecondaryText,
+                          {
+                            color: COLORS.text,
+                            fontFamily: 'Poppins-ExtraBold',
+                          },
+                        ]}
+                      >
+                        Exit Game
+                      </Text>
+                    </Pressable>
+                  </div>
+                )}
+              </View>
             </View>
-          </View>
+          </div>
         </View>
       </Modal>
 
@@ -1850,113 +1853,127 @@ export default function TicTacToe() {
             styles.overlay
           }
         >
-          <View
-            style={[
-              styles.exitModal,
-              {
-                backgroundColor:
-                  colors.card,
-
-                borderColor:
-                  colors.border,
-              },
-            ]}
-          >
-            <Text
-              style={[
-                styles.exitTitle,
-                {
-                  color:
-                    colors.text,
-                },
-              ]}
-            >
-              Exit Game?
-            </Text>
-
-            <Text
-              style={[
-                styles.exitSub,
-                {
-                  color:
-                    colors.muted,
-                },
-              ]}
-            >
-              Are you sure you want to
-              exit this game?
-            </Text>
-
-            <Text
-              style={[
-                styles.exitWarning,
-                {
-                  color:
-                    colors.muted,
-                },
-              ]}
-            >
-              Your current game will be
-              cancelled and no points will
-              be awarded.
-            </Text>
-
+          <div style={{ position: 'relative', width: '100%', maxWidth: 360 }}>
+            <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 20 }} />
             <View
-              style={
-                styles.exitButtons
-              }
+              style={[
+                styles.exitModal,
+                {
+                  backgroundColor: COLORS.card,
+                  borderColor: '#000000',
+                  borderWidth: 3,
+                  borderRadius: 20,
+                },
+              ]}
             >
-              <Pressable
-                onPress={
-                  handleCancelExit
-                }
+              <Text
                 style={[
-                  styles.btnPrimary,
+                  styles.exitTitle,
                   {
-                    backgroundColor:
-                      colors.accent,
+                    color: COLORS.text,
+                    fontFamily: 'Poppins-ExtraBold',
                   },
                 ]}
               >
-                <Text
-                  style={[
-                    styles.btnPrimaryText,
-                    {
-                      color:
-                        colors.onAccent,
-                    },
-                  ]}
-                >
-                  Keep Playing
-                </Text>
-              </Pressable>
+                Exit Game?
+              </Text>
 
-              <Pressable
-                onPress={
-                  handleConfirmExit
-                }
+              <Text
                 style={[
-                  styles.btnSecondary,
+                  styles.exitSub,
                   {
-                    backgroundColor:
-                      colors.border,
+                    color: COLORS.muted,
+                    fontFamily: 'Poppins-Medium',
                   },
                 ]}
               >
-                <Text
-                  style={[
-                    styles.btnSecondaryText,
-                    {
-                      color:
-                        colors.text,
-                    },
-                  ]}
-                >
-                  Exit Game
-                </Text>
-              </Pressable>
+                Are you sure you want to
+                exit this game?
+              </Text>
+
+              <Text
+                style={[
+                  styles.exitWarning,
+                  {
+                    color: COLORS.muted,
+                    fontFamily: 'Poppins-Regular',
+                  },
+                ]}
+              >
+                Your current game will be
+                cancelled and no points will
+                be awarded.
+              </Text>
+
+              <View
+                style={
+                  styles.exitButtons
+                }
+              >
+                <div style={{ position: 'relative', width: '100%' }}>
+                  <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+                  <Pressable
+                    onPress={
+                      handleCancelExit
+                    }
+                    style={({ pressed }) => [
+                      styles.btnPrimary,
+                      {
+                        backgroundColor: COLORS.card,
+                        borderColor: '#000000',
+                        borderWidth: 2.5,
+                        borderRadius: 12,
+                      },
+                      pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.btnPrimaryText,
+                        {
+                          color: COLORS.text,
+                          fontFamily: 'Poppins-ExtraBold',
+                        },
+                      ]}
+                    >
+                      Keep Playing
+                    </Text>
+                  </Pressable>
+                </div>
+
+                <div style={{ position: 'relative', width: '100%' }}>
+                  <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+                  <Pressable
+                    onPress={
+                      handleConfirmExit
+                    }
+                    style={({ pressed }) => [
+                      styles.btnSecondary,
+                      {
+                        backgroundColor: '#000000',
+                        borderColor: '#000000',
+                        borderWidth: 2.5,
+                        borderRadius: 12,
+                      },
+                      pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.btnSecondaryText,
+                        {
+                          color: '#FFFFFF',
+                          fontFamily: 'Poppins-ExtraBold',
+                        },
+                      ]}
+                    >
+                      Exit Game
+                    </Text>
+                  </Pressable>
+                </div>
+              </View>
             </View>
-          </View>
+          </div>
         </View>
       </Modal>
     </SafeAreaView>
@@ -1965,287 +1982,183 @@ export default function TicTacToe() {
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
-const styles =
-  StyleSheet.create({
+function makeStyles(C: typeof DARK_PALETTE) {
+  return StyleSheet.create({
     safe: {
       flex: 1,
     },
 
     header: {
-       position: 'relative',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 25,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ECE9E4',
-    zIndex: 100,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 20,
+      borderBottomWidth: 0,
+      zIndex: 100,
     },
 
     headerBack: {
-      width: 38,
-
-      height: 38,
-
-      borderRadius: 19,
-
-      alignItems:
-        'center',
-
-      justifyContent:
-        'center',
+      width: 40,
+      height: 40,
+      borderRadius: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
 
     headerTitle: {
-      fontFamily:
-        'Poppins-ExtraBold',
-
-      fontSize: 16,
-
       letterSpacing: 1,
     },
 
+    headerRight: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+
     levelBadge: {
-      borderRadius: 20,
-
       paddingHorizontal: 10,
-
-      paddingVertical: 4,
+      paddingVertical: 5,
     },
 
     levelLabel: {
-      fontFamily:
-        'Poppins-Bold',
-
       fontSize: 11,
-
-      letterSpacing: 0.5,
     },
 
     statusBar: {
-      alignItems:
-        'center',
-
+      alignItems: 'center',
       paddingVertical: 10,
-
-      borderBottomWidth: 1,
+      borderBottomWidth: 0,
     },
 
     statusText: {
-      fontFamily:
-        'Poppins-Medium',
-
       fontSize: 14,
     },
 
     boardContainer: {
       flex: 1,
-
-      alignItems:
-        'center',
-
-      justifyContent:
-        'center',
-
+      alignItems: 'center',
+      justifyContent: 'center',
       paddingHorizontal: 16,
-
       paddingVertical: 8,
     },
 
+    gridContainer: {
+      overflow: 'hidden',
+    },
+
     board: {
-      flexDirection:
-        'column',
+      flexDirection: 'column',
     },
 
     boardRow: {
-      flexDirection:
-        'row',
-
+      flexDirection: 'row',
       flex: 1,
-
       width: '100%',
     },
 
     cell: {
       flex: 1,
-
-      borderWidth: 1,
-
+      borderWidth: 1.5,
       borderRadius: 6,
-
-      alignItems:
-        'center',
-
-      justifyContent:
-        'center',
-
-      margin: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      margin: 1.5,
     },
 
     cellText: {
-      fontFamily:
-        'Poppins-Bold',
+      // font specified inline
     },
 
     overlay: {
       flex: 1,
-
-      backgroundColor:
-        'rgba(0,0,0,0.75)',
-
-      alignItems:
-        'center',
-
-      justifyContent:
-        'center',
-
+      backgroundColor: 'rgba(0,0,0,0.75)',
+      alignItems: 'center',
+      justifyContent: 'center',
       padding: 24,
     },
 
     modal: {
       width: '100%',
-
-      borderRadius: 20,
-
-      padding: 28,
-
-      alignItems:
-        'center',
-
-      borderWidth: 1,
+      padding: 24,
+      alignItems: 'center',
     },
 
     modalEmoji: {
-      fontSize: 48,
-
+      fontSize: 44,
       marginBottom: 8,
     },
 
     modalTitle: {
-      fontFamily:
-        'Poppins-ExtraBold',
-
-      fontSize: 26,
-
+      fontSize: 22,
       marginBottom: 6,
-
-      textAlign:
-        'center',
+      textAlign: 'center',
     },
 
     modalSub: {
-      fontFamily:
-        'Poppins-Medium',
-
-      fontSize: 15,
-
+      fontSize: 14,
       marginBottom: 4,
-
-      textAlign:
-        'center',
+      textAlign: 'center',
     },
 
     modalBtns: {
       width: '100%',
-
       gap: 12,
-
       marginTop: 16,
     },
 
     btnPrimary: {
-      borderRadius: 12,
-
+      width: '100%',
       paddingVertical: 14,
-
-      alignItems:
-        'center',
+      alignItems: 'center',
     },
 
     btnPrimaryText: {
-      fontFamily:
-        'Poppins-Bold',
-
-      fontSize: 16,
+      fontSize: 15,
+      letterSpacing: 1,
     },
 
     btnSecondary: {
-      borderRadius: 12,
-
+      width: '100%',
       paddingVertical: 14,
-
-      alignItems:
-        'center',
+      alignItems: 'center',
     },
 
     btnSecondaryText: {
-      fontFamily:
-        'Poppins-SemiBold',
-
-      fontSize: 16,
+      fontSize: 15,
+      letterSpacing: 1,
+      textAlign: 'center',
     },
 
-    // Exit confirmation popup.
     exitModal: {
       width: '100%',
-
       maxWidth: 420,
-
-      borderRadius: 20,
-
-      padding: 28,
-
-      alignItems:
-        'center',
-
-      borderWidth: 1,
+      padding: 24,
+      alignItems: 'center',
     },
 
     exitTitle: {
-      fontFamily:
-        'Poppins-ExtraBold',
-
-      fontSize: 25,
-
-      textAlign:
-        'center',
-
+      fontSize: 22,
+      textAlign: 'center',
       marginBottom: 8,
     },
 
     exitSub: {
-      fontFamily:
-        'Poppins-Medium',
-
-      fontSize: 15,
-
-      textAlign:
-        'center',
-
-      lineHeight: 22,
+      fontSize: 14,
+      textAlign: 'center',
+      lineHeight: 20,
     },
 
     exitWarning: {
-      fontFamily:
-        'Poppins-Regular',
-
       fontSize: 13,
-
-      textAlign:
-        'center',
-
-      lineHeight: 20,
-
+      textAlign: 'center',
+      lineHeight: 18,
       marginTop: 8,
     },
 
     exitButtons: {
       width: '100%',
-
       gap: 12,
-
-      marginTop: 22,
+      marginTop: 16,
     },
   });
+}

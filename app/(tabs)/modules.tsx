@@ -1,2577 +1,1060 @@
-import { useCallback, useEffect, useState } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  BellRing,
   Bookmark,
-  CalendarDays,
   CheckCircle2,
   Gamepad2,
   HeartPulse,
   ListChecks,
-  BellRing,
   Sprout,
   WalletCards,
+  ArrowUpRight,
 } from 'lucide-react-native';
-
 import {
-  ActivityIndicator,
   Pressable,
-
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-
-import { router } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { router, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-
 import { useApp } from '@/components/AppProvider';
-import SidekickAvatar from '@/components/SidekickAvatar';
 import { supabase } from '@/lib/supabase';
-
-/* =========================================================
-   TYPES
-========================================================= */
-
-type DashboardItem = {
-  key: string;
-  label: string;
-  icon: typeof WalletCards;
-  value: string;
-  description: string;
-  route: string;
-};
-
-type DashboardState = {
-  planner: number;
-  habits: number;
-  finance: number;
-  lists: number;
-  reminders: number;
-  bookmarks: number;
-  plantsNeedingAttention: number;
-  plantsTotal: number;
-  wellbeingCompleted: number;
-  wellbeingTotal: number;
-  games: number;
-};
-
-type SidekickUpdate = {
-  id: string;
-  content: string;
-  source_module: string | null;
-  priority: number;
-  created_at: string;
-  shown_at: string | null;
-};
-
-/* =========================================================
-   FONTS
-========================================================= */
-
+import SidekickAvatar from '@/components/SidekickAvatar';
+import { formatMoney } from '@/components/currencies';
+/* =========================================================*
+*   FONTS*
+*========================================================= */
 const FONT = 'Poppins-Regular';
 const FONT_MED = 'Poppins-Medium';
-const FONT_SEMI = 'Poppins-SemiBold';
 const FONT_BOLD = 'Poppins-Bold';
-
-/* =========================================================
-   SUPPORTED WELL-BEING MODULES
-========================================================= */
-
-const SUPPORTED_WELLBEING_MODULES = new Set([
-  'journaling',
-  'blank_pages',
-  'shadow_work',
-  'affirmations',
-  'mood_tracker',
-  'delights',
-  'breathwork',
-]);
-
-function normalizeWellbeingModuleKey(
-  key: string | null | undefined,
-): string | null {
-  if (!key) {
-    return null;
+/* =========================================================*
+*   AFFIRMATIONS DATA & STORAGE KEY*
+*========================================================= */
+const AFFIRMATIONS_STORAGE_KEY = '@mysidekick_affirmation_state';
+const AFFIRMATIONS_BANK: string[] = [
+  'I am worthy of the love and respect I give to others. My presence is a gift to the people around me.',
+  'I am capable of handling whatever this day brings. Challenges help me grow stronger and wiser.',
+  'I release the need to control what I cannot change. Peace is available to me in this moment.',
+  'My body is doing its best, and I treat it with kindness. I nourish myself with care.',
+  'I am exactly where I need to be right now. I trust the process of my life.',
+  'I give myself permission to rest without guilt. Rest is productive and necessary for my wellbeing.',
+  'I choose progress over perfection. Small steps forward are still forward motion.',
+  'I am deserving of joy simply because I exist. I allow myself to feel good today.',
+  'I am resilient in the face of uncertainty. I will get through this too.',
+  'I am enough, just as I am, in this moment. I do not need to prove my worth to anyone.',
+];
+/* =========================================================*
+*   GREETINGS ROTATION (Changes every 2 hours)*
+*========================================================= */
+const GREETINGS = [
+  'Ciao',
+  'Bonjour',
+  'Habari',
+  'Hola',
+  'Hello',
+  'Konnichiwa',
+  'Namaste',
+  'Guten Tag',
+  'Ola',
+  'Nǐ Hǎo',
+  'Aloha',
+  'Salute',
+];
+function getRotatingGreeting(timeZone: string = 'Africa/Nairobi'): string {
+  let currentHour = new Date().getHours();
+  try {
+    const hourPart = new Intl.DateTimeFormat('en-GB', {
+      hour: '2-digit',
+      hourCycle: 'h23',
+      timeZone,
+    }).format(new Date());
+    currentHour = Number(hourPart);
+  } catch (error) {
+    console.warn('Invalid timezone for greeting:', timeZone);
   }
-
-  if (key === 'morning_pages') {
-    return 'blank_pages';
-  }
-
-  return key;
+  const slot = Math.floor(currentHour / 2) % GREETINGS.length;
+  return GREETINGS[slot];
 }
-
-/* =========================================================
-   DATE HELPERS
-========================================================= */
-
-function getTodayKey(): string {
+function formatHeaderDateTime(timeZone: string = 'Africa/Nairobi'): string {
   const now = new Date();
-
-  return `${now.getFullYear()}-${String(
-    now.getMonth() + 1,
-  ).padStart(2, '0')}-${String(
-    now.getDate(),
-  ).padStart(2, '0')}`;
-}
-
-function formatSidekickTime(value: string | null | undefined): string {
-  if (!value) return '';
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return '';
+  try {
+    return new Intl.DateTimeFormat('en-GB', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+      timeZone,
+    }).format(now);
+  } catch (error) {
+    console.warn('Invalid timezone for header clock:', timeZone);
+    return new Intl.DateTimeFormat('en-GB', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    }).format(now);
   }
-
-  return date.toLocaleTimeString([], {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
+}
+/* =========================================================*
+*   TYPES*
+*========================================================= */
+export type ListItemPreview = {
+  text: string;
+  isOverdue?: boolean;
+};
+export type FolderModuleData = {
+  key: string;
+  title: string;
+  icon: typeof WalletCards;
+  value: string;
+  valueColor?: string;
+  subtitle: string;
+  items?: ListItemPreview[];
+  footerNote?: string;
+  route: string;
+};
+/* =========================================================*
+*   DATE HELPERS*
+*========================================================= */
+function getTodayKey(timeZone: string = 'Africa/Nairobi'): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const values: Record<string, string> = {};
+  parts.forEach((part) => {
+    values[part.type] = part.value;
   });
+  return `${values.year}-${values.month}-${values.day}`;
 }
-
+function getHabitFrequencyKey(frequency?: string | null): string {
+  const value = (frequency || 'daily').toLowerCase().trim();
+  if (['yearly', 'annual', 'annually', 'year'].includes(value)) return 'annually';
+  if (['monthly', 'month'].includes(value)) return 'monthly';
+  if (['weekly', 'week'].includes(value)) return 'weekly';
+  return 'daily';
+}
+function getHabitPeriodStart(today: string, frequency?: string | null): string {
+  const normalized = getHabitFrequencyKey(frequency);
+  if (normalized === 'annually') return `${today.slice(0, 4)}-01-01`;
+  if (normalized === 'monthly') return `${today.slice(0, 7)}-01`;
+  if (normalized === 'weekly') {
+    const date = parseDate(today);
+    const day = date.getDay();
+    date.setDate(date.getDate() - ((day + 6) % 7));
+    return formatDate(date);
+  }
+  return today;
+}
 function parseDate(value: string): Date {
-  const [year, month, day] = value
-    .split('-')
-    .map(Number);
-
-  return new Date(
-    year,
-    month - 1,
-    day,
-  );
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, month - 1, day);
 }
-
 function formatDate(date: Date): string {
-  return `${date.getFullYear()}-${String(
-    date.getMonth() + 1,
-  ).padStart(2, '0')}-${String(
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
     date.getDate(),
   ).padStart(2, '0')}`;
 }
-
-function addDays(
-  dateString: string,
-  days: number,
-): string {
+function addDays(dateString: string, days: number): string {
   const date = parseDate(dateString);
-
-  date.setDate(
-    date.getDate() + days,
-  );
-
+  date.setDate(date.getDate() + days);
   return formatDate(date);
 }
-
-function daysBetween(
-  start: string,
-  end: string,
-): number {
-  return Math.round(
-    (parseDate(end).getTime() -
-      parseDate(start).getTime()) /
-      86400000,
-  );
-}
-
-/* =========================================================
-   DASHBOARD DEFAULTS
-========================================================= */
-
-function emptyDashboard(): DashboardState {
-  return {
-    planner: 0,
-    habits: 0,
-    finance: 0,
-    lists: 0,
-    reminders: 0,
-    bookmarks: 0,
-    plantsNeedingAttention: 0,
-    plantsTotal: 0,
-    wellbeingCompleted: 0,
-    wellbeingTotal: 0,
-    games: 0,
-  };
-}
-
-/* =========================================================
-   PLANNER RECURRENCE HELPERS
-========================================================= */
-
-function occurrenceStartsOnDate(
-  task: {
-    start_date: string;
-    repeat: string | null;
-    repeat_interval: number | null;
-  },
-  date: string,
-): boolean {
-  if (date < task.start_date) {
-    return false;
-  }
-
-  const repeat = task.repeat ?? 'none';
-
-  if (repeat === 'none') {
-    return date === task.start_date;
-  }
-
-  const diff = daysBetween(
-    task.start_date,
-    date,
-  );
-
-  const interval = Math.max(
-    1,
-    task.repeat_interval ?? 1,
-  );
-
-  switch (repeat) {
-    case 'daily':
-    case 'custom':
-      return diff % interval === 0;
-
-    case 'weekly':
-      return diff % (7 * interval) === 0;
-
-    case 'monthly': {
-      const start = parseDate(
-        task.start_date,
-      );
-
-      const current = parseDate(date);
-
-      const monthDiff =
-        (current.getFullYear() -
-          start.getFullYear()) *
-          12 +
-        (current.getMonth() -
-          start.getMonth());
-
-      return (
-        monthDiff >= 0 &&
-        monthDiff % interval === 0 &&
-        current.getDate() ===
-          start.getDate()
-      );
-    }
-
-    case 'yearly': {
-      const start = parseDate(
-        task.start_date,
-      );
-
-      const current = parseDate(date);
-
-      const yearDiff =
-        current.getFullYear() -
-        start.getFullYear();
-
-      return (
-        yearDiff >= 0 &&
-        yearDiff % interval === 0 &&
-        current.getMonth() ===
-          start.getMonth() &&
-        current.getDate() ===
-          start.getDate()
-      );
-    }
-
-    default:
-      return false;
-  }
-}
-
-function isOvernightTask(
-  startTime: string | null,
-  endTime: string | null,
-): boolean {
-  if (!startTime || !endTime) {
-    return false;
-  }
-
-  const [
-    startHour,
-    startMinute,
-  ] = startTime
-    .split(':')
-    .map(Number);
-
-  const [
-    endHour,
-    endMinute,
-  ] = endTime
-    .split(':')
-    .map(Number);
-
-  const startMinutes =
-    startHour * 60 +
-    startMinute;
-
-  const endMinutes =
-    endHour * 60 +
-    endMinute;
-
-  return endMinutes <= startMinutes;
-}
-
-function taskOccursToday(
-  task: {
-    start_date: string;
-    end_date: string;
-    start_time: string | null;
-    end_time: string | null;
-    repeat: string | null;
-    repeat_interval: number | null;
-  },
-  today: string,
-): boolean {
-  const repeat = task.repeat ?? 'none';
-
-  /* Non-recurring task */
-  if (repeat === 'none') {
-    if (
-      today >= task.start_date &&
-      today <= task.end_date
-    ) {
-      return true;
-    }
-
-    /* Overnight task beginning yesterday */
-    if (
-      isOvernightTask(
-        task.start_time,
-        task.end_time,
-      ) &&
-      today ===
-        addDays(
-          task.start_date,
-          1,
-        )
-    ) {
-      return true;
-    }
-
-    return false;
-  }
-
-  /* Recurring task beginning today */
-  if (
-    occurrenceStartsOnDate(
-      task,
-      today,
-    )
-  ) {
-    return true;
-  }
-
-  /* Recurring overnight task beginning yesterday */
-  if (
-    isOvernightTask(
-      task.start_time,
-      task.end_time,
-    ) &&
-    occurrenceStartsOnDate(
-      task,
-      addDays(today, -1),
-    )
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
-/* =========================================================
-   SCREEN
-========================================================= */
-
-/* =========================================================
-   ONBOARDING BODY FORMATTER
-   Turns **text** into bold text while preserving line breaks.
-   ========================================================= */
-
-function renderOnboardingBody(
-  text: string,
-  bodyStyle: any,
-  boldStyle: any,
-) {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
-
-  return parts.map((part, index) => {
-    const isBold =
-      part.startsWith('**') &&
-      part.endsWith('**');
-
-    return (
-      <Text
-        key={index}
-        style={isBold ? boldStyle : bodyStyle}
-      >
-        {isBold ? part.slice(2, -2) : part}
-      </Text>
-    );
-  });
-}
-
-export default function ModulesScreen() {
-  const appContext = useApp() as any;
-
-  const {
-    accentForeground,
-    isDark,
-    sidekick_id,
-  } = appContext;
-
-  const displayName =
-    appContext.display_name ||
-    appContext.profileName ||
-    'User';
-
-  const [dashboard, setDashboard] =
-    useState<DashboardState>(
-      emptyDashboard(),
-    );
-
-  const [todayKey, setTodayKey] =
-    useState(getTodayKey());
-
-  const [loading, setLoading] =
-    useState(true);
-
-  const [hasError, setHasError] =
-    useState(false);
-
-  const [onboardingCompleted, setOnboardingCompleted] =
-    useState<boolean | null>(null);
-
-  const [onboardingStep, setOnboardingStep] =
-    useState(0);
-
-  const [sidekickUpdates, setSidekickUpdates] =
-    useState<SidekickUpdate[]>([]);
-
-  const [sidekickUpdateIndex, setSidekickUpdateIndex] =
-    useState(0);
-
-  const [sidekickBriefingLoading, setSidekickBriefingLoading] =
-    useState(false);
-
-  // This is true only when the briefing function explicitly says
-  // there is nothing actionable to surface right now.
-  const [sidekickNoActionableUpdate, setSidekickNoActionableUpdate] =
-    useState(false);
-
-  /* =======================================================
-     ONBOARDING
-  ======================================================= */
-
-  const onboardingSteps = [
-    {
-      title: `Welcome to Sidekick. Let's do a tour!`,
-      body:
-        'Sideick is your personal life assistant, helping you keep track of the things that matter! It brings the important parts of your life together so you can see what needs your attention.  Let me show you what Sidekick can do...',
-    },
-    {
-      title: 'To Plan & Stay Consistent',
-      body:
-        '**Planner** will help you organize what needs to get done, keep track of your tasks, and stay on top of what\'s ahead.\n\n**Habits** will help you build consistency by keeping track of the things you want to do regularly.',
-    },
-    {
-      title: 'To Manage Your Money',
-      body:
-        '**Finance** will help you keep track of your money coming in and going out, manage expenses, and stay aware of where your money is going.\n\nYou can also keep track of bills and splits so you know what you owe and what others owe you.',
-    },
-    {
-      title: 'To Keep Life Organized',
-      body:
-        '**Lists** will give you a place for the things you don\'t want to forget, e.g shopping lists, packing lists, ideas, etc...\n\n**Reminders** will help you remember the things that need your attention at the right time.\n\n**Bookmarks** keeps useful resources in one place so you can find them when you need them.',
-    },
-    {
-      title: 'To Take Care of Your Space',
-      body:
-        '**Plants** will help you keep track of your plants and when they need attention, so they can stay healthy and thriving.',
-    },
-    {
-      title: 'To Take Care of Yourself',
-      body:
-        '**Well-being** will give you space to look after your mind and yourself through journaling, mood tracking, affirmations, breathwork, reflections, and more.',
-    },
-    {
-      title: 'To Make Time for Play',
-      body:
-        '**Games** will give you a little space to have fun, challenge yourself and friends, and take a break from everything else.',
-    },
-    {
-      title: "You're Ready",
-      body:
-        'Everything is in one place! Your Sidekick will help you pay attention to what matters. \n\nClick let\'s go to get started.',
-    },
-  ];
-  /* =======================================================
-     COLORS
-  ======================================================= */
-
-  const C = isDark
-    ? {
-        bg: '#000000',
-        card: '#151515',
-        border: '#2A2A2A',
-        text: '#F4F2EE',
-        muted: '#AAA59D',
-        soft: '#242424',
-      }
-    : {
-        bg: '#FBFAF8',
-        card: '#FFFFFF',
-        border: '#ECE9E4',
-        text: '#27241F',
-        muted: '#8F8A82',
-        soft: '#F3F2EF',
-      };
-
-  /* =======================================================
-     ONBOARDING STATUS
-  ======================================================= */
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadOnboardingStatus = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user || cancelled) {
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('onboarding_completed')
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-      if (error) {
-        console.log(
-          'ONBOARDING STATUS ERROR:',
-          error,
-        );
-        // Existing users are allowed straight into the app if the
-        // status cannot be read, so onboarding never blocks the app.
-        if (!cancelled) {
-          setOnboardingCompleted(true);
-        }
-        return;
-      }
-
-      if (!cancelled) {
-        const completed =
-          data?.onboarding_completed === true;
-
-        setOnboardingCompleted(completed);
-      }
-    };
-
-    loadOnboardingStatus();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const completeOnboarding = async () => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (user) {
-      const { error } = await supabase
-        .from('profiles')
-        .update({
-          onboarding_completed: true,
-        })
-        .eq('user_id', user.id);
-
-      if (error) {
-        console.log(
-          'ONBOARDING COMPLETE ERROR:',
-          error,
-        );
-        return;
-      }
-    }
-
-    setOnboardingCompleted(true);
-    setOnboardingStep(0);
-  };
-
-  const goToNextOnboardingStep = () => {
-    if (
-      onboardingStep >=
-      onboardingSteps.length - 1
-    ) {
-      completeOnboarding();
-      return;
-    }
-
-    setOnboardingStep((current) => current + 1);
-  };
-
-  const goToPreviousOnboardingStep = () => {
-    setOnboardingStep((current) =>
-      Math.max(0, current - 1),
-    );
-  };
-
-  /* =======================================================
-     SIDEKICK IMPORTANT UPDATES
-  ======================================================= */
-
-  const loadSidekickUpdates = useCallback(
-    async (forceRefresh = false) => {
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
-
-      if (userError || !user) {
-        return;
-      }
-
-      const cacheKey = `sidekick-briefing-cache:${user.id}:${todayKey}`;
-      const cacheTtl = 60 * 60 * 1000;
-
-      if (!forceRefresh) {
-        try {
-          const cachedRaw = await AsyncStorage.getItem(cacheKey);
-
-          if (cachedRaw) {
-            const cached = JSON.parse(cachedRaw);
-            const cachedAt = Number(cached?.cachedAt);
-            const cachedUpdates = Array.isArray(cached?.updates)
-              ? cached.updates as SidekickUpdate[]
-              : [];
-
-            if (
-              Number.isFinite(cachedAt) &&
-              Date.now() - cachedAt < cacheTtl
-            ) {
-              setSidekickUpdates(cachedUpdates);
-              setSidekickUpdateIndex((current) =>
-                Math.min(
-                  current,
-                  Math.max(0, cachedUpdates.length - 1),
-                ),
-              );
-              return;
-            }
-          }
-        } catch (cacheError) {
-          console.log('SIDEKICK CACHE READ ERROR:', cacheError);
-        }
-      }
-
-      const { data, error } = await supabase
-        .from('sidekick_updates')
-        .select(
-          'id, content, source_module, priority, created_at, shown_at',
-        )
-        .eq('user_id', user.id)
-        .eq('day_key', todayKey)
-        .order('priority', {
-          ascending: false,
-        })
-        .order('created_at', {
-          ascending: false,
-        })
-        .limit(20);
-
-      if (error) {
-        console.log(
-          'SIDEKICK UPDATES LOAD ERROR:',
-          error,
-        );
-        return;
-      }
-
-      // NO_UPDATE is an internal backend value and must never be
-      // displayed, even if an old malformed row exists in the database.
-      const updates = (data ?? [])
-        .filter((item: any) => {
-          const content =
-            typeof item?.content === 'string'
-              ? item.content.trim()
-              : '';
-
-          return (
-            content.length > 0 &&
-            !/\bNO_UPDATE\b/i.test(content)
-          );
-        }) as SidekickUpdate[];
-
-      setSidekickUpdates(updates);
-      setSidekickUpdateIndex((current) =>
-        Math.min(
-          current,
-          Math.max(0, updates.length - 1),
-        ),
-      );
-
-      try {
-        await AsyncStorage.setItem(
-          cacheKey,
-          JSON.stringify({
-            cachedAt: Date.now(),
-            dayKey: todayKey,
-            updates,
-          }),
-        );
-      } catch (cacheError) {
-        console.log('SIDEKICK CACHE WRITE ERROR:', cacheError);
-      }
-    },
-    [todayKey],
-  );
-
-  const buildSidekickAppData = useCallback(
-    async (userId: string) => {
-      const [
-        plannerResult,
-        habitsResult,
-        completionsResult,
-        remindersResult,
-        listsResult,
-        financeResult,
-        bookmarksResult,
-        plantsResult,
-        wellbeingResult,
-        gamesResult,
-      ] = await Promise.all([
-        supabase
-          .from('planner_tasks')
-          .select(
-            'id, title, start_date, end_date, start_time, end_time, completed, repeat, repeat_interval',
-          )
-          .eq('user_id', userId),
-
-        supabase
-          .from('habits')
-          .select(
-            'id, name, start_date, end_date',
-          )
-          .eq('user_id', userId),
-
-        supabase
-          .from('habit_completions')
-          .select('habit_id, completed_on')
-          .eq('user_id', userId)
-          .eq('completed_on', todayKey),
-
-        supabase
-          .from('reminders')
-          .select(
-            'id, title, due_date, due_time, completed',
-          )
-          .eq('user_id', userId)
-          .eq('completed', false),
-
-        supabase
-          .from('list_items')
-          .select(
-            'id, list_id, content, completed',
-          )
-          .eq('user_id', userId)
-          .eq('completed', false),
-
-        supabase
-          .from('finance_transactions')
-          .select(
-            'id, transaction_date, amount, type, title, category',
-          )
-          .eq('user_id', userId),
-
-        supabase
-          .from('bookmarks')
-          .select(
-            'id, title, url, created_at',
-          )
-          .eq('user_id', userId),
-
-        supabase
-          .from('plants')
-          .select(
-            'id, name, last_watered_on, watering_interval_days',
-          )
-          .eq('user_id', userId),
-
-        supabase
-          .from('wellbeing_entries')
-          .select(
-            'id, module_key, entry_date',
-          )
-          .eq('user_id', userId)
-          .order('entry_date', {
-            ascending: false,
-          })
-          .limit(30),
-
-        supabase
-          .from('game_scores')
-          .select(
-            'id, game_type, score, created_at',
-          )
-          .eq('player_id', userId)
-          .order('created_at', {
-            ascending: false,
-          })
-          .limit(30),
-      ]);
-
-      return {
-        planner: plannerResult.data ?? [],
-        habits: habitsResult.data ?? [],
-        habit_completions_today:
-          completionsResult.data ?? [],
-        reminders: remindersResult.data ?? [],
-        lists: listsResult.data ?? [],
-        finance: financeResult.data ?? [],
-        bookmarks: bookmarksResult.data ?? [],
-        plants: plantsResult.data ?? [],
-        wellbeing: wellbeingResult.data ?? [],
-        games: gamesResult.data ?? [],
-      };
-    },
-    [todayKey],
-  );
-
-  const requestSidekickBriefing = useCallback(
-    async () => {
-      if (
-        onboardingCompleted !== true ||
-        sidekickBriefingLoading
-      ) {
-        return;
-      }
-
-      setSidekickBriefingLoading(true);
-
-      try {
-        const {
-          data: { user },
-          error: userError,
-        } = await supabase.auth.getUser();
-
-        if (userError || !user) {
-          return;
-        }
-
-        const cacheKey = `sidekick-briefing-cache:${user.id}:${todayKey}`;
-        const cacheTtl = 60 * 60 * 1000;
-
-        try {
-          const cachedRaw = await AsyncStorage.getItem(cacheKey);
-          if (cachedRaw) {
-            const cached = JSON.parse(cachedRaw);
-            const cachedAt = Number(cached?.cachedAt);
-
-            if (
-              Number.isFinite(cachedAt) &&
-              Date.now() - cachedAt < cacheTtl
-            ) {
-              return;
-            }
-          }
-        } catch (cacheError) {
-          console.log('SIDEKICK CACHE CHECK ERROR:', cacheError);
-        }
-
-        const appData =
-          await buildSidekickAppData(user.id);
-
-        const { data, error } =
-          await supabase.functions.invoke(
-            'sidekick-briefing',
-            {
-              body: {
-                appData,
-                dayKey: todayKey,
-              },
-            },
-          );
-
-        if (error) {
-          console.log(
-            'SIDEKICK BRIEFING ERROR:',
-            error,
-          );
-          return;
-        }
-
-        // Cache the successful check even when there is no new update.
-        // This prevents repeated Edge Function and Claude calls when the
-        // user's data has not produced anything new.
-        if (!data?.update) {
-          try {
-            const existingCache = await AsyncStorage.getItem(cacheKey);
-            const cached = existingCache
-              ? JSON.parse(existingCache)
-              : { updates: [] };
-
-            await AsyncStorage.setItem(
-              cacheKey,
-              JSON.stringify({
-                cachedAt: Date.now(),
-                dayKey: todayKey,
-                updates: Array.isArray(cached?.updates)
-                  ? cached.updates
-                  : [],
-              }),
-            );
-          } catch (cacheError) {
-            console.log('SIDEKICK CACHE WRITE ERROR:', cacheError);
-          }
-        }
-
-        if (data?.update) {
-          // A genuinely new update was created. Refresh the history so
-          // the newest update appears immediately.
-          setSidekickNoActionableUpdate(false);
-          await loadSidekickUpdates(true);
-        } else if (data?.reason === 'no_update') {
-          // "no_update" means there is nothing NEW to add.
-          // Keep the most recent real update already on the card.
-          // Do not replace it with an empty-state message.
-        }
-      } catch (error) {
-        console.log(
-          'SIDEKICK BRIEFING EXCEPTION:',
-          error,
-        );
-      } finally {
-        setSidekickBriefingLoading(false);
-      }
-    },
-    [
-      onboardingCompleted,
-      sidekickBriefingLoading,
-      buildSidekickAppData,
-      todayKey,
-      loadSidekickUpdates,
-    ],
-  );
-
-  useEffect(() => {
-    if (onboardingCompleted !== true) {
-      return;
-    }
-
-    loadSidekickUpdates();
-    requestSidekickBriefing();
-
-    // The Edge Function enforces the daily Sidekick update limit.
-    // Check for a new Sidekick update every 20 minutes.
-    const interval = setInterval(
-      requestSidekickBriefing,
-      20 * 60 * 1000,
-    );
-
-    return () => clearInterval(interval);
-  }, [
-    onboardingCompleted,
-    loadSidekickUpdates,
-    requestSidekickBriefing,
-  ]);
-
-  /* =======================================================
-     DATE REFRESH
-  ======================================================= */
-
-  useEffect(() => {
-    const checkDate = () => {
-      const nextKey =
-        getTodayKey();
-
-      if (
-        nextKey !== todayKey
-      ) {
-        setTodayKey(nextKey);
-
-        setDashboard(
-          emptyDashboard(),
-        );
-        setSidekickUpdates([]);
-        setSidekickUpdateIndex(0);
-        setSidekickNoActionableUpdate(false);
-      }
-    };
-
-    const interval =
-      setInterval(
-        checkDate,
-        60 * 1000,
-      );
-
-    return () =>
-      clearInterval(interval);
-  }, [todayKey]);
-
-  /* =======================================================
-     DASHBOARD DATA
-  ======================================================= */
-
-  const loadDashboard =
-    useCallback(
-      async () => {
-        try {
-          setLoading(true);
-          setHasError(false);
-
-          /* ===============================================
-             AUTH
-          =============================================== */
-
-          const {
-            data: { user },
-            error: userError,
-          } =
-            await supabase.auth.getUser();
-
-          if (
-            userError ||
-            !user
-          ) {
-            setDashboard(
-              emptyDashboard(),
-            );
-
-            setLoading(false);
-            setHasError(true);
-
-            return;
-          }
-
-          const next =
-            emptyDashboard();
-
-          /* ===============================================
-             1. PLANNER
-          =============================================== */
-
-          try {
-            const {
-              data: plannerRows,
-              error: plannerError,
-            } =
-              await supabase
-                .from(
-                  'planner_tasks',
-                )
-                .select(
-                  `
-                    id,
-                    start_date,
-                    end_date,
-                    start_time,
-                    end_time,
-                    completed,
-                    repeat,
-                    repeat_interval
-                  `,
-                )
-                .eq(
-                  'user_id',
-                  user.id,
-                );
-
-            if (plannerError) {
-              console.log(
-                'DASHBOARD PLANNER ERROR:',
-                plannerError,
-              );
-            } else {
-              next.planner =
-                (
-                  plannerRows ?? []
-                ).filter(
-                  (task) =>
-                    !task.completed &&
-                    taskOccursToday(
-                      task,
-                      todayKey,
-                    ),
-                ).length;
-            }
-          } catch (error) {
-            console.log(
-              'DASHBOARD PLANNER EXCEPTION:',
-              error,
-            );
-          }
-
-          /* ===============================================
-             2. HABITS
-          =============================================== */
-
-          try {
-            const [
-              {
-                data: habitsRows,
-                error: habitsError,
-              },
-              {
-                data: completionRows,
-                error: completionError,
-              },
-            ] =
-              await Promise.all([
-                supabase
-                  .from('habits')
-                  .select(
-                    'id, start_date, end_date',
-                  )
-                  .eq(
-                    'user_id',
-                    user.id,
-                  ),
-
-                supabase
-                  .from(
-                    'habit_completions',
-                  )
-                  .select(
-                    'habit_id',
-                  )
-                  .eq(
-                    'user_id',
-                    user.id,
-                  )
-                  .eq(
-                    'completed_on',
-                    todayKey,
-                  ),
-              ]);
-
-            if (
-              habitsError ||
-              completionError
-            ) {
-              console.log(
-                'DASHBOARD HABITS ERROR:',
-                habitsError ??
-                  completionError,
-              );
-            } else {
-              const completedHabitIds =
-                new Set(
-                  (
-                    completionRows ??
-                    []
-                  ).map(
-                    (row) =>
-                      row.habit_id,
-                  ),
-                );
-
-              next.habits =
-                (
-                  habitsRows ??
-                  []
-                ).filter(
-                  (habit) => {
-                    const startsTodayOrEarlier =
-                      !habit.start_date ||
-                      habit.start_date <=
-                        todayKey;
-
-                    const hasNotEnded =
-                      !habit.end_date ||
-                      habit.end_date >=
-                        todayKey;
-
-                    const completed =
-                      completedHabitIds.has(
-                        habit.id,
-                      );
-
-                    return (
-                      startsTodayOrEarlier &&
-                      hasNotEnded &&
-                      !completed
-                    );
-                  },
-                ).length;
-            }
-          } catch (error) {
-            console.log(
-              'DASHBOARD HABITS EXCEPTION:',
-              error,
-            );
-          }
-
-          /* ===============================================
-             3. FINANCE
-          =============================================== */
-
-          try {
-            const {
-              data: financeRows,
-              error: financeError,
-            } =
-              await supabase
-                .from(
-                  'finance_transactions',
-                )
-                .select('id')
-                .eq(
-                  'user_id',
-                  user.id,
-                )
-                .eq(
-                  'transaction_date',
-                  todayKey,
-                );
-
-            if (financeError) {
-              console.log(
-                'DASHBOARD FINANCE ERROR:',
-                financeError,
-              );
-            } else {
-              next.finance =
-                (
-                  financeRows ??
-                  []
-                ).length;
-            }
-          } catch (error) {
-            console.log(
-              'DASHBOARD FINANCE EXCEPTION:',
-              error,
-            );
-          }
-
-/* ===============================================
-   4. LISTS
-   Only incomplete items from CHECKLIST lists
-   are counted on the Modules dashboard.
-=============================================== */
-
-try {
-  // First find this user's checklist lists.
-  const {
-    data: checklistLists,
-    error: checklistError,
-  } = await supabase
-    .from('lists')
-    .select('id')
-    .eq('user_id', user.id)
-    .eq('list_type', 'checklist');
-
-  if (checklistError) {
-    console.log(
-      'DASHBOARD CHECKLIST LISTS ERROR:',
-      checklistError,
-    );
-  } else {
-    const checklistListIds = (
-      checklistLists ?? []
-    ).map((list) => list.id);
-
-    // No checklist lists = zero incomplete checklist items.
-    if (checklistListIds.length === 0) {
-      next.lists = 0;
-    } else {
-      const {
-        data: listRows,
-        error: listError,
-      } = await supabase
-        .from('list_items')
-        .select('id')
-        .eq('user_id', user.id)
-        .eq('completed', false)
-        .in('list_id', checklistListIds);
-
-      if (listError) {
-        console.log(
-          'DASHBOARD LIST ITEMS ERROR:',
-          listError,
-        );
-      } else {
-        next.lists = (
-          listRows ?? []
-        ).length;
-      }
-    }
-  }
-} catch (error) {
-  console.log(
-    'DASHBOARD LISTS EXCEPTION:',
-    error,
-  );
-}
-
-          /* ===============================================
-             5. REMINDERS
-          =============================================== */
-
-          try {
-            const {
-              data: reminderRows,
-              error: reminderError,
-            } =
-              await supabase
-                .from(
-                  'reminders',
-                )
-                .select('id')
-                .eq(
-                  'user_id',
-                  user.id,
-                )
-                .eq(
-                  'due_date',
-                  todayKey,
-                )
-                .eq(
-                  'completed',
-                  false,
-                );
-
-            if (reminderError) {
-              console.log(
-                'DASHBOARD REMINDERS ERROR:',
-                reminderError,
-              );
-            } else {
-              next.reminders =
-                (
-                  reminderRows ??
-                  []
-                ).length;
-            }
-          } catch (error) {
-            console.log(
-              'DASHBOARD REMINDERS EXCEPTION:',
-              error,
-            );
-          }
-
-          /* ===============================================
-             6. BOOKMARKS
-          =============================================== */
-
-          try {
-            const startOfToday =
-              new Date();
-
-            startOfToday.setHours(
-              0,
-              0,
-              0,
-              0,
-            );
-
-            const startOfTomorrow =
-              new Date(
-                startOfToday,
-              );
-
-            startOfTomorrow.setDate(
-              startOfTomorrow.getDate() +
-                1,
-            );
-
-            const {
-              data: bookmarkRows,
-              error: bookmarkError,
-            } =
-              await supabase
-                .from(
-                  'bookmarks',
-                )
-                .select('id')
-                .eq(
-                  'user_id',
-                  user.id,
-                )
-                .gte(
-                  'created_at',
-                  startOfToday.toISOString(),
-                )
-                .lt(
-                  'created_at',
-                  startOfTomorrow.toISOString(),
-                );
-
-            if (bookmarkError) {
-              console.log(
-                'DASHBOARD BOOKMARKS ERROR:',
-                bookmarkError,
-              );
-            } else {
-              next.bookmarks =
-                (
-                  bookmarkRows ??
-                  []
-                ).length;
-            }
-          } catch (error) {
-            console.log(
-              'DASHBOARD BOOKMARKS EXCEPTION:',
-              error,
-            );
-          }
-
-          /* ===============================================
-             7. PLANTS
-          =============================================== */
-
-          try {
-            const {
-              data: plantRows,
-              error: plantError,
-            } =
-              await supabase
-                .from(
-                  'plants',
-                )
-                .select(
-                  'id, last_watered_on, watering_interval_days',
-                )
-                .eq(
-                  'user_id',
-                  user.id,
-                );
-
-            if (plantError) {
-              console.log(
-                'DASHBOARD PLANTS ERROR:',
-                plantError,
-              );
-            } else {
-              const plants =
-                plantRows ?? [];
-
-              next.plantsTotal =
-                plants.length;
-
-              next.plantsNeedingAttention =
-                plants.filter(
-                  (plant) => {
-                    if (
-                      !plant.last_watered_on
-                    ) {
-                      return true;
-                    }
-
-                    const interval =
-                      Math.max(
-                        1,
-                        Number(
-                          plant.watering_interval_days ??
-                            7,
-                        ),
-                      );
-
-                    const nextWatering =
-                      addDays(
-                        plant.last_watered_on,
-                        interval,
-                      );
-
-                    return (
-                      nextWatering <=
-                      todayKey
-                    );
-                  },
-                ).length;
-            }
-          } catch (error) {
-            console.log(
-              'DASHBOARD PLANTS EXCEPTION:',
-              error,
-            );
-          }
-
-          /* ===============================================
-             8. WELL-BEING
-          =============================================== */
-
-          try {
-            const {
-              data: wellbeingModules,
-              error:
-                wellbeingModuleError,
-            } =
-              await supabase
-                .from(
-                  'wellbeing_modules',
-                )
-                .select(
-                  'module_key, enabled',
-                )
-                .eq(
-                  'user_id',
-                  user.id,
-                )
-                .eq(
-                  'enabled',
-                  true,
-                );
-
-            if (
-              wellbeingModuleError
-            ) {
-              console.log(
-                'DASHBOARD WELLBEING MODULE ERROR:',
-                wellbeingModuleError,
-              );
-            } else {
-              const selectedModuleKeys =
-                new Set<string>();
-
-              for (
-                const row of
-                  wellbeingModules ??
-                  []
-              ) {
-                const normalizedKey =
-                  normalizeWellbeingModuleKey(
-                    row.module_key,
-                  );
-
-                if (
-                  normalizedKey &&
-                  SUPPORTED_WELLBEING_MODULES.has(
-                    normalizedKey,
-                  )
-                ) {
-                  selectedModuleKeys.add(
-                    normalizedKey,
-                  );
-                }
-              }
-
-              next.wellbeingTotal =
-                selectedModuleKeys.size;
-
-              if (
-                selectedModuleKeys.size ===
-                0
-              ) {
-                next.wellbeingCompleted =
-                  0;
-              } else {
-                const databaseKeys =
-                  Array.from(
-                    selectedModuleKeys,
-                  ).flatMap(
-                    (key) => {
-                      if (
-                        key ===
-                        'blank_pages'
-                      ) {
-                        return [
-                          'blank_pages',
-                          'morning_pages',
-                        ];
-                      }
-
-                      return [key];
-                    },
-                  );
-
-                const {
-                  data:
-                    wellbeingEntries,
-                  error:
-                    wellbeingEntryError,
-                } =
-                  await supabase
-                    .from(
-                      'wellbeing_entries',
-                    )
-                    .select(
-                      'module_key',
-                    )
-                    .eq(
-                      'user_id',
-                      user.id,
-                    )
-                    .eq(
-                      'entry_date',
-                      todayKey,
-                    )
-                    .in(
-                      'module_key',
-                      databaseKeys,
-                    );
-
-                if (
-                  wellbeingEntryError
-                ) {
-                  console.log(
-                    'DASHBOARD WELLBEING ENTRY ERROR:',
-                    wellbeingEntryError,
-                  );
-                } else {
-                  const completedModuleKeys =
-                    new Set<string>();
-
-                  for (
-                    const row of
-                      wellbeingEntries ??
-                      []
-                  ) {
-                    const normalizedKey =
-                      normalizeWellbeingModuleKey(
-                        row.module_key,
-                      );
-
-                    if (
-                      normalizedKey &&
-                      selectedModuleKeys.has(
-                        normalizedKey,
-                      )
-                    ) {
-                      completedModuleKeys.add(
-                        normalizedKey,
-                      );
-                    }
-                  }
-
-                  next.wellbeingCompleted =
-                    Math.min(
-                      completedModuleKeys.size,
-                      next.wellbeingTotal,
-                    );
-                }
-              }
-            }
-          } catch (error) {
-            console.log(
-              'DASHBOARD WELLBEING EXCEPTION:',
-              error,
-            );
-          }
-
-          /* ===============================================
-             9. GAMES
-             
-             IMPORTANT:
-             Games are recorded in game_scores.
-             Count today's game score records for the
-             currently logged-in player.
-          =============================================== */
-
-          try {
-            const startOfToday =
-              new Date();
-
-            startOfToday.setHours(
-              0,
-              0,
-              0,
-              0,
-            );
-
-            const startOfTomorrow =
-              new Date(
-                startOfToday,
-              );
-
-            startOfTomorrow.setDate(
-              startOfTomorrow.getDate() +
-                1,
-            );
-
-            const {
-              data: gameRows,
-              error: gameError,
-            } =
-              await supabase
-                .from(
-                  'game_scores',
-                )
-                .select('id')
-                .eq(
-                  'player_id',
-                  user.id,
-                )
-                .gte(
-                  'created_at',
-                  startOfToday.toISOString(),
-                )
-                .lt(
-                  'created_at',
-                  startOfTomorrow.toISOString(),
-                );
-
-            if (gameError) {
-              console.log(
-                'DASHBOARD GAMES ERROR:',
-                gameError,
-              );
-            } else {
-              next.games =
-                (
-                  gameRows ??
-                  []
-                ).length;
-
-              console.log(
-                'DASHBOARD GAMES COUNT:',
-                next.games,
-              );
-            }
-          } catch (error) {
-            console.log(
-              'DASHBOARD GAMES EXCEPTION:',
-              error,
-            );
-          }
-
-          /* ===============================================
-             APPLY
-          =============================================== */
-
-          setDashboard(next);
-          setLoading(false);
-        } catch (error) {
-          console.log(
-            'DASHBOARD LOAD ERROR:',
-            error,
-          );
-
-          setLoading(false);
-          setHasError(true);
-        }
-      },
-      [todayKey],
-    );
-
-  /* =======================================================
-     LOAD
-  ======================================================= */
-
-  useEffect(() => {
-    loadDashboard();
-  }, [loadDashboard]);
-
-  /* =======================================================
-     DASHBOARD MODULES
-  ======================================================= */
-
-  const dashboardItems: DashboardItem[] = [
-    {
-      key: 'planner',
-      label: 'Planner',
-      icon: CalendarDays,
-      value: String(
-        dashboard.planner,
-      ),
-      description:
-        'incomplete tasks today',
-      route: '/planner',
-    },
-
-    {
-      key: 'habits',
-      label: 'Habits',
-      icon: CheckCircle2,
-      value: String(
-        dashboard.habits,
-      ),
-      description:
-        'incomplete habits today',
-      route: '/habits',
-    },
-
-    {
-      key: 'finance',
-      label: 'Finance',
-      icon: WalletCards,
-      value: String(
-        dashboard.finance,
-      ),
-      description:
-        'finance items logged today',
-      route: '/modules/finances',
-    },
-
-    {
-      key: 'lists',
-      label: 'Lists',
-      icon: ListChecks,
-      value: String(
-        dashboard.lists,
-      ),
-      description:
-        'incomplete list items',
-      route: '/modules/lists',
-    },
-
-    {
-      key: 'reminders',
-      label: 'Reminders',
-      icon: BellRing,
-      value: String(
-        dashboard.reminders,
-      ),
-      description:
-        'incomplete reminders',
-      route: '/reminders',
-    },
-
-    {
-      key: 'bookmarks',
-      label: 'Bookmarks',
-      icon: Bookmark,
-      value: String(
-        dashboard.bookmarks,
-      ),
-      description:
-        'resources added today',
-      route: '/bookmarks',
-    },
-
-    {
-      key: 'plants',
-      label: 'Plants',
-      icon: Sprout,
-      value: `${dashboard.plantsNeedingAttention}/${dashboard.plantsTotal}`,
-      description:
-        'needing attention',
-      route: '/plants',
-    },
-
-    {
-      key: 'wellbeing',
-      label: 'Well-being',
-      icon: HeartPulse,
-      value: `${dashboard.wellbeingCompleted}/${dashboard.wellbeingTotal}`,
-      description:
-        'completed today',
-      route: '/modules/wellbeing',
-    },
-
-    {
-      key: 'games',
-      label: 'Games',
-      icon: Gamepad2,
-      value: String(
-        dashboard.games,
-      ),
-      description:
-        'games played today',
-      route: '/modules/games',
-    },
-  ];
-
-  /* =======================================================
-     RENDER
-  ======================================================= */
-
+function isAccentBlack(color?: string): boolean {
+  if (!color) return false;
+  const normalized = color.trim().toLowerCase();
   return (
-    <SafeAreaView
-      style={[
-        styles.safe,
-        {
-          backgroundColor: C.bg,
-        },
+    normalized === '#000000' ||
+    normalized === '#000' ||
+    normalized === 'black' ||
+    normalized === 'rgb(0,0,0)' ||
+    normalized === 'rgba(0,0,0,1)'
+  );
+}
+/* =========================================================*
+*   LISTS TITLE FORMATTER*
+*========================================================= */
+function formatListTitleWithCount(title: string, count: number): string {
+  const trimmed = title.trim();
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  const baseTitle = words.length > 1 ? `${words[0]}...` : words[0] || 'List';
+  const itemLabel = count === 1 ? '1 item' : `${count} items`;
+  return `${baseTitle} (${itemLabel})`;
+}
+/* =========================================================*
+*   CROSS-PLATFORM NEO-BRUTALIST FOLDER CARD*
+*========================================================= */
+const BLACK_MODULE_KEYS = new Set(['habits', 'reminders', 'plants', 'lists']);
+function NeoFolderCard({
+  item,
+  accentColor,
+  loading,
+  onPress,
+}: {
+  item: FolderModuleData;
+  accentColor: string;
+  loading: boolean;
+  onPress: () => void;
+}) {
+  const Icon = item.icon;
+  const isBlackCard = BLACK_MODULE_KEYS.has(item.key);
+  const cardBg = isBlackCard ? '#000000' : '#FFFFFF';
+  const textColor = isBlackCard ? '#FFFFFF' : '#000000';
+  const subtextColor = isBlackCard ? '#9CA3AF' : '#52525B';
+  const cardBorderColor = '#000000';
+  const iconStrokeColor = isAccentBlack(accentColor) ? '#FFFFFF' : '#000000';
+  const defaultValColor = item.valueColor || textColor;
+  const firstTwoItems = (item.items || []).slice(0, 2);
+  const thirdItem = (item.items || [])[2];
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.folderWrapper,
+        pressed && styles.folderWrapperPressed,
       ]}
     >
-      <StatusBar
-        barStyle={
-          isDark
-            ? 'light-content'
-            : 'dark-content'
-        }
-        backgroundColor={C.bg}
-        translucent={false}
-      />
-
-      {/* =================================================
-          FIXED SIDEKICK RECTANGLE
-          
-          This is intentionally OUTSIDE the ScrollView.
-          It will remain static while the modules scroll.
-      ================================================= */}
-
+      {/* 1. SOLID OFFSET BACKDROP FOR HARD DROP SHADOW (iOS, Android, Web) */}
+      <View style={styles.cardShadowBackdrop} />
+      {/* 2. CARD TAB */}
       <View
-        style={styles.fixedSidekickArea}
+        style={[
+          styles.folderTab,
+          {
+            backgroundColor: cardBg,
+            borderColor: cardBorderColor,
+          },
+        ]}
+      />
+      {/* 3. CARD MAIN BODY WITH 2.5 BRUTALIST BORDER */}
+      <View
+        style={[
+          styles.folderBody,
+          {
+            backgroundColor: cardBg,
+            borderColor: cardBorderColor,
+          },
+        ]}
       >
-        <View
-          style={[
-            styles.sidekickPlaceholder,
-            {
-              backgroundColor:
-                accentForeground,
-            },
-          ]}
-        >
-          {/* Sidekick instructor */}
-
-          <View
-            style={[
-              styles.sidekickInstructor,
-              {
-                backgroundColor:
-                  accentForeground,
-              },
-            ]}
-          >
-            <SidekickAvatar
-              sidekickId={sidekick_id}
-              size={82}
-            />
-          </View>
-
-          <View
-            style={
-              styles.onboardingProgress
-            }
-          >
-            {onboardingCompleted === false &&
-              onboardingSteps.map(
-                (_, index) => (
-                  <View
-                    key={index}
-                    style={[
-                      styles.sidekickDot,
-                      index === onboardingStep &&
-                        styles.sidekickDotActive,
-                    ]}
-                  />
-                ),
-              )}
-          </View>
-
-          {/* Sidekick content */}
-
-          {onboardingCompleted === false ? (
-            <>
-              <View
-                style={[
-                  styles.sidekickContent,
-                  styles.onboardingContent,
-                ]}
-              >
-                <Text
-                  style={
-                    styles.sidekickGreeting
-                  }
-                >
-                  {onboardingSteps[onboardingStep].title}
-                </Text>
-
-                <Text style={styles.sidekickBody}>
-                  {renderOnboardingBody(
-                    onboardingSteps[onboardingStep].body,
-                    styles.sidekickBody,
-                    styles.sidekickBodyBold,
-                  )}
-                </Text>
-              </View>
-
-              {/* Onboarding navigation */}
-
-              <View
-                style={
-                  styles.sidekickNavigation
-                }
-              >
-                <Pressable
-                  onPress={
-                    goToPreviousOnboardingStep
-                  }
-                  disabled={onboardingStep === 0}
-                  hitSlop={8}
-                >
-                  <Text
-                    style={[
-                      styles.sidekickNavigationText,
-                      onboardingStep === 0 &&
-                        styles.sidekickNavigationDisabled,
-                    ]}
-                  >
-                    Previous
-                  </Text>
-                </Pressable>
-
-                <Pressable
-                  onPress={
-                    goToNextOnboardingStep
-                  }
-                  hitSlop={8}
-                >
-                  <Text
-                    style={
-                      styles.sidekickNavigationText
-                    }
-                  >
-                    {onboardingStep ===
-                    onboardingSteps.length - 1
-                      ? "Let's Go"
-                      : 'Next'}
-                  </Text>
-                </Pressable>
-              </View>
-            </>
-          ) : (
-            <>
-              <View
-                style={
-                  styles.sidekickContent
-                }
-              >
-                <View style={styles.sidekickTitleRow}>
-                  <Text
-                    style={
-                      styles.sidekickGreeting
-                    }
-                  >
-                    Sidekick
-                  </Text>
-
-                  {sidekickUpdates.length > 0 &&
-                    formatSidekickTime(
-                      sidekickUpdates[
-                        sidekickUpdateIndex
-                      ]?.created_at,
-                    ) ? (
-                    <Text style={styles.sidekickTime}>
-                      {formatSidekickTime(
-                        sidekickUpdates[
-                          sidekickUpdateIndex
-                        ]?.created_at,
-                      )}
-                    </Text>
-                  ) : null}
-                </View>
-
-                <Text style={styles.sidekickBody}>
-                  {sidekickUpdates.length > 0
-                    ? sidekickUpdates[
-                        sidekickUpdateIndex
-                      ]?.content
-                    : sidekickBriefingLoading
-                      ? 'Sidekick is checking what matters right now...'
-                      : 'Sidekick is ready when you are.'}
-                </Text>
-              </View>
-
-              {sidekickUpdates.length > 0 && (
-                <View
-                  style={
-                    styles.sidekickUpdateNavigation
-                  }
-                >
-                  <Pressable
-                    onPress={() =>
-                      setSidekickUpdateIndex(
-                        (current) =>
-                          Math.max(
-                            0,
-                            current - 1,
-                          ),
-                      )
-                    }
-                    disabled={
-                      sidekickUpdateIndex === 0
-                    }
-                    hitSlop={8}
-                  >
-                    <Text
-                      style={[
-                        styles.sidekickNavigationText,
-                        sidekickUpdateIndex === 0 &&
-                          styles.sidekickNavigationDisabled,
-                      ]}
-                    >
-                      Previous
-                    </Text>
-                  </Pressable>
-
-                  <Text
-                    style={
-                      styles.sidekickUpdateCount
-                    }
-                  >
-                    {sidekickUpdateIndex + 1}/
-                    {sidekickUpdates.length}
-                  </Text>
-
-                  <Pressable
-                    onPress={() =>
-                      setSidekickUpdateIndex(
-                        (current) =>
-                          Math.min(
-                            sidekickUpdates.length - 1,
-                            current + 1,
-                          ),
-                      )
-                    }
-                    disabled={
-                      sidekickUpdateIndex >=
-                      sidekickUpdates.length - 1
-                    }
-                    hitSlop={8}
-                  >
-                    <Text
-                      style={[
-                        styles.sidekickNavigationText,
-                        sidekickUpdateIndex >=
-                          sidekickUpdates.length - 1 &&
-                          styles.sidekickNavigationDisabled,
-                      ]}
-                    >
-                      Next
-                    </Text>
-                  </Pressable>
-                </View>
-              )}
-
-              {sidekickUpdates.length === 0 &&
-                sidekickBriefingLoading && (
-                  <ActivityIndicator
-                    size="small"
-                    color="#FFFFFF"
-                    style={
-                      styles.sidekickBriefingIndicator
-                    }
-                  />
-                )}
-            </>
-
-        )}
-
-        </View>
-      </View>
-
-      {/* =================================================
-          SCROLLABLE MODULE AREA
-          
-          ONLY this section scrolls.
-      ================================================= */}
-
-      <ScrollView
-        style={styles.modulesScroll}
-        contentContainerStyle={
-          styles.modulesContent
-        }
-        showsVerticalScrollIndicator={
-          false
-        }
-        bounces={true}
-      >
-        <View
-          style={styles.grid}
-        >
-          {dashboardItems.map(
-            ({
-              key,
-              label,
-              icon: Icon,
-              value,
-              description,
-              route,
-            }) => (
-              <Pressable
-                key={key}
-                onPress={() =>
-                  router.push(
-                    route as any,
-                  )
-                }
-                style={({ pressed }) => [
-                  styles.module,
-                  {
-                    backgroundColor:
-                      C.card,
-                    borderColor:
-                      C.border,
-                  },
-                  pressed &&
-                    styles.modulePressed,
-                ]}
-                accessibilityLabel={`${label}: ${value} ${description}`}
-              >
-                {/* ICON */}
-
-                <View
-                  style={[
-                    styles.moduleIcon,
-                    {
-                      backgroundColor:
-                        accentForeground,
-                    },
-                  ]}
-                >
-                  <Icon
-                    color="#FFFFFF"
-                    size={25}
-                    strokeWidth={2.1}
-                  />
-                </View>
-
-                {/* LABEL */}
-
-                <Text
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.7}
-                  style={[
-                    styles.moduleLabel,
-                    {
-                      color: C.text,
-                    },
-                  ]}
-                >
-                  {label.toUpperCase()}
-                </Text>
-
-                {/* VALUE */}
-
-                <Text
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.7}
-                  style={[
-                    styles.moduleValue,
-                    {
-                      color: C.text,
-                    },
-                  ]}
-                >
-                  {loading
-                    ? '—'
-                    : value}
-                </Text>
-
-                {/* DESCRIPTION */}
-
-                <Text
-                  numberOfLines={2}
-                  style={[
-                    styles.moduleDescription,
-                    {
-                      color: C.muted,
-                    },
-                  ]}
-                >
-                  {description}
-                </Text>
-              </Pressable>
-            ),
-          )}
-        </View>
-
-        {/* ERROR */}
-
-        {hasError && (
-          <View
-            style={
-              styles.errorContainer
-            }
-          >
-            <Text
+        {/* ROW 1: ICON + TITLE + ARROW */}
+        <View style={styles.cardHeaderRow}>
+          <View style={styles.headerLeft}>
+            <View
               style={[
-                styles.errorText,
+                styles.iconRoundedRect,
                 {
-                  color: C.muted,
+                  backgroundColor: accentColor,
+                  borderColor: '#000000',
                 },
               ]}
             >
-              Some activity could not
-              be loaded.
+              <Icon size={13} color={iconStrokeColor} strokeWidth={2.4} />
+            </View>
+            <Text style={[styles.cardTitle, { color: textColor }]} numberOfLines={1}>
+              {item.title}
             </Text>
           </View>
-        )}
-
-        {/* LOADING */}
-
-        {loading && (
-          <View
-            style={
-              styles.loadingContainer
-            }
-          >
-            <ActivityIndicator
-              size="small"
-              color={
-                accentForeground
-              }
-            />
+          <ArrowUpRight size={17} color={textColor} strokeWidth={2.4} />
+        </View>
+        {/* ROW 2: NUMBER / VALUE */}
+        <Text
+          style={[styles.cardValue, { color: defaultValColor }]}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.7}
+        >
+          {loading ? '—' : item.value}
+        </Text>
+        {/* ROW 3: SUBTITLE */}
+        <Text style={[styles.cardSubtitle, { color: subtextColor }]} numberOfLines={1}>
+          {item.subtitle}
+        </Text>
+        {/* ROW 4+: ACTIONABLE LIST */}
+        {item.items && item.items.length > 0 && (
+          <View style={styles.listSection}>
+            {firstTwoItems.map((listItem, i) => (
+              <View key={i} style={styles.listItemRow}>
+                <Text
+                  style={[
+                    styles.listArrow,
+                    { color: listItem.isOverdue ? '#EF4444' : textColor },
+                  ]}
+                >
+                  ↳
+                </Text>
+                <Text
+                  style={[
+                    styles.listItemText,
+                    {
+                      color: listItem.isOverdue ? '#EF4444' : textColor,
+                      fontFamily: listItem.isOverdue ? FONT_BOLD : FONT,
+                    },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {listItem.text}
+                </Text>
+              </View>
+            ))}
+            {thirdItem && (
+              <View style={[styles.listItemRow, styles.shadowRow]}>
+                <Text style={[styles.listArrow, { color: subtextColor, opacity: 0.35 }]}>
+                  ↳
+                </Text>
+                <Text
+                  style={[styles.listItemText, { color: subtextColor, opacity: 0.35 }]}
+                  numberOfLines={1}
+                >
+                  {thirdItem.text}
+                </Text>
+              </View>
+            )}
           </View>
         )}
+        {/* AFFIRMATION FOOTER */}
+        {item.footerNote && (
+          <Text style={[styles.cardAffirmation, { color: textColor }]} numberOfLines={2}>
+            {item.footerNote}
+          </Text>
+        )}
+      </View>
+    </Pressable>
+  );
+}
+/* =========================================================*
+*   MAIN MODULES SCREEN*
+*========================================================= */
+export default function ModulesScreen() {
+  const appContext = useApp() as any;
+  const {
+    accentForeground,
+    accentColor: rawAccent,
+    user: appUser,
+    profile: appProfile,
+    display_name: appDisplayName,
+    currency_code,
+    timezone: appTimezone,
+    sidekick_id,
+  } = appContext;
+  const initialFirstName = (appDisplayName || appProfile?.display_name || appProfile?.name || 'Friend')
+    .trim()
+    .split(/\s+/)[0];
+  const [userName, setUserName] = useState<string>(initialFirstName);
+  const timeZone = appTimezone || 'Africa/Nairobi';
+  const [greeting, setGreeting] = useState<string>(getRotatingGreeting(timeZone));
+  const [headerDateTime, setHeaderDateTime] = useState<string>(() => formatHeaderDateTime(timeZone));
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    if (appDisplayName) {
+      setUserName(appDisplayName.trim().split(/\s+/)[0]);
+    }
+  }, [appDisplayName]);
+  // Module states
+  const [habitsCount, setHabitsCount] = useState(0);
+  const [habitItems, setHabitItems] = useState<ListItemPreview[]>([]);
+  const [financeNet, setFinanceNet] = useState<number>(0);
+  const [listsCount, setListsCount] = useState(0);
+  const [listModuleItems, setListModuleItems] = useState<ListItemPreview[]>([]);
+  const [remindersCount, setRemindersCount] = useState(0);
+  const [reminderSubtitle, setReminderSubtitle] = useState('Due today');
+  const [reminderItems, setReminderItems] = useState<ListItemPreview[]>([]);
+  const [bookmarksCount, setBookmarksCount] = useState(0);
+  const [plantsAttentionCount, setPlantsAttentionCount] = useState(0);
+  const [plantItems, setPlantItems] = useState<ListItemPreview[]>([]);
+  const [wellbeingDone, setWellbeingDone] = useState(0);
+  const [gamesCount, setGamesCount] = useState(0);
+  const globalAccent = rawAccent || accentForeground || '#FDE047';
+  const pageBg = accentForeground || globalAccent;
+  const isAccentPureBlack = isAccentBlack(pageBg);
+  const headerTextColor = isAccentPureBlack ? '#FFFFFF' : '#000000';
+  useEffect(() => {
+    const updateHeaderTime = () => {
+      setHeaderDateTime(formatHeaderDateTime(timeZone));
+      setGreeting(getRotatingGreeting(timeZone));
+    };
+    updateHeaderTime();
+    const timer = setInterval(updateHeaderTime, 60 * 1000);
+    return () => clearInterval(timer);
+  }, [timeZone]);
+  const loadProfile = useCallback(async () => {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      const currentUserId = user?.id || appUser?.id;
+      if (!currentUserId) return;
+      const { data } = await supabase
+        .from('profiles')
+        .select('name, display_name, full_name, username')
+        .or(`id.eq.${currentUserId},user_id.eq.${currentUserId}`)
+        .maybeSingle();
+      const resolved =
+        appDisplayName ||
+        data?.display_name ||
+        data?.name ||
+        data?.full_name ||
+        data?.username ||
+        appProfile?.display_name ||
+        appProfile?.name ||
+        appProfile?.full_name ||
+        user?.user_metadata?.name ||
+        user?.user_metadata?.full_name ||
+        'Friend';
+      const firstNameOnly = resolved.trim().split(/\s+/)[0] || 'Friend';
+      setUserName(firstNameOnly);
+    } catch (e) {
+      console.log('Error loading profile name:', e);
+    }
+  }, [appProfile, appUser, appDisplayName]);
+  const loadDashboardData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const today = getTodayKey(timeZone);
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      const currentUserId = user?.id || appUser?.id;
+      if (!currentUserId) {
+        setLoading(false);
+        return;
+      }
+      // 1. HABITS
+      try {
+        const [{ data: habitRows }, { data: completionRows }] = await Promise.all([
+          supabase
+            .from('habits')
+            .select('id, name, frequency, start_date, end_date')
+            .eq('user_id', currentUserId),
+          supabase
+            .from('habit_completions')
+            .select('habit_id, completed_on')
+            .eq('user_id', currentUserId),
+        ]);
+        const completionsByHabit = new Map<string, string[]>();
+        (completionRows ?? []).forEach((row) => {
+          const dates = completionsByHabit.get(row.habit_id) || [];
+          if (row.completed_on) dates.push(row.completed_on);
+          completionsByHabit.set(row.habit_id, dates);
+        });
+        const frequencyOrder: Record<string, number> = {
+          daily: 0,
+          weekly: 1,
+          monthly: 2,
+          annually: 3,
+        };
+        const incompleteHabits = (habitRows ?? [])
+          .filter((habit) => {
+            const startsToday = !habit.start_date || habit.start_date <= today;
+            const notEnded = !habit.end_date || habit.end_date >= today;
+            if (!startsToday || !notEnded) return false;
+            const periodStart = getHabitPeriodStart(today, habit.frequency);
+            const completedThisPeriod = (completionsByHabit.get(habit.id) || [])
+              .some((completedOn) => completedOn >= periodStart && completedOn <= today);
+            return !completedThisPeriod;
+          })
+          .sort((a, b) => {
+            const aFrequency = getHabitFrequencyKey(a.frequency);
+            const bFrequency = getHabitFrequencyKey(b.frequency);
+            return frequencyOrder[aFrequency] - frequencyOrder[bFrequency];
+          });
+        setHabitsCount(incompleteHabits.length);
+        setHabitItems(
+          incompleteHabits.slice(0, 3).map((habit) => {
+            const frequency = getHabitFrequencyKey(habit.frequency);
+            const label = frequency.charAt(0).toUpperCase() + frequency.slice(1);
+            return { text: `${habit.name} (${label})` };
+          }),
+        );
+      } catch (e) {}
+      // 2. FINANCES — lifetime totals, not affected by date filters.
+      try {
+        const { data: txRows, error: txError } = await supabase
+          .from('finance_transactions')
+          .select('amount, kind')
+          .eq('user_id', currentUserId);
+        if (txError) throw txError;
+        const transactions = txRows ?? [];
+        const income = transactions
+          .filter((t) => t.kind === 'income')
+          .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+        const expense = transactions
+          .filter((t) => t.kind === 'expense')
+          .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+        // Debt records store the remaining unpaid balance in amount.
+        const outstandingDebt = transactions
+          .filter((t) => t.kind === 'debt')
+          .reduce((sum, t) => sum + Number(t.amount || 0), 0);
+        setFinanceNet(income - expense - outstandingDebt);
+      } catch (e) {
+        console.log('Error calculating financial health net position:', e);
+      }
+      // 3. LISTS
+      try {
+        const { data: checklistRows } = await supabase
+          .from('lists')
+          .select('id, title, list_type')
+          .eq('user_id', currentUserId)
+          .eq('list_type', 'checklist')
+          .order('created_at', { ascending: true });
+        const checklistIds = (checklistRows ?? []).map((l) => l.id);
+        if (checklistIds.length > 0) {
+          const { data: uncheckedItems } = await supabase
+            .from('list_items')
+            .select('id, list_id, completed')
+            .eq('user_id', currentUserId)
+            .eq('completed', false)
+            .in('list_id', checklistIds);
+          setListsCount(uncheckedItems?.length ?? 0);
+          const uncheckedByList = new Map<string, number>();
+          (uncheckedItems ?? []).forEach((item) => {
+            uncheckedByList.set(item.list_id, (uncheckedByList.get(item.list_id) || 0) + 1);
+          });
+          const activeChecklists = (checklistRows ?? []).filter(
+            (l) => (uncheckedByList.get(l.id) || 0) > 0
+          );
+          const formattedListPreviews: ListItemPreview[] = activeChecklists.slice(0, 3).map((l) => {
+            const count = uncheckedByList.get(l.id) || 0;
+            return {
+              text: formatListTitleWithCount(l.title, count),
+            };
+          });
+          setListModuleItems(formattedListPreviews);
+        } else {
+          setListsCount(0);
+          setListModuleItems([]);
+        }
+      } catch (e) {
+        console.log('Error loading lists dashboard:', e);
+      }
+      // 4. REMINDERS
+      try {
+        const { data: reminderRows } = await supabase
+          .from('reminders')
+          .select('id, title, due_date, time, completed')
+          .eq('user_id', currentUserId)
+          .eq('completed', false)
+          .order('due_date', { ascending: true });
+        if (reminderRows) {
+          const overdue = reminderRows.filter((r) => r.due_date && r.due_date < today);
+          const dueToday = reminderRows.filter((r) => r.due_date === today);
+          const upcoming = reminderRows.filter((r) => r.due_date && r.due_date > today);
+          const attentionTotal = overdue.length + dueToday.length;
+          setRemindersCount(attentionTotal > 0 ? attentionTotal : upcoming.length);
+          if (overdue.length > 0 && dueToday.length > 0) {
+            setReminderSubtitle(`${overdue.length} overdue · ${dueToday.length} today`);
+          } else if (overdue.length > 0) {
+            setReminderSubtitle(`${overdue.length} overdue`);
+          } else if (dueToday.length > 0) {
+            setReminderSubtitle('Due today');
+          } else {
+            setReminderSubtitle('Upcoming');
+          }
+          const prioritized = [...overdue, ...dueToday, ...upcoming];
+          setReminderItems(
+            prioritized.slice(0, 3).map((r) => {
+              const isOverdue = Boolean(r.due_date && r.due_date < today);
+              const isToday = r.due_date === today;
+              const statusTag = isOverdue
+                ? '(Overdue)'
+                : isToday
+                ? '(Today)'
+                : '(Upcoming)';
+              return {
+                text: `${r.title} ${statusTag}`,
+                isOverdue,
+              };
+            }),
+          );
+        }
+      } catch (e) {
+        console.log('Error loading reminders dashboard:', e);
+      }
+      // 5. BOOKMARKS
+      try {
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
+        const { count } = await supabase
+          .from('bookmarks')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', currentUserId)
+          .gte('created_at', startOfToday.toISOString());
+        setBookmarksCount(count ?? 0);
+      } catch (e) {}
+      // 6. PLANTS
+      try {
+        const { data: plantRows } = await supabase
+          .from('plants')
+          .select('name, last_watered_on, watering_interval_days')
+          .eq('user_id', currentUserId);
+        if (plantRows) {
+          const attentionNeeded: { name: string; isOverdue: boolean; label: string }[] = [];
+          plantRows.forEach((p) => {
+            const interval = Math.max(1, Number(p.watering_interval_days ?? 7));
+            const dueDate = p.last_watered_on ? addDays(p.last_watered_on, interval) : today;
+            if (dueDate < today) {
+              attentionNeeded.push({
+                name: p.name,
+                isOverdue: true,
+                label: `${p.name} (Overdue)`,
+              });
+            } else if (dueDate === today) {
+              attentionNeeded.push({
+                name: p.name,
+                isOverdue: false,
+                label: `${p.name} (Today)`,
+              });
+            }
+          });
+          setPlantsAttentionCount(attentionNeeded.length);
+          setPlantItems(
+            attentionNeeded.slice(0, 3).map((item) => ({
+              text: item.label,
+              isOverdue: item.isOverdue,
+            })),
+          );
+        }
+      } catch (e) {}
+      // 7. WELL-BEING
+      try {
+        const { data: entries } = await supabase
+          .from('wellbeing_entries')
+          .select('id')
+          .eq('user_id', currentUserId)
+          .eq('entry_date', today);
+        setWellbeingDone((entries ?? []).length);
+      } catch (e) {
+        console.log('Error loading wellbeing entries:', e);
+      }
+      // 8. GAMES
+      try {
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
+        const { count } = await supabase
+          .from('game_scores')
+          .select('id', { count: 'exact', head: true })
+          .eq('player_id', currentUserId)
+          .gte('created_at', startOfToday.toISOString());
+        setGamesCount(count ?? 0);
+      } catch (e) {}
+      setLoading(false);
+    } catch (err) {
+      console.log('Error loading dashboard:', err);
+      setLoading(false);
+    }
+  }, [appUser, timeZone]);
+  useFocusEffect(
+    useCallback(() => {
+      loadProfile();
+      loadDashboardData();
+    }, [loadProfile, loadDashboardData]),
+  );
+  const financeDisplay = useMemo(() => {
+    const formatted = formatMoney(Math.abs(financeNet), currency_code);
+    return financeNet < 0 ? `-${formatted}` : `+${formatted}`;
+  }, [financeNet, currency_code]);
+  const financeColor = financeNet >= 0 ? '#3E9D66' : '#E05252';
+  const folderModules: FolderModuleData[] = [
+    {
+      key: 'habits',
+      title: 'Habits',
+      icon: CheckCircle2,
+      value: String(habitsCount),
+      subtitle: 'habits left today',
+      items: habitItems,
+      route: '/habits',
+    },
+    {
+      key: 'finances',
+      title: 'Finances',
+      icon: WalletCards,
+      value: financeDisplay,
+      valueColor: financeColor,
+      subtitle: 'Net position',
+      route: '/modules/finances',
+    },
+    {
+      key: 'lists',
+      title: 'Lists',
+      icon: ListChecks,
+      value: String(listsCount),
+      subtitle: 'items left to check',
+      items: listModuleItems,
+      route: '/modules/lists',
+    },
+    {
+      key: 'reminders',
+      title: 'Reminder',
+      icon: BellRing,
+      value: String(remindersCount),
+      subtitle: reminderSubtitle,
+      items: reminderItems,
+      route: '/reminders',
+    },
+    {
+      key: 'bookmarks',
+      title: 'Bookmarks',
+      icon: Bookmark,
+      value: String(bookmarksCount),
+      subtitle: 'resources added today',
+      route: '/bookmarks',
+    },
+    {
+      key: 'plants',
+      title: 'Plants',
+      icon: Sprout,
+      value: String(plantsAttentionCount),
+      subtitle: 'plants need attention',
+      items: plantItems,
+      route: '/plants',
+    },
+    {
+      key: 'wellbeing',
+      title: 'Well-being',
+      icon: HeartPulse,
+      value: String(wellbeingDone),
+      subtitle: 'completed today',
+      route: '/modules/wellbeing',
+    },
+    {
+      key: 'games',
+      title: 'Games',
+      icon: Gamepad2,
+      value: String(gamesCount),
+      subtitle: 'games played today',
+      route: '/modules/games',
+    },
+  ];
+  return (
+    <SafeAreaView style={[styles.safe, { backgroundColor: pageBg }]}>
+      <StatusBar
+        barStyle={isAccentPureBlack ? 'light-content' : 'dark-content'}
+        backgroundColor={pageBg}
+        translucent={false}
+      />
+      {/* FIXED / STICKY HEADER OUTSIDE SCROLLVIEW */}
+      <View style={[styles.headerRowContainer, { backgroundColor: pageBg }]}>
+        <View style={styles.headerLeftTextGroup}>
+          <Text style={[styles.headerDateTime, { color: headerTextColor }]} numberOfLines={1}>
+            {headerDateTime}
+          </Text>
+          <Text
+            style={[styles.headerName, { color: headerTextColor }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.65}
+          >
+            {userName}!
+          </Text>
+          <Text style={[styles.headerGreeting, { color: headerTextColor }]}>
+            {greeting},
+          </Text>
+        </View>
+        {/* DOOR FRAME: SIDEKICK TALL & FITTING DOOR ALMOST COMPLETELY */}
+        <Pressable
+          onPress={() => router.push('/profile' as any)}
+          style={({ pressed }) => [
+            styles.doorFrameWrapper,
+            pressed && styles.doorFramePressed,
+          ]}
+        >
+          {/* HARD SHADOW LAYER FOR DOOR */}
+          <View style={styles.doorShadowBackdrop} />
+          {/* DOOR PORTAL */}
+          <View style={styles.doorPortal}>
+            <View style={styles.doorTrimArch} />
+            <View style={styles.peekingAvatarWrapper}>
+              <View style={styles.avatarFlipContainer}>
+                <SidekickAvatar
+                  sidekickId={sidekick_id || 'sidekick-01'}
+                  size={78}
+                />
+              </View>
+            </View>
+            <View style={styles.openDoorPanel}>
+              <View style={styles.doorKnob} />
+            </View>
+          </View>
+        </Pressable>
+      </View>
+      {/* SCROLLING GRID */}
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.grid}>
+          {folderModules.map((item) => (
+            <NeoFolderCard
+              key={item.key}
+              item={item}
+              accentColor={globalAccent}
+              loading={loading}
+              onPress={() => router.push(item.route as any)}
+            />
+          ))}
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
-
-/* =========================================================
-   STYLES
-========================================================= */
-
-const styles =
-  StyleSheet.create({
-    safe: {
-      flex: 1,
-    },
-
-    /* =====================================================
-       FIXED SIDEKICK AREA
-       This does NOT scroll.
-    ===================================================== */
-
-    fixedSidekickArea: {
-      paddingHorizontal: 16,
-      paddingTop: 50,
-      paddingBottom: 10,
-    },
-
-    sidekickPlaceholder: {
-      width: '100%',
-      minHeight: 220,
-      borderRadius: 24,
-      paddingHorizontal: 32,
-      paddingTop: 65,
-      paddingBottom: 48,
-      position: 'relative',
-      overflow: 'visible',
-    },
-
-    sidekickInstructor: {
-      position: 'absolute',
-      top: -34,
-      left: 0,
-      width: 104,
-      height: 104,
-      borderRadius: 52,
-      alignItems: 'center',
-      justifyContent: 'center',
-      overflow: 'hidden',
-    },
-
-    sidekickDot: {
-      width: 11,
-      height: 11,
-      borderRadius: 6,
-      backgroundColor: 'transparent',
-      borderWidth: 1.5,
-      borderColor: '#FFFFFF',
-    },
-
-    sidekickDotActive: {
-      backgroundColor: '#FFFFFF',
-    },
-
-    sidekickContent: {
-      width: '100%',
-    },
-
-    onboardingProgress: {
-      position: 'absolute',
-      top: 22,
-      right: 28,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'flex-end',
-      gap: 5,
-    },
-
-    sidekickNavigationDisabled: {
-      opacity: 0.35,
-    },
-
-    sidekickTitleRow: {
-      flexDirection: 'row',
-      alignItems: 'baseline',
-      gap: 7,
-      marginBottom: 2,
-    },
-
-    sidekickGreeting: {
-      color: '#FFFFFF',
-      fontFamily: FONT,
-      fontSize: 15,
-      lineHeight: 23,
-      marginBottom: 0,
-    },
-
-    sidekickTime: {
-      color: '#FFFFFF',
-      fontFamily: FONT,
-      fontSize: 10,
-      lineHeight: 16,
-      opacity: 0.72,
-    },
-
-    sidekickBody: {
-      color: '#FFFFFF',
-      fontFamily: FONT,
-      fontSize: 12,
-      lineHeight: 19,
-      maxWidth: '95%',
-    },
-
-    sidekickBodyBold: {
-      color: '#FFFFFF',
-      fontFamily: FONT_BOLD,
-      fontSize: 12,
-      lineHeight: 19,
-    },
-
-    onboardingContent: {
-      minHeight: 112,
-    },
-
-    sidekickUpdateNavigation: {
-      position: 'absolute',
-      left: 32,
-      right: 28,
-      bottom: 18,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-    },
-
-    sidekickUpdateCount: {
-      color: '#FFFFFF',
-      fontFamily: FONT_MED,
-      fontSize: 10,
-      opacity: 0.8,
-    },
-
-    sidekickBriefingIndicator: {
-      position: 'absolute',
-      right: 30,
-      top: 24,
-    },
-
-    sidekickNavigation: {
-      position: 'absolute',
-      left: 32,
-      right: 28,
-      bottom: 18,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-    },
-
-    sidekickNavigationText: {
-      color: '#FFFFFF',
-      fontFamily: FONT_BOLD,
-      fontSize: 12,
-    },
-
-    /* =====================================================
-       MODULE SCROLL AREA
-       This is the ONLY scrolling section.
-    ===================================================== */
-
-    modulesScroll: {
-      flex: 1,
-    },
-
-    modulesContent: {
-      paddingHorizontal: 16,
-      paddingTop: 14,
-      paddingBottom: 100,
-    },
-
-    /* =====================================================
-       MODULE GRID
-    ===================================================== */
-
-    grid: {
-      width: '100%',
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      justifyContent: 'space-between',
-      rowGap: 10,
-    },
-
-    module: {
-      width: '31.8%',
-      minHeight: 142,
-      borderRadius: 18,
-      borderWidth: 1,
-      paddingHorizontal: 7,
-      paddingVertical: 10,
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 7,
-    },
-
-    modulePressed: {
-      opacity: 0.7,
-      transform: [
-        {
-          scale: 0.98,
-        },
-      ],
-    },
-
-    moduleIcon: {
-      width: 48,
-      height: 48,
-      borderRadius: 15,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginBottom: 2,
-    },
-
-    moduleLabel: {
-      fontFamily: FONT_BOLD,
-      fontSize: 8,
-      letterSpacing: 0.15,
-      textAlign: 'center',
-      includeFontPadding: false,
-      flexShrink: 1,
-    },
-
-    moduleValue: {
-      fontFamily: FONT_BOLD,
-      fontSize: 22,
-      lineHeight: 25,
-      textAlign: 'center',
-      includeFontPadding: false,
-    },
-
-    moduleDescription: {
-      fontFamily: FONT_MED,
-      fontSize: 7.5,
-      lineHeight: 10,
-      textAlign: 'center',
-      includeFontPadding: false,
-      maxWidth: '95%',
-    },
-
-    /* =====================================================
-       LOADING / ERROR
-    ===================================================== */
-
-    loadingContainer: {
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingTop: 18,
-    },
-
-    errorContainer: {
-      alignItems: 'center',
-      paddingTop: 16,
-    },
-
-    errorText: {
-      fontFamily: FONT,
-      fontSize: 9,
-      textAlign: 'center',
-    },
-  });
+/* =========================================================*
+*   STYLES: CROSS-PLATFORM HARD SHADOWS & GEOMETRY*
+*========================================================= */
+const styles = StyleSheet.create({
+  safe: {
+    flex: 1,
+  },
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 36,
+  },
+  /* HEADER LAYOUT */
+  headerRowContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 5,
+    gap: 12,
+    zIndex: 10,
+  },
+  headerLeftTextGroup: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  headerDateTime: {
+    fontFamily: FONT_MED,
+    fontSize: 9,
+    lineHeight: 13,
+    letterSpacing: 0.2,
+    opacity: 0.75,
+    marginBottom: 2,
+  },
+  headerGreeting: {
+    fontFamily: FONT_MED,
+    fontSize: 19,
+    lineHeight: 25,
+    letterSpacing: 0.1,
+  },
+  headerName: {
+    fontFamily: FONT_BOLD,
+    fontSize: 36,
+    lineHeight: 42,
+    letterSpacing: -0.4,
+    marginTop: -1,
+  },
+  /* DOOR FRAME & CROSS-PLATFORM SHADOW */
+  doorFrameWrapper: {
+    alignSelf: 'center',
+    marginTop: 4,
+    width: 72,
+    height: 98,
+    position: 'relative',
+  },
+  doorFramePressed: {
+    transform: [{ translateX: 2 }, { translateY: 2 }],
+  },
+  doorShadowBackdrop: {
+    position: 'absolute',
+    top: 4,
+    left: 4,
+    width: 68,
+    height: 94,
+    backgroundColor: '#000000',
+    borderTopLeftRadius: 34,
+    borderTopRightRadius: 34,
+    borderBottomLeftRadius: 6,
+    borderBottomRightRadius: 6,
+  },
+  doorPortal: {
+    width: 68,
+    height: 94,
+    backgroundColor: '#000000',
+    borderWidth: 2.5,
+    borderColor: '#000000',
+    borderTopLeftRadius: 34,
+    borderTopRightRadius: 34,
+    borderBottomLeftRadius: 6,
+    borderBottomRightRadius: 6,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  doorTrimArch: {
+    position: 'absolute',
+    top: 3,
+    left: 4,
+    right: 4,
+    height: 26,
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    borderWidth: 1.5,
+    borderColor: '#27272A',
+    zIndex: 1,
+  },
+  peekingAvatarWrapper: {
+    position: 'absolute',
+    bottom: -4,
+    left: -12,
+    width: 78,
+    height: 88,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    zIndex: 2,
+    transform: [{ rotate: '8deg' }],
+  },
+  avatarFlipContainer: {
+    transform: [{ scaleX: -1 }],
+  },
+  openDoorPanel: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: 25,
+    height: '100%',
+    backgroundColor: '#FAFAFA',
+    borderLeftWidth: 2.5,
+    borderLeftColor: '#000000',
+    zIndex: 3,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    paddingLeft: 3.5,
+    transform: [{ skewY: '-3deg' }],
+  },
+  doorKnob: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#000000',
+  },
+  /* GRID */
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    rowGap: 1,
+  },
+  /* FOLDER WRAPPER & CROSS-PLATFORM HARD SHADOW BACKDROP */
+  folderWrapper: {
+    width: '48.2%',
+    position: 'relative',
+    marginTop: 10,
+    paddingRight: 5,
+    paddingBottom: 5,
+  },
+  folderWrapperPressed: {
+    transform: [{ translateX: 2 }, { translateY: 2 }],
+  },
+  cardShadowBackdrop: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#000000',
+    borderRadius: 16,
+    borderTopLeftRadius: 10,
+  },
+  folderBody: {
+    borderRadius: 16,
+    borderTopLeftRadius: 10,
+    borderWidth: 5,
+    padding: 12,
+    minHeight: 184,
+  },
+  folderTab: {
+    position: 'absolute',
+    top: -9,
+    left: 7,
+    width: '52%',
+    height: 0,
+    borderTopLeftRadius: 8,
+    borderTopRightRadius: 8,
+    borderWidth: 0,
+    borderBottomWidth: 0,
+    zIndex: 2,
+  },
+  /* ROW 1: HEADER (Icon, Title, Arrow) */
+  cardHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+  },
+  iconRoundedRect: {
+    width: 30,
+    height: 30,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardTitle: {
+    fontFamily: FONT_BOLD,
+    fontSize: 13.5,
+    flexShrink: 1,
+  },
+  /* ROW 2: NUMBER / VALUE */
+  cardValue: {
+    fontFamily: FONT_BOLD,
+    fontSize: 28,
+    lineHeight: 34,
+  },
+  /* ROW 3: SUBTITLE */
+  cardSubtitle: {
+    fontFamily: FONT_MED,
+    fontSize: 10.5,
+    marginTop: 1,
+    marginBottom: 8,
+  },
+  /* ROW 4: LIST ITEMS */
+  listSection: {
+    marginTop: 4,
+    gap: 3,
+  },
+  listItemRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 4,
+  },
+  listArrow: {
+    fontFamily: FONT_BOLD,
+    fontSize: 9,
+    lineHeight: 13,
+  },
+  listItemText: {
+    fontSize: 9,
+    lineHeight: 13,
+    flex: 1,
+  },
+  shadowRow: {
+    marginTop: 1,
+  },
+  /* AFFIRMATION FOOTER */
+  cardAffirmation: {
+    marginTop: 6,
+    fontFamily: FONT_BOLD,
+    fontSize: 9.5,
+    lineHeight: 13.5,
+  },
+});

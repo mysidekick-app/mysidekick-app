@@ -5,10 +5,12 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
   View,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -16,42 +18,71 @@ import {
   ChevronDown,
   ChevronUp,
   ChevronLeft,
+  List,
   ListChecks,
+  ListOrdered,
   MoreVertical,
   Plus,
   Search,
   Trash2,
+  Type,
   X,
+  AlertTriangle,
 } from 'lucide-react-native';
-import { router } from 'expo-router';
+import { router, useNavigation } from 'expo-router';
 
 import { useApp } from '@/components/AppProvider';
 import { supabase } from '@/lib/supabase';
 
-type ListType =
-  | 'blank'
-  | 'checklist'
-  | 'bullet'
-  | 'numbered';
-
-type ListItem = {
-  id: string;
-  title: string;
-  completed: boolean;
-};
-
-type ListCard = {
-  id: string;
-  title: string;
-  icon: string;
-  list_type: ListType;
-  items: ListItem[];
-};
-
+/* =========================================================
+   FONTS
+========================================================= */
 const FONT = 'Poppins-Regular';
 const FONT_MED = 'Poppins-Medium';
 const FONT_SEMI = 'Poppins-SemiBold';
 const FONT_BOLD = 'Poppins-Bold';
+const PARAGRAPH_MIN_HEIGHT = 46;
+const PARAGRAPH_MAX_HEIGHT = Math.round(Dimensions.get('window').height * 0.7);
+
+/* =========================================================
+   TYPES & FORMAT HELPERS
+========================================================= */
+export type ListType = 'blank' | 'checklist';
+export type BlankFormat = 'paragraph' | 'bullet' | 'numbered';
+
+export type ListItem = {
+  id: string;
+  title: string;
+  completed: boolean;
+  format_type?: BlankFormat;
+  is_bold?: boolean;
+  is_italic?: boolean;
+  is_highlighted?: boolean;
+  inputHeight?: number;
+};
+
+const ITEM_FORMAT_MARKER = '[[SKFMT:';
+function encodeItemTitle(title: string, format: BlankFormat): string {
+  return format === 'paragraph' ? title : `${ITEM_FORMAT_MARKER}${format}]]${title}`;
+}
+
+function decodeItemTitle(storedTitle: string): { title: string; format: BlankFormat } {
+  const match = storedTitle.match(/^\[\[SKFMT:(bullet|numbered|paragraph)\]\]/);
+  if (!match) return { title: storedTitle, format: 'paragraph' };
+  return {
+    title: storedTitle.slice(match[0].length),
+    format: match[1] as BlankFormat,
+  };
+}
+
+export type ListCard = {
+  id: string;
+  title: string;
+  icon: string;
+  list_type: ListType;
+  blank_format?: BlankFormat;
+  items: ListItem[];
+};
 
 const LIST_TYPES: {
   value: ListType;
@@ -61,96 +92,92 @@ const LIST_TYPES: {
   {
     value: 'blank',
     label: 'Blank list',
-    description: 'Simple text items',
+    description: 'Paragraphs, notes, bullets & numbers',
   },
   {
     value: 'checklist',
     label: 'Checklist',
     description: 'Items you can check off',
   },
-  {
-    value: 'bullet',
-    label: 'Bullet list',
-    description: 'Items with bullet points',
-  },
-  {
-    value: 'numbered',
-    label: 'Numbered list',
-    description: 'Items with numbers',
-  },
 ];
 
-const getListTypeLabel = (type: ListType) =>
-  LIST_TYPES.find(
-    (item) => item.value === type,
-  )?.label ?? 'Checklist';
+function isAccentBlack(color?: string): boolean {
+  if (!color) return false;
+  const normalized = color.trim().toLowerCase();
+  return (
+    normalized === '#000000' ||
+    normalized === '#000' ||
+    normalized === 'black' ||
+    normalized === 'rgb(0,0,0)' ||
+    normalized === 'rgba(0,0,0,1)'
+  );
+}
 
 export default function ListsScreen() {
+  const navigation = useNavigation();
+
+  useEffect(() => {
+    navigation.setOptions({ tabBarStyle: { display: 'none' } });
+    return () => {
+      navigation.setOptions({ tabBarStyle: undefined });
+    };
+  }, [navigation]);
+
   const {
     accentForeground,
-    accentWash,
+    accentColor: rawAccent,
     isDark,
-    onAccent,
-  } = useApp();
+  } = useApp() as any;
+
+  const pageBg = rawAccent || accentForeground || '#FDE047';
+  const isAccentPureBlack = isAccentBlack(pageBg);
+  const headerTextColor = isAccentPureBlack ? '#FFFFFF' : '#000000';
+
+  const C = isDark
+    ? {
+        cardBg: '#121212',
+        cardText: '#FFFFFF',
+        cardSubtext: '#A1A1AA',
+        cardBorder: '#000000',
+        cardInputBg: '#1E1E1E',
+        cardInputBorder: '#333333',
+        highlightBg: '#854D0E',
+        highlightText: '#FEF08A',
+      }
+    : {
+        cardBg: '#FFFFFF',
+        cardText: '#000000',
+        cardSubtext: '#52525B',
+        cardBorder: '#000000',
+        cardInputBg: '#F4F4F5',
+        cardInputBorder: '#E4E4E7',
+        highlightBg: '#FEF08A',
+        highlightText: '#854D0E',
+      };
 
   const [lists, setLists] = useState<ListCard[]>([]);
-  const [expanded, setExpanded] = useState<Set<string>>(
-    new Set(),
-  );
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [newListOpen, setNewListOpen] = useState(false);
   const [newListTitle, setNewListTitle] = useState('');
-  const [newListType, setNewListType] =
-    useState<ListType>('checklist');
+  const [newListType, setNewListType] = useState<ListType>('checklist');
   const [savingList, setSavingList] = useState(false);
 
+  const [searchQuery, setSearchQuery] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
 
-  /*
-   * Search lists by title or item text.
-   */
-  const [searchQuery, setSearchQuery] = useState('');
+  const [newItemText, setNewItemText] = useState<Record<string, string>>({});
+  const [paragraphHeights, setParagraphHeights] = useState<Record<string, number>>({});
+  const [addParagraphHeights, setAddParagraphHeights] = useState<Record<string, number>>({});
 
-  /*
-   * Text currently being entered for each list.
-   */
-  const [newItemText, setNewItemText] = useState<
-    Record<string, string>
+  const [blankFormatState, setBlankFormatState] = useState<
+    Record<string, { format: BlankFormat }>
   >({});
 
-  /*
-   * Dynamic height for Blank-list input boxes.
-   */
-  const [inputHeights, setInputHeights] = useState<
-    Record<string, number>
-  >({});
-
-  const C = isDark
-    ? {
-        bg: '#090909',
-        card: '#151515',
-        border: '#2A2A2A',
-        text: '#F4F2EE',
-        muted: '#AAA59D',
-        input: '#1E1E1E',
-        inputBorder: '#363636',
-      }
-    : {
-        bg: '#FBFAF8',
-        card: '#FFFFFF',
-        border: '#ECE9E4',
-        text: '#27241F',
-        muted: '#8F8A82',
-        input: '#FCFBF9',
-        inputBorder: '#E0DDD7',
-      };
-
-  /* =========================================================
-     LOAD LISTS
-  ========================================================= */
+  const [deleteConfirmListId, setDeleteConfirmListId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -162,78 +189,69 @@ export default function ListsScreen() {
     ] = await Promise.all([
       supabase
         .from('lists')
-        .select(
-          'id, title, icon, list_type',
-        )
-        .order('created_at', {
-          ascending: true,
-        }),
+        .select('id, title, icon, list_type')
+        .order('created_at', { ascending: true }),
 
       supabase
         .from('list_items')
-        .select(
-          'id, list_id, title, completed, position',
-        )
-        .order('position', {
-          ascending: true,
-        }),
+        .select('id, list_id, title, completed, position')
+        .order('position', { ascending: true }),
     ]);
 
     if (listErr || itemErr) {
-      console.log(
-        'LIST LOAD ERROR:',
-        listErr ?? itemErr,
-      );
-
-      setError(
-        'Your lists could not be loaded.',
-      );
+      setError(`Your lists could not be loaded: ${(listErr ?? itemErr)?.message ?? 'Unknown error'}`);
       setLoading(false);
       return;
     }
 
-    const items = (
-      itemRows ?? []
-    ) as {
-      id: string;
-      list_id: string;
-      title: string;
-      completed: boolean;
-      position: number;
-    }[];
+    const items = (itemRows ?? []) as any[];
 
-    const cards: ListCard[] = (
-      (listRows ?? []) as {
-        id: string;
-        title: string;
-        icon: string;
-        list_type: ListType | null;
-      }[]
-    ).map((list) => ({
-      id: list.id,
-      title: list.title,
-      icon: list.icon ?? '',
+    const cards: ListCard[] = ((listRows ?? []) as any[]).map((list) => {
+      const rawType = list.list_type ?? 'checklist';
+      const isBlankType = rawType === 'blank' || rawType === 'bullet' || rawType === 'numbered';
 
-      /*
-       * Existing lists without list_type
-       * remain checklists.
-       */
-      list_type:
-        list.list_type ?? 'checklist',
-
-      items: items
-        .filter(
-          (item) =>
-            item.list_id === list.id,
-        )
-        .map((item) => ({
-          id: item.id,
-          title: item.title,
-          completed: item.completed,
-        })),
-    }));
+      return {
+        id: list.id,
+        title: list.title,
+        icon: list.icon ?? '',
+        list_type: isBlankType ? 'blank' : 'checklist',
+        blank_format: (() => {
+          const listItems = items.filter((item) => item.list_id === list.id);
+          const storedFormat = listItems
+            .map((item) => decodeItemTitle(item.title ?? '').format)
+            .find((format) => format !== 'paragraph');
+          return rawType === 'bullet'
+            ? 'bullet'
+            : rawType === 'numbered'
+              ? 'numbered'
+              : storedFormat ?? 'paragraph';
+        })(),
+        items: items
+          .filter((item) => item.list_id === list.id)
+          .map((item) => {
+            const decoded = decodeItemTitle(item.title ?? '');
+            return {
+              id: item.id,
+              title: decoded.title,
+              completed: Boolean(item.completed),
+              format_type: decoded.format,
+              is_bold: false,
+              is_italic: false,
+            };
+          }),
+      };
+    });
 
     setLists(cards);
+
+    const initFormats: Record<string, any> = {};
+    cards.forEach((c) => {
+      initFormats[c.id] = {
+        format: c.blank_format || 'paragraph',
+      };
+    });
+    setBlankFormatState(initFormats);
+
     setLoading(false);
   }, []);
 
@@ -241,67 +259,27 @@ export default function ListsScreen() {
     load();
   }, [load]);
 
-  /* =========================================================
-     SEARCH
-  ========================================================= */
-
   const filteredLists = useMemo(() => {
-    const query =
-      searchQuery.trim().toLowerCase();
-
-    if (!query) {
-      return lists;
-    }
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return lists;
 
     return lists.filter((list) => {
-      const titleMatch =
-        list.title
-          .toLowerCase()
-          .includes(query);
+      const titleMatch = list.title.toLowerCase().includes(query);
+      const typeMatch = (list.list_type === 'blank' ? 'Blank list' : 'Checklist').toLowerCase().includes(query);
+      const itemMatch = list.items.some((item) => item.title.toLowerCase().includes(query));
 
-      const typeMatch =
-        getListTypeLabel(
-          list.list_type,
-        )
-          .toLowerCase()
-          .includes(query);
-
-      const itemMatch =
-        list.items.some((item) =>
-          item.title
-            .toLowerCase()
-            .includes(query),
-        );
-
-      return (
-        titleMatch ||
-        typeMatch ||
-        itemMatch
-      );
+      return titleMatch || typeMatch || itemMatch;
     });
   }, [lists, searchQuery]);
-
-  /* =========================================================
-     EXPAND / COLLAPSE
-  ========================================================= */
 
   const toggleExpand = (id: string) => {
     setExpanded((prev) => {
       const next = new Set(prev);
-
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
-
-  /* =========================================================
-     NEW LIST
-  ========================================================= */
 
   const openNewList = () => {
     setNewListTitle('');
@@ -312,9 +290,7 @@ export default function ListsScreen() {
 
   const saveList = async () => {
     if (!newListTitle.trim()) {
-      setError(
-        'Give your list a name.',
-      );
+      setError('Give your list a name.');
       return;
     }
 
@@ -328,60 +304,44 @@ export default function ListsScreen() {
       } = await supabase.auth.getUser();
 
       if (authError || !user) {
-        setError(
-          'You must be logged in to create a list.',
-        );
+        setError('You must be logged in to create a list.');
         setSavingList(false);
         return;
       }
 
-      const {
-        data,
-        error: saveErr,
-      } = await supabase
+      const { data, error: saveErr } = await supabase
         .from('lists')
         .insert({
           user_id: user.id,
           title: newListTitle.trim(),
           list_type: newListType,
         })
-        .select(
-          'id, title, icon, list_type',
-        )
+        .select('id, title, icon, list_type')
         .maybeSingle();
 
       if (saveErr || !data) {
-        console.log(
-          'LIST SAVE ERROR:',
-          saveErr,
-        );
-
-        setError(
-          'The list could not be saved.',
-        );
+        setError('The list could not be saved.');
         setSavingList(false);
         return;
       }
 
-      const created = data as {
-        id: string;
-        title: string;
-        icon: string;
-        list_type: ListType;
+      const created = data as any;
+      const newListObj: ListCard = {
+        id: created.id,
+        title: created.title,
+        icon: created.icon ?? '',
+        list_type: created.list_type === 'blank' ? 'blank' : 'checklist',
+        blank_format: 'paragraph',
+        items: [],
       };
 
-      setLists((current) => [
-        ...current,
-        {
-          id: created.id,
-          title: created.title,
-          icon: created.icon ?? '',
-          list_type:
-            created.list_type ??
-            newListType,
-          items: [],
+      setLists((current) => [...current, newListObj]);
+      setBlankFormatState((prev) => ({
+        ...prev,
+        [created.id]: {
+          format: 'paragraph',
         },
-      ]);
+      }));
 
       setExpanded((prev) => {
         const next = new Set(prev);
@@ -392,32 +352,24 @@ export default function ListsScreen() {
       setNewListOpen(false);
       setNewListTitle('');
       setNewListType('checklist');
-    } catch (err) {
-      console.log(
-        'LIST SAVE EXCEPTION:',
-        err,
-      );
-
-      setError(
-        'Something went wrong while creating the list.',
-      );
+    } catch {
+      setError('Something went wrong while creating the list.');
     } finally {
       setSavingList(false);
     }
   };
 
-  /* =========================================================
-     DELETE LIST
-  ========================================================= */
+  const confirmDeleteList = (id: string) => {
+    setDeleteConfirmListId(id);
+  };
 
-  const deleteList = async (id: string) => {
+  const handleExecuteDeleteList = async () => {
+    if (!deleteConfirmListId) return;
+    const id = deleteConfirmListId;
+    setDeleteConfirmListId(null);
+
     const previous = lists;
-
-    setLists((current) =>
-      current.filter(
-        (list) => list.id !== id,
-      ),
-    );
+    setLists((current) => current.filter((list) => list.id !== id));
 
     setExpanded((current) => {
       const next = new Set(current);
@@ -425,47 +377,123 @@ export default function ListsScreen() {
       return next;
     });
 
-    const { error: deleteError } =
-      await supabase
-        .from('lists')
-        .delete()
-        .eq('id', id);
+    const { error: deleteError } = await supabase.from('lists').delete().eq('id', id);
 
     if (deleteError) {
-      console.log(
-        'LIST DELETE ERROR:',
-        deleteError,
-      );
-
-      setError(
-        'Could not delete the list.',
-      );
-
+      setError('Could not delete the list.');
       setLists(previous);
     }
   };
 
-  /* =========================================================
-     ADD ITEM
-  ========================================================= */
+  const updateBlankFormat = (listId: string, key: 'format', value: any) => {
+    const selectedFormat = value as BlankFormat;
+    const targetList = lists.find((list) => list.id === listId && list.list_type === 'blank');
 
-  const addItem = async (listId: string) => {
-    const rawText =
-      newItemText[listId] ?? '';
+    setBlankFormatState((prev) => ({
+      ...prev,
+      [listId]: {
+        ...(prev[listId] || { format: 'paragraph' }),
+        format: selectedFormat,
+      },
+    }));
 
-    const text = rawText.trim();
-
-    if (!text) {
-      return;
-    }
-
-    const list = lists.find(
-      (item) => item.id === listId,
+    setLists((current) =>
+      current.map((list) =>
+        list.id === listId && list.list_type === 'blank'
+          ? {
+              ...list,
+              blank_format: selectedFormat,
+              items: list.items.map((item) => ({ ...item, format_type: selectedFormat })),
+            }
+          : list,
+      ),
     );
 
-    if (!list) {
-      return;
+    if (targetList) {
+      void Promise.all(
+        targetList.items.map(async (item) => {
+          await supabase
+            .from('list_items')
+            .update({ title: encodeItemTitle(item.title, selectedFormat) })
+            .eq('id', item.id);
+        }),
+      );
     }
+  };
+
+  const handleItemTextChange = (listId: string, itemId: string, text: string) => {
+    setLists((current) =>
+      current.map((list) => {
+        if (list.id !== listId) return list;
+        return {
+          ...list,
+          items: list.items.map((item) =>
+            item.id === itemId
+              ? {
+                  ...item,
+                  title: text,
+                }
+              : item,
+          ),
+        };
+      }),
+    );
+  };
+
+  const handleItemContentSizeChange = (itemId: string, height: number) => {
+    const clampedHeight = Math.max(PARAGRAPH_MIN_HEIGHT, Math.ceil(height) + 4);
+    setParagraphHeights((previous) => {
+      if (previous[itemId] === clampedHeight) return previous;
+      return { ...previous, [itemId]: clampedHeight };
+    });
+  };
+
+  const handleAddContentSizeChange = (listId: string, height: number) => {
+    const clampedHeight = Math.max(PARAGRAPH_MIN_HEIGHT, Math.ceil(height) + 4);
+    setAddParagraphHeights((previous) => {
+      if (previous[listId] === clampedHeight) return previous;
+      return { ...previous, [listId]: clampedHeight };
+    });
+  };
+
+  const handleItemTextBlur = async (listId: string, itemId: string, text: string) => {
+    const list = lists.find((l) => l.id === listId);
+    const item = list?.items.find((i) => i.id === itemId);
+    if (!item) return;
+
+    const fmt = list?.blank_format || item.format_type || 'paragraph';
+    const encodedTitle = encodeItemTitle(text, fmt);
+
+    await supabase
+      .from('list_items')
+      .update({ title: encodedTitle })
+      .eq('id', itemId);
+  };
+
+  const addItem = async (listId: string, initialText?: string) => {
+    const rawText = initialText !== undefined ? initialText : newItemText[listId] ?? '';
+    const text = rawText.trim();
+
+    if (initialText === undefined && !text) return;
+
+    const list = lists.find((item) => item.id === listId);
+    if (!list) return;
+
+    const fmt = blankFormatState[listId] || {
+      format: 'paragraph',
+    };
+
+    if (list.list_type === 'blank' && fmt.format === 'paragraph') {
+      const hasParagraph = list.items.some(
+        (item) => (item.format_type || 'paragraph') === 'paragraph'
+      );
+      if (hasParagraph) {
+        setError('A blank list can only contain one paragraph.');
+        return;
+      }
+    }
+
+    const currentInputHeight = addParagraphHeights[listId] ?? PARAGRAPH_MIN_HEIGHT;
 
     const {
       data: { user },
@@ -473,18 +501,17 @@ export default function ListsScreen() {
     } = await supabase.auth.getUser();
 
     if (authError || !user) {
-      setError(
-        'You must be logged in to add an item.',
-      );
+      setError('You must be logged in to add an item.');
       return;
     }
 
     const tempId = `temp-${Date.now()}`;
-
     const newItem: ListItem = {
       id: tempId,
       title: text,
       completed: false,
+      format_type: list.list_type === 'blank' ? fmt.format : undefined,
+      inputHeight: currentInputHeight,
     };
 
     setLists((current) =>
@@ -492,152 +519,84 @@ export default function ListsScreen() {
         item.id === listId
           ? {
               ...item,
-              items: [
-                ...item.items,
-                newItem,
-              ],
+              items: [...item.items, newItem],
             }
           : item,
       ),
     );
 
-    setNewItemText((previous) => ({
-      ...previous,
-      [listId]: '',
-    }));
+    if (initialText === undefined) {
+      setNewItemText((previous) => ({
+        ...previous,
+        [listId]: '',
+      }));
+      setAddParagraphHeights((previous) => ({
+        ...previous,
+        [listId]: PARAGRAPH_MIN_HEIGHT,
+      }));
+    }
 
-    setInputHeights((previous) => ({
-      ...previous,
-      [listId]: 56,
-    }));
+    const nextPosition = list.items.length;
 
-    const nextPosition =
-      list.items.length;
-
-    const {
-      data,
-      error: insertError,
-    } = await supabase
+    const { data, error: insertError } = await supabase
       .from('list_items')
       .insert({
         user_id: user.id,
         list_id: listId,
-        title: text,
+        title: encodeItemTitle(text, newItem.format_type || 'paragraph'),
         completed: false,
         position: nextPosition,
       })
-      .select(
-        'id, title, completed',
-      )
+      .select('id, title, completed')
       .maybeSingle();
 
     if (insertError || !data) {
-      console.log(
-        'LIST ITEM INSERT ERROR:',
-        insertError,
-      );
-
-      setError(
-        'Could not add the item.',
-      );
-
+      setError(`Could not add the item: ${insertError?.message ?? 'Unknown error'}`);
       setLists((current) =>
         current.map((item) =>
           item.id === listId
             ? {
                 ...item,
-                items:
-                  item.items.filter(
-                    (entry) =>
-                      entry.id !==
-                      tempId,
-                  ),
+                items: item.items.filter((entry) => entry.id !== tempId),
               }
             : item,
         ),
       );
-
       return;
     }
 
-    const saved = data as {
-      id: string;
-      title: string;
-      completed: boolean;
-    };
-
+    const saved = data as any;
     setLists((current) =>
       current.map((item) =>
         item.id === listId
           ? {
               ...item,
-              items:
-                item.items.map(
-                  (entry) =>
-                    entry.id ===
-                    tempId
-                      ? {
-                          id: saved.id,
-                          title:
-                            saved.title,
-                          completed:
-                            saved.completed,
-                        }
-                      : entry,
-                ),
+              items: item.items.map((entry) =>
+                entry.id === tempId
+                  ? {
+                      ...newItem,
+                      id: saved.id,
+                      title: text,
+                      completed: Boolean(saved.completed),
+                    }
+                  : entry,
+              ),
             }
           : item,
       ),
     );
-  };
 
-  /* =========================================================
-     UPDATE INPUT HEIGHT
-  ========================================================= */
-
-  const updateInputHeight = (
-    listId: string,
-    height: number,
-  ) => {
-    const minimumHeight = 56;
-
-    const nextHeight = Math.max(
-      minimumHeight,
-      Math.ceil(height),
-    );
-
-    setInputHeights((previous) => ({
+    setParagraphHeights((previous) => ({
       ...previous,
-      [listId]: nextHeight,
+      [saved.id]: currentInputHeight,
     }));
   };
 
-  /* =========================================================
-     TOGGLE CHECKLIST ITEM
-  ========================================================= */
+  const toggleItem = async (listId: string, itemId: string) => {
+    const list = lists.find((item) => item.id === listId);
+    if (!list || list.list_type !== 'checklist') return;
 
-  const toggleItem = async (
-    listId: string,
-    itemId: string,
-  ) => {
-    const list = lists.find(
-      (item) => item.id === listId,
-    );
-
-    if (!list) return;
-
-    if (
-      list.list_type !==
-      'checklist'
-    ) {
-      return;
-    }
-
-    const item = list.items.find(
-      (entry) =>
-        entry.id === itemId,
-    );
-
+    const item = list.items.find((entry) => entry.id === itemId);
     if (!item) return;
 
     const next = !item.completed;
@@ -647,74 +606,23 @@ export default function ListsScreen() {
         itemList.id === listId
           ? {
               ...itemList,
-              items:
-                itemList.items.map(
-                  (entry) =>
-                    entry.id ===
-                    itemId
-                      ? {
-                          ...entry,
-                          completed:
-                            next,
-                        }
-                      : entry,
-                ),
+              items: itemList.items.map((entry) =>
+                entry.id === itemId
+                  ? {
+                      ...entry,
+                      completed: next,
+                    }
+                  : entry,
+              ),
             }
           : itemList,
       ),
     );
 
-    const {
-      error: updateError,
-    } = await supabase
-      .from('list_items')
-      .update({
-        completed: next,
-      })
-      .eq('id', itemId);
-
-    if (updateError) {
-      console.log(
-        'LIST ITEM UPDATE ERROR:',
-        updateError,
-      );
-
-      setError(
-        'Could not update the item.',
-      );
-
-      setLists((current) =>
-        current.map((itemList) =>
-          itemList.id === listId
-            ? {
-                ...itemList,
-                items:
-                  itemList.items.map(
-                    (entry) =>
-                      entry.id ===
-                      itemId
-                        ? {
-                            ...entry,
-                            completed:
-                              !next,
-                          }
-                        : entry,
-                  ),
-              }
-            : itemList,
-        ),
-      );
-    }
+    await supabase.from('list_items').update({ completed: next }).eq('id', itemId);
   };
 
-  /* =========================================================
-     DELETE ITEM
-  ========================================================= */
-
-  const deleteItem = async (
-    listId: string,
-    itemId: string,
-  ) => {
+  const deleteItem = async (listId: string, itemId: string) => {
     const previous = lists;
 
     setLists((current) =>
@@ -722,126 +630,54 @@ export default function ListsScreen() {
         list.id === listId
           ? {
               ...list,
-              items:
-                list.items.filter(
-                  (item) =>
-                    item.id !==
-                    itemId,
-                ),
+              items: list.items.filter((item) => item.id !== itemId),
             }
           : list,
       ),
     );
 
-    const {
-      error: deleteError,
-    } = await supabase
-      .from('list_items')
-      .delete()
-      .eq('id', itemId);
+    const { error: deleteError } = await supabase.from('list_items').delete().eq('id', itemId);
 
     if (deleteError) {
-      console.log(
-        'LIST ITEM DELETE ERROR:',
-        deleteError,
-      );
-
-      setError(
-        'Could not delete the item.',
-      );
-
+      setError('Could not delete the item.');
       setLists(previous);
     }
   };
 
-  /* =========================================================
-     ITEM PREFIX
-  ========================================================= */
-
-  const renderItemPrefix = (
-    list: ListCard,
-    item: ListItem,
-    index: number,
-  ) => {
-    if (
-      list.list_type ===
-      'checklist'
-    ) {
+  const renderItemPrefix = (list: ListCard, item: ListItem, index: number) => {
+    if (list.list_type === 'checklist') {
       return (
         <Pressable
-          onPress={() =>
-            toggleItem(
-              list.id,
-              item.id,
-            )
-          }
+          onPress={() => toggleItem(list.id, item.id)}
           style={[
             styles.itemCheck,
+            { borderColor: C.cardText },
             item.completed && {
-              backgroundColor:
-                accentForeground,
-              borderColor:
-                accentForeground,
+              backgroundColor: '#000000',
+              borderColor: '#000000',
             },
           ]}
           hitSlop={8}
         >
-          {item.completed && (
-            <Check
-              color={onAccent}
-              size={13}
-            />
-          )}
+          {item.completed && <Check color="#FFFFFF" size={13} strokeWidth={3} />}
         </Pressable>
       );
     }
 
-    if (
-      list.list_type ===
-      'bullet'
-    ) {
+    const fmtType = list.blank_format || item.format_type || 'paragraph';
+
+    if (fmtType === 'bullet') {
       return (
-        <View
-          style={
-            styles.bulletPrefix
-          }
-        >
-          <Text
-            style={[
-              styles.bulletText,
-              {
-                color:
-                  accentForeground,
-              },
-            ]}
-          >
-            •
-          </Text>
+        <View style={styles.bulletPrefix}>
+          <Text style={[styles.bulletText, { color: C.cardText }]}>•</Text>
         </View>
       );
     }
 
-    if (
-      list.list_type ===
-      'numbered'
-    ) {
+    if (fmtType === 'numbered') {
       return (
-        <View
-          style={
-            styles.numberPrefix
-          }
-        >
-          <Text
-            style={[
-              styles.numberText,
-              {
-                color:
-                  accentForeground,
-              },
-            ]}
-          >
-            {index + 1}.
-          </Text>
+        <View style={styles.numberPrefix}>
+          <Text style={[styles.numberText, { color: C.cardText }]}>{index + 1}.</Text>
         </View>
       );
     }
@@ -849,945 +685,538 @@ export default function ListsScreen() {
     return null;
   };
 
-  /* =========================================================
-     RENDER
-  ========================================================= */
-
   return (
-    <SafeAreaView
-      style={[
-        styles.safe,
-        {
-          backgroundColor:
-            C.bg,
-        },
-      ]}
-    >
-      {/* =====================================================
-          HEADER
-      ===================================================== */}
+    <SafeAreaView style={[styles.safe, { backgroundColor: pageBg }]}>
+      <StatusBar
+        barStyle={isAccentPureBlack ? 'light-content' : 'dark-content'}
+        backgroundColor={pageBg}
+      />
 
-      <View
-        style={[
-          styles.header,
-          {
-            borderBottomColor:
-              C.border,
-          },
-        ]}
-      >
+      <View style={styles.header}>
         <Pressable
-          onPress={() =>
-            router.push('/modules')
-          }
-          style={[
+          onPress={() => router.push('/modules')}
+          style={({ pressed }) => [
             styles.headerBack,
-            {
-              backgroundColor:
-                accentForeground,
-            },
+            pressed && styles.pressedBtn,
           ]}
           hitSlop={12}
         >
-          <ChevronLeft
-            color="#FFFFFF"
-            size={22}
-            strokeWidth={2.4}
-          />
+          <ChevronLeft color="#FFFFFF" size={22} strokeWidth={2.8} />
         </Pressable>
 
-        <Text
-          style={[
-            styles.headerTitle,
-            {
-              color: isDark
-                ? '#FFFFFF'
-                : accentForeground,
-            },
-          ]}
-        >
+        <Text style={[styles.headerTitle, { color: headerTextColor }]}>
           LISTS
         </Text>
 
         <Pressable
-          onPress={() =>
-            setMenuOpen(true)
-          }
-          style={styles.headerBtn}
+          onPress={() => setMenuOpen(true)}
+          style={({ pressed }) => [
+            styles.headerBtn,
+            pressed && styles.pressedBtn,
+          ]}
           hitSlop={12}
         >
-          <MoreVertical
-            color={C.text}
-            size={22}
-          />
+          <MoreVertical color={headerTextColor} size={24} strokeWidth={2.5} />
         </Pressable>
       </View>
 
-      {/* =====================================================
-          SEARCH BAR
-      ===================================================== */}
-
-      <View
-        style={[
-          styles.searchWrap,
-          {
-            backgroundColor:
-              C.input,
-            borderColor:
-              C.inputBorder,
-          },
-        ]}
-      >
-        <Search
-          color={C.muted}
-          size={18}
-          strokeWidth={2}
-        />
-
-        <TextInput
-          value={searchQuery}
-          onChangeText={
-            setSearchQuery
-          }
-          placeholder="Search lists"
-          placeholderTextColor={
-            C.muted
-          }
-          style={[
-            styles.searchInput,
-            {
-              color: C.text,
-            },
-          ]}
-          returnKeyType="search"
-          clearButtonMode="never"
-        />
-
-        {searchQuery.length > 0 && (
-          <Pressable
-            onPress={() =>
-              setSearchQuery('')
-            }
-            hitSlop={10}
-            style={
-              styles.searchClear
-            }
-          >
-            <X
-              color={C.muted}
-              size={17}
-            />
-          </Pressable>
-        )}
+      <View style={styles.searchWrap}>
+        <View style={styles.shadowBackdrop} />
+        <View style={styles.searchBoxBody}>
+          <Search color="#000000" size={18} strokeWidth={2.5} />
+          <TextInput
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder="Search lists..."
+            placeholderTextColor="#71717A"
+            style={styles.searchInput}
+            returnKeyType="search"
+          />
+          {searchQuery.length > 0 && (
+            <Pressable onPress={() => setSearchQuery('')} hitSlop={10}>
+              <X color="#000000" size={18} strokeWidth={2.5} />
+            </Pressable>
+          )}
+        </View>
       </View>
-
-      {/* =====================================================
-          MENU
-      ===================================================== */}
 
       <Modal
         visible={menuOpen}
         transparent
         animationType="fade"
-        onRequestClose={() =>
-          setMenuOpen(false)
-        }
+        onRequestClose={() => setMenuOpen(false)}
       >
-        <Pressable
-          style={styles.menuShade}
-          onPress={() =>
-            setMenuOpen(false)
-          }
-        >
-          <Pressable
-            style={[
-              styles.menuCard,
-              {
-                backgroundColor:
-                  C.card,
-                borderColor:
-                  C.border,
-              },
-            ]}
-            onPress={(event) =>
-              event.stopPropagation()
-            }
-          >
-            <Pressable
-              onPress={() => {
-                setMenuOpen(false);
-                router.push(
-                  '/(tabs)/profile',
-                );
-              }}
-              style={styles.menuItem}
-            >
-              <Text
-                style={[
-                  styles.menuItemText,
-                  {
-                    color: C.text,
-                  },
-                ]}
+        <Pressable style={styles.menuShade} onPress={() => setMenuOpen(false)}>
+          <View style={styles.menuCardWrapper}>
+            <View style={styles.shadowBackdrop} />
+            <View style={[styles.menuCardBody, { backgroundColor: C.cardBg }]}>
+              <Pressable
+                onPress={() => {
+                  setMenuOpen(false);
+                  router.push('/(tabs)/profile');
+                }}
+                style={styles.menuItem}
               >
-                Settings
-              </Text>
-            </Pressable>
-          </Pressable>
+                <Text style={[styles.menuItemText, { color: C.cardText }]}>
+                  Settings
+                </Text>
+              </Pressable>
+            </View>
+          </View>
         </Pressable>
       </Modal>
 
-      {/* =====================================================
-          MAIN CONTENT
-      ===================================================== */}
-
       <ScrollView
-        contentContainerStyle={
-          styles.content
-        }
-        showsVerticalScrollIndicator={
-          false
-        }
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
         {error && (
-          <Text
-            style={[
-              styles.error,
-              {
-                color: '#C53A2F',
-              },
-            ]}
-          >
-            {error}
-          </Text>
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
         )}
 
         {loading ? (
-          <Text
-            style={[
-              styles.emptyText,
-              {
-                color: C.muted,
-              },
-            ]}
-          >
+          <Text style={[styles.emptyText, { color: headerTextColor }]}>
             Loading your lists...
           </Text>
         ) : lists.length === 0 ? (
           <View style={styles.empty}>
-            <Text
-              style={[
-                styles.emptyText,
-                {
-                  color: C.muted,
-                },
-              ]}
-            >
-              No lists yet. Tap the +
-              button to create your
-              first one.
+            <Text style={[styles.emptyText, { color: headerTextColor }]}>
+              No lists yet. Tap the + button below to create one!
             </Text>
           </View>
-        ) : filteredLists.length ===
-          0 ? (
+        ) : filteredLists.length === 0 ? (
           <View style={styles.empty}>
-            <Text
-              style={[
-                styles.emptyText,
-                {
-                  color: C.muted,
-                },
-              ]}
-            >
-              No lists found for "
-              {searchQuery}"
+            <Text style={[styles.emptyText, { color: headerTextColor }]}>
+              No lists match "{searchQuery}"
             </Text>
           </View>
         ) : (
-          <View
-            style={styles.listStack}
-          >
-            {filteredLists.map(
-              (list) => {
-                const isChecklist =
-                  list.list_type ===
-                  'checklist';
+          <View style={styles.listStack}>
+            {filteredLists.map((list) => {
+              const isChecklist = list.list_type === 'checklist';
+              const isBlank = list.list_type === 'blank';
 
-                const isBlank =
-                  list.list_type ===
-                  'blank';
+              const doneCount = isChecklist
+                ? list.items.filter((item) => item.completed).length
+                : 0;
+              const totalCount = list.items.length;
+              const pct = isChecklist && totalCount > 0 ? (doneCount / totalCount) * 100 : 0;
 
-                const done =
-                  isChecklist
-                    ? list.items.filter(
-                        (item) =>
-                          item.completed,
-                      ).length
-                    : 0;
+              const isOpen = expanded.has(list.id);
+              const currentInput = newItemText[list.id] ?? '';
 
-                const total =
-                  list.items.length;
+              const activeToolbar = blankFormatState[list.id] || {
+                format: list.blank_format || 'paragraph',
+              };
 
-                const pct =
-                  isChecklist &&
-                  total > 0
-                    ? (done / total) *
-                      100
-                    : 0;
+              const isItemizedFormat =
+                isChecklist || activeToolbar.format === 'numbered' || activeToolbar.format === 'bullet';
 
-                const isOpen =
-                  expanded.has(
-                    list.id,
-                  );
+              const hasExistingParagraph =
+                isBlank &&
+                activeToolbar.format === 'paragraph' &&
+                list.items.some((item) => (item.format_type || 'paragraph') === 'paragraph');
 
-                const currentInput =
-                  newItemText[
-                    list.id
-                  ] ?? '';
+              return (
+                <View key={list.id} style={styles.cardContainer}>
+                  <View style={styles.cardShadowBackdrop} />
 
-                const currentInputHeight =
-                  inputHeights[
-                    list.id
-                  ] ?? 56;
-
-                return (
                   <View
-                    key={list.id}
                     style={[
-                      styles.card,
+                      styles.cardBody,
                       {
-                        backgroundColor:
-                          C.card,
-                        borderColor:
-                          C.border,
+                        backgroundColor: C.cardBg,
+                        borderColor: C.cardBorder,
                       },
                     ]}
                   >
-                    {/* =================================================
-                        CARD HEADER
-                    ================================================= */}
-
                     <Pressable
-                      onPress={() =>
-                        toggleExpand(
-                          list.id,
-                        )
-                      }
-                      style={
-                        styles.cardHeader
-                      }
+                      onPress={() => toggleExpand(list.id)}
+                      style={styles.cardHeader}
                     >
-                      <View
-                        style={
-                          styles.cardHeaderLeft
-                        }
-                      >
-                        <View
-                          style={[
-                            styles.cardIcon,
-                            {
-                              backgroundColor:
-                                accentWash,
-                            },
-                          ]}
-                        >
-                          <ListChecks
-                            color={
-                              accentForeground
-                            }
-                            size={16}
-                            strokeWidth={
-                              2.2
-                            }
-                          />
+                      <View style={styles.cardHeaderLeft}>
+                        <View style={[styles.cardIconBox, { backgroundColor: pageBg }]}>
+                          <ListChecks color="#000000" size={18} strokeWidth={2.5} />
                         </View>
 
-                        <View
-                          style={
-                            styles.cardHeaderCopy
-                          }
-                        >
+                        <View style={styles.cardHeaderCopy}>
                           <Text
-                            style={[
-                              styles.cardTitle,
-                              {
-                                color:
-                                  C.text,
-                              },
-                            ]}
+                            style={[styles.cardTitle, { color: C.cardText }]}
                             numberOfLines={1}
                           >
                             {list.title}
                           </Text>
 
-                          <Text
-                            style={[
-                              styles.cardMeta,
-                              {
-                                color:
-                                  C.muted,
-                              },
-                            ]}
-                          >
-                            {getListTypeLabel(
-                              list.list_type,
-                            )}
-
+                          <Text style={[styles.cardMeta, { color: C.cardSubtext }]}>
+                            {isBlank ? 'Blank list' : 'Checklist'}
                             {isChecklist
-                              ? ` • ${done} of ${total} done`
-                              : total > 0
-                                ? ` • ${total} item${
-                                    total ===
-                                    1
-                                      ? ''
-                                      : 's'
-                                  }`
-                                : ''}
+                              ? ` • ${doneCount} of ${totalCount} done`
+                              : totalCount > 0
+                              ? ` • ${totalCount} note${totalCount === 1 ? '' : 's'}`
+                              : ''}
                           </Text>
                         </View>
                       </View>
 
-                      <View
-                        style={
-                          styles.cardHeaderRight
-                        }
-                      >
+                      <View style={styles.cardHeaderRight}>
                         {isChecklist && (
-                          <View
-                            style={[
-                              styles.miniProgress,
-                              {
-                                backgroundColor:
-                                  isDark
-                                    ? '#292929'
-                                    : '#F0EEEA',
-                              },
-                            ]}
-                          >
+                          <View style={styles.miniProgressTrack}>
                             <View
                               style={[
                                 styles.miniProgressFill,
-                                {
-                                  width: `${pct}%`,
-                                  backgroundColor:
-                                    accentForeground,
-                                },
+                                { width: `${pct}%`, backgroundColor: pageBg },
                               ]}
                             />
                           </View>
                         )}
 
                         {isOpen ? (
-                          <ChevronUp
-                            color={
-                              C.muted
-                            }
-                            size={18}
-                          />
+                          <ChevronUp color={C.cardText} size={20} strokeWidth={2.5} />
                         ) : (
-                          <ChevronDown
-                            color={
-                              C.muted
-                            }
-                            size={18}
-                          />
+                          <ChevronDown color={C.cardText} size={20} strokeWidth={2.5} />
                         )}
                       </View>
                     </Pressable>
 
-                    {/* =================================================
-                        EXPANDED BODY
-                    ================================================= */}
-
                     {isOpen && (
-                      <View
-                        style={[
-                          styles.cardBody,
-                          isBlank &&
-                            styles.blankCardBody,
-                        ]}
-                      >
-                        {list.items.length > 0 && (
-                          list.items.map(
-                            (
-                              item,
-                              index,
-                            ) => (
-                              <View
-                                key={
-                                  item.id
-                                }
-                                style={[
-                                  styles.itemRow,
-                                  isBlank &&
-                                    styles.blankItemRow,
-                                  {
-                                    borderBottomColor:
-                                      isDark
-                                        ? '#1F1F1F'
-                                        : '#F5F3EF',
-                                  },
-                                ]}
-                              >
-                                {renderItemPrefix(
-                                  list,
-                                  item,
-                                  index,
-                                )}
-
-                                <View
-                                  style={
-                                    styles.itemCopy
-                                  }
-                                >
-                                  <Text
-                                    style={[
-                                      styles.itemText,
-                                      isBlank &&
-                                        styles.blankItemText,
-                                      {
-                                        color:
-                                          C.text,
-                                      },
-                                      isChecklist &&
-                                        item.completed &&
-                                        styles.itemDone,
-                                    ]}
-                                  >
-                                    {
-                                      item.title
-                                    }
-                                  </Text>
-                                </View>
-
-                                <Pressable
-                                  onPress={() =>
-                                    deleteItem(
-                                      list.id,
-                                      item.id,
-                                    )
-                                  }
-                                  style={
-                                    styles.itemDelete
-                                  }
-                                  hitSlop={
-                                    8
-                                  }
-                                >
-                                  <Trash2
-                                    color={
-                                      isDark
-                                        ? '#555'
-                                        : '#D8D5CE'
-                                    }
-                                    size={
-                                      15
-                                    }
-                                  />
-                                </Pressable>
-                              </View>
-                            ),
-                          )
-                        )}
-
-                        {/* =================================================
-                            DYNAMIC ADD ITEM AREA
-                        ================================================= */}
-
-                        {(!isBlank || list.items.length === 0) && (
+                      <View style={styles.cardExpandedContent}>
+                        {isBlank && (
                           <View
                             style={[
-                              styles.addItemRow,
-                              isBlank &&
-                                styles.blankAddItemRow,
+                              styles.blankToolbar,
                               {
-                                borderTopColor:
-                                  isDark
-                                    ? '#1F1F1F'
-                                    : '#F5F3EF',
+                                backgroundColor: C.cardInputBg,
+                                borderColor: C.cardInputBorder,
                               },
                             ]}
                           >
-                            {!isBlank &&
-                              list.list_type ===
-                                'checklist' && (
-                              <Plus
-                                color={C.muted}
-                                size={16}
-                              />
+                            <View style={styles.toolbarGroup}>
+                              <Pressable
+                                onPress={() => updateBlankFormat(list.id, 'format', 'paragraph')}
+                                style={[
+                                  styles.toolbarBtn,
+                                  activeToolbar.format === 'paragraph' && styles.toolbarBtnActive,
+                                ]}
+                              >
+                                <Type
+                                  size={15}
+                                  color={activeToolbar.format === 'paragraph' ? '#FFFFFF' : C.cardText}
+                                  strokeWidth={2.5}
+                                />
+                              </Pressable>
+
+                              <Pressable
+                                onPress={() => updateBlankFormat(list.id, 'format', 'numbered')}
+                                style={[
+                                  styles.toolbarBtn,
+                                  activeToolbar.format === 'numbered' && styles.toolbarBtnActive,
+                                ]}
+                              >
+                                <ListOrdered
+                                  size={15}
+                                  color={activeToolbar.format === 'numbered' ? '#FFFFFF' : C.cardText}
+                                  strokeWidth={2.5}
+                                />
+                              </Pressable>
+
+                              <Pressable
+                                onPress={() => updateBlankFormat(list.id, 'format', 'bullet')}
+                                style={[
+                                  styles.toolbarBtn,
+                                  activeToolbar.format === 'bullet' && styles.toolbarBtnActive,
+                                ]}
+                              >
+                                <List
+                                  size={15}
+                                  color={activeToolbar.format === 'bullet' ? '#FFFFFF' : C.cardText}
+                                  strokeWidth={2.5}
+                                />
+                              </Pressable>
+                            </View>
+                          </View>
+                        )}
+
+                        {list.items.map((item, index) => {
+                          const currentSavedHeight =
+                            paragraphHeights[item.id] ?? item.inputHeight ?? PARAGRAPH_MIN_HEIGHT;
+                          const isParagraphItem =
+                            isBlank && (item.format_type || 'paragraph') === 'paragraph';
+
+                          return (
+                            <View
+                              key={item.id}
+                              style={[
+                                styles.itemRow,
+                                { borderBottomColor: C.cardInputBorder },
+                              ]}
+                            >
+                              {renderItemPrefix(list, item, index)}
+
+                              <View style={styles.itemCopy}>
+                                {isItemizedFormat || isBlank ? (
+                                  <TextInput
+                                    value={item.title}
+                                    onChangeText={(text) => handleItemTextChange(list.id, item.id, text)}
+                                    onContentSizeChange={(e) => {
+                                      if (isParagraphItem) {
+                                        handleItemContentSizeChange(item.id, e.nativeEvent.contentSize.height);
+                                      }
+                                    }}
+                                    onBlur={() => handleItemTextBlur(list.id, item.id, item.title)}
+                                    style={[
+                                      styles.itemInputInline,
+                                      { color: C.cardText },
+                                      isParagraphItem && {
+                                        flex: 0,
+                                        flexGrow: 0,
+                                        flexShrink: 0,
+                                        height: currentSavedHeight,
+                                      },
+                                      isChecklist && item.completed && styles.itemDone,
+                                    ]}
+                                    multiline={!isItemizedFormat}
+                                    scrollEnabled={false}
+                                    textAlignVertical={!isItemizedFormat ? 'top' : 'center'}
+                                  />
+                                ) : (
+                                  <Text
+                                    style={[
+                                      styles.itemText,
+                                      { color: C.cardText },
+                                      isChecklist && item.completed && styles.itemDone,
+                                    ]}
+                                  >
+                                    {item.title}
+                                  </Text>
+                                )}
+                              </View>
+
+                              {/* Only show delete trash button for bullet and numbered list items or checklists */}
+                              {(!isBlank || !isParagraphItem) && (
+                                <Pressable
+                                  onPress={() => deleteItem(list.id, item.id)}
+                                  style={styles.itemDeleteBtn}
+                                  hitSlop={8}
+                                >
+                                  <Trash2 color={C.cardSubtext} size={15} strokeWidth={2} />
+                                </Pressable>
+                              )}
+                            </View>
+                          );
+                        })}
+
+                        {!hasExistingParagraph && (
+                          <View style={styles.addItemRow}>
+                            {isItemizedFormat && (
+                              <View style={styles.addItemPrefixBox}>
+                                {activeToolbar.format === 'bullet' ? (
+                                  <Text style={[styles.bulletText, { color: C.cardSubtext }]}>•</Text>
+                                ) : activeToolbar.format === 'numbered' ? (
+                                  <Text style={[styles.numberText, { color: C.cardSubtext }]}>
+                                    {list.items.length + 1}.
+                                  </Text>
+                                ) : null}
+                              </View>
                             )}
 
-                            <TextInput
-                              value={currentInput}
-                              onChangeText={(text) => {
-                                setNewItemText((previous) => ({
-                                  ...previous,
-                                  [list.id]: text,
-                                }));
-                              }}
-                              onContentSizeChange={(event) => {
-                                if (isBlank) {
-                                  updateInputHeight(
-                                    list.id,
-                                    event.nativeEvent.contentSize.height,
-                                  );
-                                }
-                              }}
-                              placeholder="Add an item"
-                              placeholderTextColor={C.muted}
-                              multiline={isBlank}
-                              scrollEnabled={false}
-                              textAlignVertical={isBlank ? 'top' : 'center'}
-                              style={[
-                                styles.addItemInput,
-                                isBlank && styles.blankAddItemInput,
-                                { color: C.text },
-                                isBlank && {
-                                  minHeight: currentInputHeight,
-                                },
-                              ]}
-                            />
+                            {(() => {
+                              const currentAddHeight = addParagraphHeights[list.id] ?? PARAGRAPH_MIN_HEIGHT;
+                              const isAddingParagraph = isBlank && activeToolbar.format === 'paragraph';
+
+                              return (
+                                <TextInput
+                                  value={currentInput}
+                                  onChangeText={(text) => {
+                                    setNewItemText((prev) => ({ ...prev, [list.id]: text }));
+                                  }}
+                                  onContentSizeChange={(e) => {
+                                    if (isAddingParagraph) {
+                                      handleAddContentSizeChange(list.id, e.nativeEvent.contentSize.height);
+                                    }
+                                  }}
+                                  placeholder={
+                                    activeToolbar.format === 'numbered'
+                                      ? 'Add numbered item...'
+                                      : activeToolbar.format === 'bullet'
+                                      ? 'Add bullet item...'
+                                      : isBlank
+                                      ? 'Add paragraph or note...'
+                                      : 'Add checklist item...'
+                                  }
+                                  placeholderTextColor={C.cardSubtext}
+                                  multiline={!isItemizedFormat}
+                                  style={[
+                                    styles.addItemInput,
+                                    {
+                                      backgroundColor: C.cardInputBg,
+                                      borderColor: C.cardInputBorder,
+                                      color: C.cardText,
+                                    },
+                                    isAddingParagraph && [
+                                      styles.blankInputBox,
+                                      {
+                                        height: currentAddHeight,
+                                      },
+                                    ],
+                                  ]}
+                                  scrollEnabled={false}
+                                  textAlignVertical={!isItemizedFormat ? 'top' : 'center'}
+                                />
+                              );
+                            })()}
 
                             <Pressable
                               onPress={() => addItem(list.id)}
-                              style={[
+                              style={({ pressed }) => [
                                 styles.addItemBtn,
-                                { backgroundColor: accentForeground },
+                                pressed && styles.pressedBtn,
                               ]}
-                              hitSlop={6}
                             >
-                              <Text
-                                style={[
-                                  styles.addItemBtnText,
-                                  { color: onAccent },
-                                ]}
-                              >
-                                Add
-                              </Text>
+                              <Text style={styles.addItemBtnText}>Add</Text>
                             </Pressable>
                           </View>
                         )}
 
-                        {/* =================================================
-                            DELETE LIST
-                        ================================================= */}
-
                         <Pressable
-                          onPress={() =>
-                            deleteList(
-                              list.id,
-                            )
-                          }
-                          style={[
-                            styles.deleteListBtn,
-                            {
-                              borderTopColor:
-                                isDark
-                                  ? '#1F1F1F'
-                                  : '#F5F3EF',
-                            },
-                          ]}
+                          onPress={() => confirmDeleteList(list.id)}
+                          style={styles.deleteListRowBtn}
                           hitSlop={8}
                         >
-                          <Trash2
-                            color={
-                              C.muted
-                            }
-                            size={14}
-                          />
-
-                          <Text
-                            style={[
-                              styles.deleteListText,
-                              {
-                                color:
-                                  C.muted,
-                              },
-                            ]}
-                          >
-                            Delete list
-                          </Text>
+                          <Trash2 color="#EF4444" size={14} strokeWidth={2.2} />
+                          <Text style={styles.deleteListText}>Delete list</Text>
                         </Pressable>
                       </View>
                     )}
                   </View>
-                );
-              },
-            )}
+                </View>
+              );
+            })}
           </View>
         )}
       </ScrollView>
 
-      {/* =====================================================
-          FLOATING ADD BUTTON
-      ===================================================== */}
-
-      <Pressable
-        onPress={openNewList}
-        style={({ pressed }) => [
-          styles.fab,
-          {
-            backgroundColor:
-              accentForeground,
-          },
-          pressed && {
-            opacity: 0.85,
-          },
-        ]}
-      >
-        <Plus
-          color="#FFFFFF"
-          size={28}
-          strokeWidth={2.6}
-        />
-      </Pressable>
-
-      {/* =====================================================
-          NEW LIST MODAL
-      ===================================================== */}
+      <View style={styles.fabContainer}>
+        <View style={styles.fabShadowBackdrop} />
+        <Pressable
+          onPress={openNewList}
+          style={({ pressed }) => [styles.fabBtn, pressed && styles.pressedBtn]}
+        >
+          <Plus color="#FFFFFF" size={28} strokeWidth={3} />
+        </Pressable>
+      </View>
 
       <Modal
         visible={newListOpen}
         transparent
         animationType="slide"
-        onRequestClose={() =>
-          setNewListOpen(false)
-        }
+        onRequestClose={() => setNewListOpen(false)}
       >
         <KeyboardAvoidingView
           style={styles.keyboardAvoidingView}
-          behavior={
-            Platform.OS === 'ios'
-              ? 'padding'
-              : 'height'
-          }
-          keyboardVerticalOffset={0}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
           <View style={styles.modalShade}>
-            <View
-              style={[
-                styles.modalCard,
-                {
-                  backgroundColor: C.card,
-                },
-              ]}
-            >
-              <View
-                style={styles.modalTitleRow}
-              >
-                <Text
-                  style={[
-                    styles.modalTitle,
-                    { color: C.text },
-                  ]}
-                >
-                  New list
-                </Text>
+            <View style={styles.modalCardWrapper}>
+              <View style={styles.modalShadowBackdrop} />
+              <View style={[styles.modalCardBody, { backgroundColor: C.cardBg }]}>
+                <View style={styles.modalTitleRow}>
+                  <Text style={[styles.modalTitle, { color: C.cardText }]}>
+                    New list
+                  </Text>
+                  <Pressable onPress={() => setNewListOpen(false)} hitSlop={12}>
+                    <X color={C.cardText} size={22} strokeWidth={2.5} />
+                  </Pressable>
+                </View>
 
-                <Pressable
-                  onPress={() =>
-                    setNewListOpen(false)
-                  }
-                  hitSlop={12}
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="always"
                 >
-                  <X
-                    color={C.muted}
-                    size={21}
-                  />
-                </Pressable>
-              </View>
+                  {error && <Text style={styles.modalError}>{error}</Text>}
 
-              <ScrollView
-                style={styles.modalScroll}
-                contentContainerStyle={
-                  styles.modalScrollContent
-                }
-                showsVerticalScrollIndicator={
-                  false
-                }
-                keyboardShouldPersistTaps="always"
-                keyboardDismissMode="none"
-                nestedScrollEnabled
-              >
-                {error && (
-                  <Text
+                  <Text style={[styles.inputLabel, { color: C.cardSubtext }]}>
+                    LIST TITLE
+                  </Text>
+                  <TextInput
+                    value={newListTitle}
+                    onChangeText={setNewListTitle}
+                    placeholder="e.g. Daily Reflection, Groceries"
+                    placeholderTextColor={C.cardSubtext}
                     style={[
-                      styles.error,
+                      styles.modalTextInput,
                       {
-                        color: '#C53A2F',
-                        marginTop: 4,
+                        backgroundColor: C.cardInputBg,
+                        borderColor: C.cardInputBorder,
+                        color: C.cardText,
                       },
                     ]}
-                  >
-                    {error}
+                    autoFocus
+                  />
+
+                  <Text style={[styles.inputLabel, { color: C.cardSubtext }]}>
+                    LIST TYPE
                   </Text>
-                )}
-
-                <Text
-                  style={[
-                    styles.label,
-                    { color: C.muted },
-                  ]}
-                >
-                  List title
-                </Text>
-
-                <TextInput
-                  value={newListTitle}
-                  onChangeText={
-                    setNewListTitle
-                  }
-                  placeholder="e.g. Groceries, Packing list"
-                  placeholderTextColor={C.muted}
-                  style={[
-                    styles.input,
-                    {
-                      backgroundColor: C.input,
-                      borderColor: C.inputBorder,
-                      color: C.text,
-                    },
-                  ]}
-                  autoFocus
-                  returnKeyType="done"
-                />
-
-                <Text
-                  style={[
-                    styles.label,
-                    { color: C.muted },
-                  ]}
-                >
-                  List type
-                </Text>
-
-                <View
-                  style={styles.typeOptions}
-                >
-                  {LIST_TYPES.map((type) => {
-                    const selected =
-                      newListType ===
-                      type.value;
-
-                    const selectedBackground =
-                      isDark
-                        ? '#FFFFFF'
-                        : accentForeground;
-
-                    const selectedText =
-                      isDark
-                        ? '#000000'
-                        : onAccent;
-
-                    return (
-                      <Pressable
-                        key={type.value}
-                        onPress={() =>
-                          setNewListType(
-                            type.value,
-                          )
-                        }
-                        style={[
-                          styles.typeOption,
-                          {
-                            backgroundColor:
-                              selected
-                                ? selectedBackground
-                                : C.input,
-                            borderColor:
-                              selected
-                                ? selectedBackground
-                                : C.inputBorder,
-                          },
-                        ]}
-                      >
-                        <View
-                          style={
-                            styles.typeOptionCopy
-                          }
-                        >
-                          <Text
-                            style={[
-                              styles.typeOptionTitle,
-                              {
-                                color: selected
-                                  ? selectedText
-                                  : C.text,
-                              },
-                            ]}
-                          >
-                            {type.label}
-                          </Text>
-
-                          <Text
-                            style={[
-                              styles.typeOptionDescription,
-                              {
-                                color: selected
-                                  ? isDark
-                                    ? '#333333'
-                                    : selectedText
-                                  : C.muted,
-                              },
-                            ]}
-                          >
-                            {type.description}
-                          </Text>
-                        </View>
-
-                        <View
+                  <View style={styles.typeOptionsStack}>
+                    {LIST_TYPES.map((type) => {
+                      const selected = newListType === type.value;
+                      return (
+                        <Pressable
+                          key={type.value}
+                          onPress={() => setNewListType(type.value)}
                           style={[
-                            styles.radio,
+                            styles.typeOptionCard,
                             {
-                              borderColor: selected
-                                ? selectedText
-                                : C.inputBorder,
+                              backgroundColor: selected ? pageBg : C.cardInputBg,
+                              borderColor: '#000000',
                             },
                           ]}
                         >
-                          {selected && (
-                            <View
+                          <View style={styles.typeOptionLeft}>
+                            <Text
                               style={[
-                                styles.radioSelected,
-                                {
-                                  backgroundColor:
-                                    selectedText,
-                                },
+                                styles.typeOptionTitle,
+                                { color: selected ? '#000000' : C.cardText },
                               ]}
-                            />
-                          )}
-                        </View>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              </ScrollView>
+                            >
+                              {type.label}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.typeOptionSub,
+                                { color: selected ? '#18181B' : C.cardSubtext },
+                              ]}
+                            >
+                              {type.description}
+                            </Text>
+                          </View>
+                          <View
+                            style={[
+                              styles.radioCircle,
+                              { borderColor: '#000000' },
+                            ]}
+                          >
+                            {selected && <View style={styles.radioInner} />}
+                          </View>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </ScrollView>
 
-              <View
-                style={styles.saveButtonFooter}
-              >
                 <Pressable
                   disabled={savingList}
                   onPress={saveList}
-                  style={[
-                    styles.saveButton,
-                    {
-                      backgroundColor:
-                        accentForeground,
-                    },
-                    savingList &&
-                      styles.saveButtonDisabled,
+                  style={({ pressed }) => [
+                    styles.createListBtn,
+                    pressed && styles.pressedBtn,
+                    savingList && { opacity: 0.6 },
                   ]}
                 >
-                  <Text
-                    style={[
-                      styles.saveText,
-                      { color: onAccent },
-                    ]}
-                  >
-                    {savingList
-                      ? 'Saving...'
-                      : 'Create list'}
+                  <Text style={styles.createListBtnText}>
+                    {savingList ? 'Creating...' : 'Create List'}
                   </Text>
                 </Pressable>
               </View>
@@ -1795,578 +1224,605 @@ export default function ListsScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      <Modal
+        visible={Boolean(deleteConfirmListId)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDeleteConfirmListId(null)}
+      >
+        <View style={styles.alertShade}>
+          <View style={styles.alertCardWrapper}>
+            <View style={styles.alertShadowBackdrop} />
+            <View style={styles.alertCardBody}>
+              <View style={styles.alertHeaderRow}>
+                <View style={styles.alertIconBadge}>
+                  <AlertTriangle color="#000000" size={20} strokeWidth={2.5} />
+                </View>
+                <Text style={styles.alertTitle}>Delete List?</Text>
+              </View>
+
+              <Text style={styles.alertMessage}>
+                Are you sure you want to delete this list? This action cannot be undone.
+              </Text>
+
+              <View style={styles.alertActionsRow}>
+                <Pressable
+                  onPress={() => setDeleteConfirmListId(null)}
+                  style={({ pressed }) => [
+                    styles.alertCancelBtn,
+                    pressed && styles.pressedBtn,
+                  ]}
+                >
+                  <Text style={styles.alertCancelText}>Cancel</Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={handleExecuteDeleteList}
+                  style={({ pressed }) => [
+                    styles.alertDeleteBtn,
+                    pressed && styles.pressedBtn,
+                  ]}
+                >
+                  <Text style={styles.alertDeleteText}>Delete</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
-
-/* =========================================================
-   STYLES
-========================================================= */
 
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
   },
-
-  /* =======================================================
-     HEADER
-  ======================================================= */
-
+  pressedBtn: {
+    transform: [{ translateX: 2 }, { translateY: 2 }],
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent:
-      'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 28,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 12,
   },
-
   headerBack: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: '#000000',
+    borderWidth: 2,
+    borderColor: '#000000',
     alignItems: 'center',
-    justifyContent:
-      'center',
+    justifyContent: 'center',
   },
-
+  headerTitle: {
+    fontFamily: FONT_BOLD,
+    fontSize: 22,
+    letterSpacing: 1,
+  },
   headerBtn: {
     width: 40,
     height: 40,
     alignItems: 'center',
-    justifyContent:
-      'center',
+    justifyContent: 'center',
   },
-
-  headerTitle: {
-    fontFamily: FONT_BOLD,
-    fontSize: 18,
-    letterSpacing: 1.5,
-  },
-
-  /* =======================================================
-     SEARCH
-  ======================================================= */
-
   searchWrap: {
+    marginHorizontal: 18,
+    marginTop: 6,
+    marginBottom: 10,
+    position: 'relative',
+    height: 48,
+  },
+  shadowBackdrop: {
+    position: 'absolute',
+    top: 4,
+    left: 4,
+    right: -4,
+    bottom: -4,
+    backgroundColor: '#000000',
+    borderRadius: 12,
+  },
+  searchBoxBody: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginHorizontal: 16,
-    marginTop: 14,
-    paddingHorizontal: 13,
-    height: 46,
-    borderRadius: 13,
-    borderWidth: 1,
+    height: 48,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2.5,
+    borderColor: '#000000',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    gap: 8,
   },
-
   searchInput: {
     flex: 1,
-    minWidth: 0,
-    height: 44,
-    marginLeft: 9,
-    fontFamily: FONT,
+    fontFamily: FONT_MED,
     fontSize: 14,
+    color: '#000000',
     paddingVertical: 0,
   },
-
-  searchClear: {
-    width: 28,
-    height: 28,
-    alignItems: 'center',
-    justifyContent:
-      'center',
-  },
-
-  /* =======================================================
-     MENU
-  ======================================================= */
-
   menuShade: {
     flex: 1,
-    backgroundColor:
-      'rgba(0,0,0,0.25)',
+    backgroundColor: 'rgba(0,0,0,0.35)',
     alignItems: 'flex-end',
-    paddingTop: 64,
-    paddingRight: 12,
+    paddingTop: 60,
+    paddingRight: 20,
   },
-
-  menuCard: {
-    borderRadius: 14,
-    borderWidth: 1,
-    paddingVertical: 6,
-    minWidth: 150,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    elevation: 4,
+  menuCardWrapper: {
+    position: 'relative',
+    width: 160,
   },
-
+  menuCardBody: {
+    borderRadius: 12,
+    borderWidth: 2.5,
+    borderColor: '#000000',
+    paddingVertical: 4,
+  },
   menuItem: {
     paddingVertical: 12,
     paddingHorizontal: 16,
   },
-
   menuItemText: {
-    fontFamily: FONT_MED,
+    fontFamily: FONT_BOLD,
     fontSize: 14,
   },
-
-  /* =======================================================
-     CONTENT
-  ======================================================= */
-
   content: {
-    padding: 16,
-    paddingBottom: 100,
+    paddingHorizontal: 18,
+    paddingTop: 8,
+    paddingBottom: 120,
   },
-
-  error: {
-    fontFamily: FONT_MED,
+  errorBox: {
+    backgroundColor: '#FEE2E2',
+    borderWidth: 2.5,
+    borderColor: '#000000',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 12,
+  },
+  errorText: {
+    fontFamily: FONT_BOLD,
+    color: '#DC2626',
     fontSize: 13,
-    marginBottom: 10,
   },
-
   empty: {
-    paddingVertical: 40,
+    paddingVertical: 50,
     alignItems: 'center',
   },
-
   emptyText: {
-    fontFamily: FONT,
-    fontSize: 14,
+    fontFamily: FONT_BOLD,
+    fontSize: 15,
     textAlign: 'center',
   },
-
   listStack: {
-    gap: 12,
+    gap: 16,
   },
-
-  /* =======================================================
-     CARD
-  ======================================================= */
-
-  card: {
-    borderRadius: 18,
-    borderWidth: 1,
-    overflow: 'hidden',
+  cardContainer: {
+    position: 'relative',
+    marginTop: 4,
   },
-
+  cardShadowBackdrop: {
+    position: 'absolute',
+    top: 5,
+    left: 5,
+    right: -5,
+    bottom: -5,
+    backgroundColor: '#000000',
+    borderRadius: 16,
+  },
+  cardBody: {
+    borderRadius: 16,
+    borderWidth: 3,
+    padding: 14,
+  },
   cardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent:
-      'space-between',
-    padding: 14,
+    justifyContent: 'space-between',
   },
-
   cardHeaderLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
     flex: 1,
-    minWidth: 0,
   },
-
-  cardIcon: {
+  cardIconBox: {
     width: 36,
     height: 36,
-    borderRadius: 11,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#000000',
     alignItems: 'center',
-    justifyContent:
-      'center',
+    justifyContent: 'center',
   },
-
   cardHeaderCopy: {
     flex: 1,
-    gap: 3,
-    minWidth: 0,
   },
-
   cardTitle: {
-    fontFamily: FONT_MED,
-    fontSize: 15,
+    fontFamily: FONT_BOLD,
+    fontSize: 16,
   },
-
   cardMeta: {
-    fontFamily: FONT,
-    fontSize: 12,
+    fontFamily: FONT_MED,
+    fontSize: 11,
   },
-
   cardHeaderRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginLeft: 8,
+    gap: 8,
   },
-
-  miniProgress: {
-    width: 60,
-    height: 6,
-    borderRadius: 3,
+  miniProgressTrack: {
+    width: 50,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#000000',
     overflow: 'hidden',
   },
-
   miniProgressFill: {
-    height: 6,
-    borderRadius: 3,
+    height: '100%',
   },
-
-  /* =======================================================
-     CARD BODY
-  ======================================================= */
-
-  cardBody: {
-    paddingHorizontal: 14,
-    paddingBottom: 14,
+  cardExpandedContent: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 2,
+    borderTopColor: '#000000',
   },
-
-  blankCardBody: {
-    paddingTop: 2,
+  blankToolbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 6,
+    borderRadius: 10,
+    borderWidth: 2,
+    marginBottom: 12,
   },
-
-  /* =======================================================
-     ITEMS
-  ======================================================= */
-
+  toolbarGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  toolbarBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  toolbarBtnActive: {
+    backgroundColor: '#000000',
+  },
   itemRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 10,
-    paddingVertical: 10,
+    gap: 6, // Reduced gap between number/bullet and text item
+    paddingVertical: 6,
     borderBottomWidth: 1,
   },
-
-  blankItemRow: {
-    alignItems: 'flex-start',
-    paddingVertical: 12,
-  },
-
   itemCheck: {
     width: 22,
     height: 22,
-    borderRadius: 7,
-    borderWidth: 1.5,
-    borderColor: '#D8D5CE',
+    borderRadius: 6,
+    borderWidth: 2,
     alignItems: 'center',
-    justifyContent:
-      'center',
-    marginTop: 1,
+    justifyContent: 'center',
   },
-
   bulletPrefix: {
-    width: 22,
+    width: 14, // Tighter width for bullets
     alignItems: 'center',
-    justifyContent:
-      'center',
-    paddingTop: 1,
   },
-
   bulletText: {
     fontFamily: FONT_BOLD,
     fontSize: 20,
-    lineHeight: 20,
   },
-
   numberPrefix: {
-    width: 26,
-    alignItems: 'flex-end',
-    justifyContent:
-      'center',
-    paddingTop: 2,
+    width: 18, // Tighter width for numbers
+    alignItems: 'flex-start',
   },
-
   numberText: {
-    fontFamily: FONT_MED,
-    fontSize: 14,
+    fontFamily: FONT_BOLD,
+    fontSize: 13,
   },
-
   itemCopy: {
     flex: 1,
     minWidth: 0,
   },
-
   itemText: {
-    fontFamily: FONT_MED,
-    fontSize: 14,
-    lineHeight: 21,
-    flexShrink: 1,
-  },
-
-  blankItemText: {
     fontFamily: FONT,
     fontSize: 14,
-    lineHeight: 23,
-    flexShrink: 1,
+    lineHeight: 20,
   },
-
+  itemInputInline: {
+    flex: 1,
+    minWidth: 0,
+    width: '100%',
+    fontFamily: FONT,
+    fontSize: 14,
+    lineHeight: 20,
+    paddingVertical: 4,
+    paddingHorizontal: 0,
+  },
   itemDone: {
-    textDecorationLine:
-      'line-through',
+    textDecorationLine: 'line-through',
     opacity: 0.5,
   },
-
-  itemDelete: {
-    width: 24,
-    minHeight: 22,
-    alignItems: 'center',
-    justifyContent:
-      'center',
-    marginTop: 1,
+  itemDeleteBtn: {
+    padding: 2,
   },
-
-  noItemsText: {
-    fontFamily: FONT,
-    fontSize: 13,
-    paddingVertical: 12,
-  },
-
-  /* =======================================================
-     ADD ITEM
-  ======================================================= */
-
   addItemRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginTop: 10,
-    paddingTop: 10,
-    borderTopWidth: 1,
+    gap: 6, // Matching tighter gap
+    marginTop: 12,
   },
-
-  blankAddItemRow: {
-    flexDirection: 'column',
-    alignItems: 'stretch',
-    gap: 10,
+  addItemPrefixBox: {
+    width: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-
   addItemInput: {
     flex: 1,
-    minWidth: 0,
     fontFamily: FONT,
-    fontSize: 14,
-    paddingVertical: 4,
-  },
-
-  /*
-   * Blank-list input:
-   * - no internal scrolling
-   * - overflow hidden
-   * - grows dynamically
-   */
-  blankAddItemInput: {
-    width: '100%',
-    minHeight: 56,
+    fontSize: 13,
     paddingHorizontal: 12,
-    paddingTop: 12,
-    paddingBottom: 12,
-    borderWidth: 1,
-    borderRadius: 12,
-    borderColor: '#363636',
-    lineHeight: 21,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 2,
+  },
+  blankInputBox: {
+    minHeight: PARAGRAPH_MIN_HEIGHT,
     textAlignVertical: 'top',
   },
-
   addItemBtn: {
-    alignSelf: 'flex-end',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 9,
-    minHeight: 36,
-    alignItems: 'center',
-    justifyContent:
-      'center',
+    backgroundColor: '#000000',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#000000',
   },
-
   addItemBtnText: {
-    fontFamily: FONT_SEMI,
+    fontFamily: FONT_BOLD,
+    color: '#FFFFFF',
     fontSize: 13,
   },
-
-  /* =======================================================
-     DELETE LIST
-  ======================================================= */
-
-  deleteListBtn: {
+  deleteListRowBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent:
-      'center',
+    justifyContent: 'center',
     gap: 6,
-    marginTop: 12,
-    paddingTop: 10,
-    borderTopWidth: 1,
+    marginTop: 14,
+    paddingTop: 8,
   },
-
   deleteListText: {
-    fontFamily: FONT_MED,
+    fontFamily: FONT_BOLD,
+    color: '#EF4444',
     fontSize: 12,
   },
-
-  /* =======================================================
-     FAB
-  ======================================================= */
-
-  fab: {
+  fabContainer: {
     position: 'absolute',
-    bottom: 30,
+    bottom: 28,
     alignSelf: 'center',
+    width: 60,
+    height: 60,
+  },
+  fabShadowBackdrop: {
+    position: 'absolute',
+    top: 4,
+    left: 4,
+    width: 56,
+    height: 56,
+    backgroundColor: '#000000',
+    borderRadius: 28,
+  },
+  fabBtn: {
     width: 56,
     height: 56,
     borderRadius: 28,
+    backgroundColor: '#000000',
+    borderWidth: 2.5,
+    borderColor: '#000000',
     alignItems: 'center',
-    justifyContent:
-      'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    elevation: 6,
+    justifyContent: 'center',
   },
-
-  /* =======================================================
-     NEW LIST MODAL
-  ======================================================= */
-
   keyboardAvoidingView: {
     flex: 1,
   },
-
   modalShade: {
     flex: 1,
-    justifyContent:
-      'flex-end',
-    backgroundColor:
-      'rgba(0,0,0,0.45)',
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'flex-end',
   },
-
-  modalCard: {
-    borderTopLeftRadius:
-      24,
-    borderTopRightRadius:
-      24,
-    padding: 22,
-    paddingBottom: 24,
-    maxHeight:
-      '92%',
-    flexShrink: 1,
+  modalCardWrapper: {
+    position: 'relative',
+    marginHorizontal: 12,
+    marginBottom: 20,
   },
-
+  modalShadowBackdrop: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    right: -6,
+    bottom: -6,
+    backgroundColor: '#000000',
+    borderRadius: 20,
+  },
+  modalCardBody: {
+    borderRadius: 20,
+    borderWidth: 3,
+    borderColor: '#000000',
+    padding: 20,
+    maxHeight: 520,
+  },
   modalTitleRow: {
-    flexDirection:
-      'row',
-    justifyContent:
-      'space-between',
-    alignItems:
-      'center',
-    marginBottom: 16,
-  },
-
-  modalTitle: {
-    fontFamily:
-      FONT_BOLD,
-    fontSize: 18,
-    flex: 1,
-    marginRight: 12,
-  },
-
-  modalScroll: {
-    flexGrow: 0,
-    flexShrink: 1,
-  },
-
-  modalScrollContent: {
-    paddingBottom: 24,
-  },
-
-  label: {
-    fontFamily: FONT_MED,
-    fontSize: 13,
-    marginTop: 14,
-    marginBottom: 6,
-  },
-
-  input: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    fontFamily: FONT,
-    fontSize: 15,
-  },
-
-  typeOptions: {
-    gap: 8,
-  },
-
-  typeOption: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent:
-      'space-between',
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
+    justifyContent: 'space-between',
+    marginBottom: 14,
   },
-
-  typeOptionCopy: {
-    flex: 1,
-    gap: 2,
+  modalTitle: {
+    fontFamily: FONT_BOLD,
+    fontSize: 20,
   },
-
-  typeOptionTitle: {
+  modalError: {
+    fontFamily: FONT_BOLD,
+    color: '#EF4444',
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  inputLabel: {
+    fontFamily: FONT_BOLD,
+    fontSize: 11,
+    letterSpacing: 0.5,
+    marginBottom: 6,
+    marginTop: 8,
+  },
+  modalTextInput: {
     fontFamily: FONT_MED,
     fontSize: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 2,
+    marginBottom: 8,
   },
-
-  typeOptionDescription: {
+  typeOptionsStack: {
+    gap: 8,
+    marginBottom: 16,
+  },
+  typeOptionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 2.5,
+  },
+  typeOptionLeft: {
+    flex: 1,
+  },
+  typeOptionTitle: {
+    fontFamily: FONT_BOLD,
+    fontSize: 14,
+  },
+  typeOptionSub: {
     fontFamily: FONT,
     fontSize: 11,
   },
-
-  radio: {
+  radioCircle: {
     width: 20,
     height: 20,
     borderRadius: 10,
-    borderWidth: 1.5,
+    borderWidth: 2,
     alignItems: 'center',
-    justifyContent:
-      'center',
-    marginLeft: 12,
+    justifyContent: 'center',
   },
-
-  radioSelected: {
+  radioInner: {
     width: 10,
     height: 10,
     borderRadius: 5,
+    backgroundColor: '#000000',
   },
-
-  saveButtonFooter: {
-    paddingTop: 0,
-  },
-
-  saveButton: {
-    borderRadius: 14,
+  createListBtn: {
+    backgroundColor: '#000000',
     paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 2.5,
+    borderColor: '#000000',
     alignItems: 'center',
-    marginTop: 12,
   },
-
-  saveButtonDisabled: {
-    opacity: 0.6,
-  },
-
-  saveText: {
-    fontFamily: FONT_SEMI,
+  createListBtnText: {
+    fontFamily: FONT_BOLD,
+    color: '#FFFFFF',
     fontSize: 15,
+  },
+  alertShade: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  alertCardWrapper: {
+    position: 'relative',
+    width: '100%',
+  },
+  alertShadowBackdrop: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    right: -6,
+    bottom: -6,
+    backgroundColor: '#000000',
+    borderRadius: 18,
+  },
+  alertCardBody: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    borderWidth: 3,
+    borderColor: '#000000',
+    padding: 20,
+  },
+  alertHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 10,
+  },
+  alertIconBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#FDE047',
+    borderWidth: 2,
+    borderColor: '#000000',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  alertTitle: {
+    fontFamily: FONT_BOLD,
+    fontSize: 18,
+    color: '#000000',
+  },
+  alertMessage: {
+    fontFamily: FONT_MED,
+    fontSize: 13,
+    color: '#3F3F46',
+    lineHeight: 18,
+    marginBottom: 18,
+  },
+  alertActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  alertCancelBtn: {
+    flex: 1,
+    backgroundColor: '#F4F4F5',
+    borderWidth: 2,
+    borderColor: '#000000',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  alertCancelText: {
+    fontFamily: FONT_BOLD,
+    color: '#000000',
+    fontSize: 13,
+  },
+  alertDeleteBtn: {
+    flex: 1,
+    backgroundColor: '#EF4444',
+    borderWidth: 2,
+    borderColor: '#000000',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  alertDeleteText: {
+    fontFamily: FONT_BOLD,
+    color: '#FFFFFF',
+    fontSize: 13,
   },
 });

@@ -6,6 +6,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
@@ -28,29 +29,29 @@ import {
 } from '@/components/WellbeingCalendar';
 
 /* ------------------------------------------------------------------ */
-/* Palettes                                                           */
+/* Palettes & Typography                                              */
 /* ------------------------------------------------------------------ */
 
 const DARK_PALETTE = {
   bg: '#090909',
-  card: '#151515',
-  cardBorder: '#2A2A2A',
-  text: '#F4F2EE',
-  muted: '#AAA59D',
+  card: '#121212',
+  cardBorder: '#000000',
+  text: '#FFFFFF',
+  muted: '#A1A1AA',
   divider: '#262626',
-  danger: '#E05252',
-  inputBg: '#1C1C1C',
+  danger: '#EF4444',
+  inputBg: '#1E1E1E',
 };
 
 const LIGHT_PALETTE = {
   bg: '#FBFAF8',
   card: '#FFFFFF',
-  cardBorder: '#ECE9E4',
-  text: '#27241F',
-  muted: '#8F8A82',
-  divider: '#F0EEEA',
-  danger: '#E05252',
-  inputBg: '#F5F3EF',
+  cardBorder: '#000000',
+  text: '#000000',
+  muted: '#52525B',
+  divider: '#E4E4E7',
+  danger: '#EF4444',
+  inputBg: '#F4F4F5',
 };
 
 const FONT = 'Poppins-Regular';
@@ -158,29 +159,6 @@ const PROMPT_LISTS: Record<ModuleKey, string[]> = {
 };
 
 /* ------------------------------------------------------------------ */
-/* Prompt helper                                                      */
-/* ------------------------------------------------------------------ */
-
-function promptFor(
-  moduleKey: ModuleKey,
-  dateStr: string,
-): string | null {
-  const list = PROMPT_LISTS[moduleKey];
-
-  if (list.length === 0) {
-    return null;
-  }
-
-  const dayIndex =
-    parseDate(dateStr).getTime() / 86_400_000;
-
-  const idx =
-    Math.floor(Math.abs(dayIndex)) % list.length;
-
-  return list[idx];
-}
-
-/* ------------------------------------------------------------------ */
 /* Date helper                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -223,11 +201,12 @@ export default function WellbeingEntryScreen() {
     isDark,
     accentForeground,
     onAccent,
-  } = useApp();
+  } = useApp() as any;
 
   const { user } = useAuth();
 
-  const accent = accentForeground;
+  const accent = accentForeground || '#FDE047';
+  const pageBg = accent;
 
   const COLORS = isDark
     ? DARK_PALETTE
@@ -569,29 +548,27 @@ export default function WellbeingEntryScreen() {
 
   return (
     <SafeAreaView
-      style={styles.safe}
+      style={[styles.safe, { backgroundColor: pageBg }]}
       edges={['top', 'bottom']}
     >
-      {/* Header */}
+      <StatusBar barStyle="dark-content" backgroundColor={pageBg} />
 
+      {/* Header */}
       <View style={styles.header}>
         <Pressable
           onPress={() => router.back()}
-          style={[
-            styles.backBtn,
-            { backgroundColor: accent },
-          ]}
+          style={({ pressed }) => [styles.backBtn, pressed && styles.pressedBtn]}
           hitSlop={12}
           accessibilityLabel="Go back"
         >
           <ChevronLeft
-            color={COLORS.text}
+            color="#FFFFFF"
             size={22}
-            strokeWidth={2.4}
+            strokeWidth={2.8}
           />
         </Pressable>
 
-        <Text style={styles.headerTitle}>
+        <Text style={[styles.headerTitle, { color: '#000000' }]}>
           {config.title}
         </Text>
 
@@ -599,14 +576,14 @@ export default function WellbeingEntryScreen() {
           onPress={() =>
             setMenuOpen(prev => !prev)
           }
-          style={styles.menuBtn}
+          style={({ pressed }) => [styles.menuBtn, pressed && styles.pressedBtn]}
           hitSlop={12}
           accessibilityLabel="Open settings menu"
         >
           <MoreVertical
-            color={COLORS.text}
-            size={22}
-            strokeWidth={2.3}
+            color="#000000"
+            size={24}
+            strokeWidth={2.5}
           />
         </Pressable>
       </View>
@@ -614,26 +591,21 @@ export default function WellbeingEntryScreen() {
       {/* Global settings menu */}
 
       {menuOpen ? (
-        <View
-          style={[
-            styles.menu,
-            {
-              backgroundColor: COLORS.card,
-              borderColor: COLORS.cardBorder,
-            },
-          ]}
-        >
-          <Pressable
-            onPress={openSettings}
-            style={({ pressed }) => [
-              styles.menuItem,
-              pressed &&
-                styles.menuItemPressed,
-            ]}
-          >
-            <Text style={styles.menuItemText}>
-              Settings
-            </Text>
+        <View style={styles.menuShadeOverlay}>
+          <Pressable style={{ flex: 1 }} onPress={() => setMenuOpen(false)}>
+            <View style={styles.menuCardWrapper}>
+              <View style={styles.shadowBackdrop} />
+              <View style={[styles.menuCardBody, { backgroundColor: COLORS.card }]}>
+                <Pressable
+                  onPress={openSettings}
+                  style={styles.menuItem}
+                >
+                  <Text style={[styles.menuItemText, { color: COLORS.text }]}>
+                    Settings
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
           </Pressable>
         </View>
       ) : null}
@@ -657,39 +629,46 @@ export default function WellbeingEntryScreen() {
           <Text
             style={[
               styles.dateLabel,
-              {
-                color: isDark
-                  ? '#FFFFFF'
-                  : accent,
-              },
+              { color: '#000000' },
             ]}
           >
             {prettyDateLabel(selectedDate)}
           </Text>
 
-          {/* Calendar */}
+          {/* Calendar with forced white background wrapper for calendar component */}
 
-          <WellbeingCalendar
-            selectedDate={selectedDate}
-            onSelectDate={onSelectDate}
-            accent={accent}
-            isDark={isDark}
-            entryDates={allEntryDates}
-          />
+          <View style={styles.cardContainer}>
+            <View style={styles.cardShadowBackdrop} />
+            <View style={[styles.calendarCardWrapper, { backgroundColor: '#FFFFFF', borderColor: '#000000' }]}>
+              <WellbeingCalendar
+                selectedDate={selectedDate}
+                onSelectDate={onSelectDate}
+                accent={accent}
+                isDark={false}
+                entryDates={allEntryDates}
+              />
+            </View>
+          </View>
 
           {/* Future notice */}
 
           {isFuture ? (
-            <View
-              style={styles.futureNotice}
-            >
-              <Text
-                style={styles.futureText}
+            <View style={styles.cardContainer}>
+              <View style={styles.cardShadowBackdrop} />
+              <View
+                style={[
+                  styles.futureNotice,
+                  { backgroundColor: '#FEE2E2', borderColor: '#000000' },
+                ]}
               >
-                You can only write for today or
-                earlier. Pick a past date to
-                continue.
-              </Text>
+                <Text
+                  style={styles.futureText}
+                >
+                  You can only write for today or
+                  earlier. Pick a past date to
+                  continue.
+                </Text>
+              </View>
             </View>
           ) : null}
 
@@ -701,11 +680,11 @@ export default function WellbeingEntryScreen() {
             >
               <ActivityIndicator
                 size="large"
-                color={accent}
+                color="#000000"
               />
 
               <Text
-                style={styles.stateText}
+                style={[styles.stateText, { color: '#000000' }]}
               >
                 Loading your entry…
               </Text>
@@ -713,36 +692,40 @@ export default function WellbeingEntryScreen() {
           ) : error ? (
             /* Error */
 
-            <View
-              style={styles.centerState}
-            >
-              <Text
-                style={styles.errorText}
-              >
-                {error}
-              </Text>
-
-              <Pressable
-                onPress={() =>
-                  loadEntry(selectedDate)
-                }
+            <View style={styles.cardContainer}>
+              <View style={styles.cardShadowBackdrop} />
+              <View
                 style={[
-                  styles.retryBtn,
-                  {
-                    backgroundColor:
-                      accent,
-                  },
+                  styles.centerStateCard,
+                  { backgroundColor: '#FEE2E2', borderColor: '#000000' },
                 ]}
               >
                 <Text
-                  style={[
-                    styles.retryText,
-                    { color: onAccent },
+                  style={styles.errorText}
+                >
+                  {error}
+                </Text>
+
+                <Pressable
+                  onPress={() =>
+                    loadEntry(selectedDate)
+                  }
+                  style={({ pressed }) => [
+                    styles.retryBtn,
+                    { backgroundColor: '#000000', borderColor: '#000000' },
+                    pressed && styles.pressedBtn,
                   ]}
                 >
-                  Retry
-                </Text>
-              </Pressable>
+                  <Text
+                    style={[
+                      styles.retryText,
+                      { color: '#FFFFFF' },
+                    ]}
+                  >
+                    Retry
+                  </Text>
+                </Pressable>
+              </View>
             </View>
           ) : (
             /* Editor */
@@ -752,49 +735,57 @@ export default function WellbeingEntryScreen() {
 
               {config.hasPrompt &&
               dailyPrompt ? (
-                <View
-                  style={styles.promptCard}
-                >
-                  {/* Refresh prompt button */}
-
-                  <Pressable
-                    onPress={refreshPrompt}
-                    style={[
-                      styles.promptIcon,
-                      {
-                        backgroundColor:
-                          accent,
-                      },
-                    ]}
-                    hitSlop={8}
-                    accessibilityRole="button"
-                    accessibilityLabel="Refresh prompt"
-                  >
-                    <RefreshCw
-                      color={onAccent}
-                      size={14}
-                      strokeWidth={2.4}
-                    />
-                  </Pressable>
-
+                <View style={styles.cardContainer}>
+                  <View style={styles.cardShadowBackdrop} />
                   <View
-                    style={{ flex: 1 }}
+                    style={[
+                      styles.promptCard,
+                      { backgroundColor: COLORS.card, borderColor: '#000000' },
+                    ]}
                   >
-                    <Text
-                      style={
-                        styles.promptEyebrow
-                      }
-                    >
-                      TODAY'S PROMPT
-                    </Text>
+                    {/* Refresh prompt button */}
 
-                    <Text
-                      style={
-                        styles.promptText
-                      }
+                    <Pressable
+                      onPress={refreshPrompt}
+                      style={({ pressed }) => [
+                        styles.promptIcon,
+                        {
+                          backgroundColor: accent,
+                          borderColor: '#000000',
+                        },
+                        pressed && styles.pressedBtn,
+                      ]}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel="Refresh prompt"
                     >
-                      {dailyPrompt}
-                    </Text>
+                      <RefreshCw
+                        color="#000000"
+                        size={14}
+                        strokeWidth={2.5}
+                      />
+                    </Pressable>
+
+                    <View
+                      style={{ flex: 1 }}
+                    >
+                      <Text
+                        style={
+                          styles.promptEyebrow
+                        }
+                      >
+                        TODAY'S PROMPT
+                      </Text>
+
+                      <Text
+                        style={[
+                          styles.promptText,
+                          { color: COLORS.text },
+                        ]}
+                      >
+                        {dailyPrompt}
+                      </Text>
+                    </View>
                   </View>
                 </View>
               ) : null}
@@ -802,67 +793,77 @@ export default function WellbeingEntryScreen() {
               {/* Existing entry */}
 
               {entryId && !isEditing ? (
-                <Pressable
-                  onPress={() =>
-                    setIsEditing(true)
-                  }
-                  style={
-                    styles.savedEntryCard
-                  }
-                >
-                  <Text
-                    style={
-                      styles.savedEntryText
+                <View style={styles.cardContainer}>
+                  <View style={styles.cardShadowBackdrop} />
+                  <Pressable
+                    onPress={() =>
+                      setIsEditing(true)
                     }
-                  >
-                    {content}
-                  </Text>
-
-                  <Text
                     style={[
-                      styles.editHint,
-                      { color: accent },
+                      styles.savedEntryCard,
+                      { backgroundColor: COLORS.card, borderColor: '#000000' },
                     ]}
                   >
-                    Tap to edit
-                  </Text>
-                </Pressable>
+                    <Text
+                      style={[
+                        styles.savedEntryText,
+                        { color: COLORS.text },
+                      ]}
+                    >
+                      {content}
+                    </Text>
+
+                    <Text
+                      style={[
+                        styles.editHint,
+                        { color: '#000000' },
+                      ]}
+                    >
+                      Tap to edit
+                    </Text>
+                  </Pressable>
+                </View>
               ) : (
                 /* New/editing entry */
 
-                <View
-                  style={
-                    styles.editorCard
-                  }
-                >
-                  <TextInput
-                    value={content}
-                    onChangeText={setContent}
-                    placeholder={
-                      config.placeholder
-                    }
-                    placeholderTextColor={
-                      COLORS.muted
-                    }
-                    multiline
-                    scrollEnabled
-                    blurOnSubmit={false}
-                    autoFocus={
-                      entryId
-                        ? true
-                        : false
-                    }
-                    editable={!isFuture}
+                <View style={styles.cardContainer}>
+                  <View style={styles.cardShadowBackdrop} />
+                  <View
                     style={[
-                      styles.editor,
-                      moduleKey ===
-                        'morning_pages' &&
-                        styles.editorLarge,
-                      isFuture &&
-                        styles.editorDisabled,
+                      styles.editorCard,
+                      { backgroundColor: COLORS.card, borderColor: '#000000' },
                     ]}
-                    textAlignVertical="top"
-                  />
+                  >
+                    <TextInput
+                      value={content}
+                      onChangeText={setContent}
+                      placeholder={
+                        config.placeholder
+                      }
+                      placeholderTextColor={
+                        COLORS.muted
+                      }
+                      multiline
+                      scrollEnabled
+                      blurOnSubmit={false}
+                      autoFocus={
+                        entryId
+                          ? true
+                          : false
+                      }
+                      editable={!isFuture}
+                      style={[
+                        styles.editor,
+                        { color: COLORS.text },
+                        moduleKey ===
+                          'morning_pages' &&
+                          styles.editorLarge,
+                        isFuture &&
+                          styles.editorDisabled,
+                      ]}
+                      textAlignVertical="top"
+                    />
+                  </View>
                 </View>
               )}
 
@@ -872,7 +873,7 @@ export default function WellbeingEntryScreen() {
                 <Text
                   style={[
                     styles.saveMsg,
-                    { color: accent },
+                    { color: '#000000' },
                   ]}
                 >
                   {saveMsg}
@@ -882,32 +883,33 @@ export default function WellbeingEntryScreen() {
           )}
         </ScrollView>
 
-        {/* Save / Update button stays above keyboard */}
+        {/* Save / Update button container */}
 
         {(isEditing || !entryId) && (
           <View style={styles.saveAction}>
+            <View style={styles.fabShadowBackdropFull} />
             <Pressable
               onPress={onSave}
               disabled={saving || isFuture}
               style={({ pressed }) => [
                 styles.saveBtn,
-                { backgroundColor: accent },
+                { backgroundColor: '#000000', borderColor: '#000000' },
                 (saving || isFuture) &&
                   styles.saveBtnDisabled,
                 pressed &&
-                  styles.saveBtnPressed,
+                  styles.pressedBtn,
               ]}
             >
               {saving ? (
                 <ActivityIndicator
                   size="small"
-                  color={onAccent}
+                  color="#FFFFFF"
                 />
               ) : (
                 <Text
                   style={[
                     styles.saveBtnText,
-                    { color: onAccent },
+                    { color: '#FFFFFF' },
                   ]}
                 >
                   {entryId
@@ -933,130 +935,156 @@ function makeStyles(C: Palette) {
   return StyleSheet.create({
     safe: {
       flex: 1,
-      backgroundColor: C.bg,
+    },
+
+    pressedBtn: {
+      transform: [{ translateX: 2 }, { translateY: 2 }],
     },
 
     header: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      paddingHorizontal: 16,
-      paddingTop: 28,
-      paddingVertical: 12,
-      borderBottomWidth: 1,
-      borderBottomColor: C.divider,
+      paddingHorizontal: 20,
+      paddingTop: 12,
+      paddingBottom: 10,
+      zIndex: 100,
     },
 
     backBtn: {
-      width: 38,
-      height: 38,
-      borderRadius: 19,
+      width: 40,
+      height: 40,
+      borderRadius: 8,
+      backgroundColor: '#000000',
       alignItems: 'center',
       justifyContent: 'center',
+      borderWidth: 2,
+      borderColor: '#000000',
     },
 
     headerTitle: {
       fontFamily: FONT_XB,
-      fontSize: 16,
-      letterSpacing: 1.4,
-      color: C.text,
+      fontSize: 22,
+      letterSpacing: 1,
     },
 
     menuBtn: {
-      width: 38,
-      height: 38,
+      width: 40,
+      height: 40,
       alignItems: 'center',
       justifyContent: 'center',
     },
 
-    menu: {
+    menuShadeOverlay: {
       position: 'absolute',
-      top: 76,
-      right: 14,
-      minWidth: 150,
-      borderWidth: 1,
-      borderRadius: 14,
-      paddingVertical: 6,
+      top: 55,
+      right: 20,
       zIndex: 1000,
-      elevation: 8,
-      shadowOffset: {
-        width: 0,
-        height: 4,
-      },
-      shadowOpacity: 0.18,
-      shadowRadius: 10,
+    },
+
+    menuCardWrapper: {
+      position: 'relative',
+      width: 170,
+    },
+
+    shadowBackdrop: {
+      position: 'absolute',
+      top: 4,
+      left: 4,
+      right: -4,
+      bottom: -4,
+      backgroundColor: '#000000',
+      borderRadius: 12,
+    },
+
+    menuCardBody: {
+      borderRadius: 12,
+      paddingVertical: 4,
+      borderWidth: 2.5,
+      borderColor: '#000000',
     },
 
     menuItem: {
-      paddingHorizontal: 16,
       paddingVertical: 12,
-    },
-
-    menuItemPressed: {
-      opacity: 0.6,
+      paddingHorizontal: 16,
     },
 
     menuItemText: {
-      fontFamily: FONT_MEDIUM,
-      fontSize: 13.5,
-      color: C.text,
+      fontFamily: FONT_BOLD,
+      fontSize: 13,
     },
 
     scroll: {
-      padding: 16,
-      paddingBottom: 48,
+      padding: 18,
+      paddingBottom: 100,
     },
 
     dateLabel: {
-      fontFamily: FONT_SEMI,
-      fontSize: 13,
-      letterSpacing: 0.4,
+      fontFamily: FONT_XB,
+      fontSize: 14,
+      letterSpacing: 0.5,
       marginBottom: 14,
       textTransform: 'uppercase',
     },
 
-    futureNotice: {
-      backgroundColor:
-        'rgba(224,82,82,0.08)',
-      borderWidth: 1,
-      borderColor:
-        'rgba(224,82,82,0.35)',
-      borderRadius: 14,
-      paddingHorizontal: 14,
-      paddingVertical: 12,
+    cardContainer: {
+      position: 'relative',
+      width: '100%',
       marginBottom: 16,
     },
 
+    cardShadowBackdrop: {
+      position: 'absolute',
+      top: 4,
+      left: 4,
+      right: -4,
+      bottom: -4,
+      backgroundColor: '#000000',
+      borderRadius: 16,
+    },
+
+    calendarCardWrapper: {
+      borderRadius: 16,
+      borderWidth: 3,
+      padding: 12,
+      overflow: 'hidden',
+    },
+
+    futureNotice: {
+      borderWidth: 3,
+      borderRadius: 16,
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+    },
+
     futureText: {
-      fontFamily: FONT_MEDIUM,
-      fontSize: 12.5,
+      fontFamily: FONT_BOLD,
+      fontSize: 13,
       lineHeight: 18,
-      color: C.danger,
+      color: '#DC2626',
     },
 
     promptCard: {
       flexDirection: 'row',
       gap: 12,
-      backgroundColor: C.card,
-      borderWidth: 1,
-      borderColor: C.cardBorder,
+      borderWidth: 3,
       borderRadius: 16,
-      padding: 14,
-      marginBottom: 16,
+      padding: 16,
     },
 
     promptIcon: {
-      width: 30,
-      height: 30,
+      width: 32,
+      height: 32,
       borderRadius: 10,
       alignItems: 'center',
       justifyContent: 'center',
       marginTop: 2,
+      borderWidth: 2,
     },
 
     promptEyebrow: {
-      fontFamily: FONT_BOLD,
-      fontSize: 9.5,
+      fontFamily: FONT_XB,
+      fontSize: 10,
       letterSpacing: 1.3,
       color: C.muted,
       marginBottom: 4,
@@ -1064,18 +1092,15 @@ function makeStyles(C: Palette) {
 
     promptText: {
       fontFamily: FONT_MEDIUM,
-      fontSize: 13.5,
+      fontSize: 14,
       lineHeight: 20,
-      color: C.text,
     },
 
     editorCard: {
-      backgroundColor: C.card,
-      borderWidth: 1,
-      borderColor: C.cardBorder,
+      borderWidth: 3,
       borderRadius: 16,
       paddingHorizontal: 16,
-      paddingVertical: 14,
+      paddingVertical: 16,
       minHeight: 220,
     },
 
@@ -1083,7 +1108,6 @@ function makeStyles(C: Palette) {
       fontFamily: FONT,
       fontSize: 15,
       lineHeight: 23,
-      color: C.text,
       minHeight: 180,
       maxHeight: 300,
       padding: 0,
@@ -1101,9 +1125,7 @@ function makeStyles(C: Palette) {
     },
 
     savedEntryCard: {
-      backgroundColor: C.card,
-      borderWidth: 1,
-      borderColor: C.cardBorder,
+      borderWidth: 3,
       borderRadius: 16,
       paddingHorizontal: 16,
       paddingVertical: 16,
@@ -1114,48 +1136,54 @@ function makeStyles(C: Palette) {
       fontFamily: FONT,
       fontSize: 15,
       lineHeight: 23,
-      color: C.text,
     },
 
     editHint: {
-      fontFamily: FONT_SEMI,
+      fontFamily: FONT_XB,
       fontSize: 12,
       marginTop: 14,
       textAlign: 'center',
     },
 
     saveMsg: {
-      fontFamily: FONT_SEMI,
-      fontSize: 12.5,
+      fontFamily: FONT_XB,
+      fontSize: 13,
       marginTop: 12,
       textAlign: 'center',
     },
 
     saveAction: {
-      paddingHorizontal: 16,
+      position: 'relative',
+      paddingHorizontal: 18,
       paddingTop: 10,
-      paddingBottom: 8,
-      backgroundColor: C.bg,
+      paddingBottom: 20,
+    },
+
+    fabShadowBackdropFull: {
+      position: 'absolute',
+      top: 14,
+      left: 22,
+      right: 14,
+      bottom: 16,
+      backgroundColor: '#000000',
+      borderRadius: 16,
     },
 
     saveBtn: {
       alignItems: 'center',
       justifyContent: 'center',
-      paddingVertical: 15,
-      borderRadius: 14,
+      paddingVertical: 16,
+      borderRadius: 16,
+      borderWidth: 3,
     },
 
     saveBtnDisabled: {
       opacity: 0.45,
     },
 
-    saveBtnPressed: {
-      opacity: 0.82,
-    },
-
     saveBtnText: {
-      fontFamily: FONT_BOLD,
-      fontSize: 13,
+      fontFamily: FONT_XB,
+      fontSize: 15,
       letterSpacing: 1.2,
     },
 
@@ -1166,30 +1194,38 @@ function makeStyles(C: Palette) {
       gap: 14,
     },
 
+    centerStateCard: {
+      borderWidth: 3,
+      borderRadius: 16,
+      padding: 24,
+      alignItems: 'center',
+      gap: 14,
+    },
+
     stateText: {
-      fontFamily: FONT,
-      fontSize: 13.5,
-      color: C.muted,
+      fontFamily: FONT_BOLD,
+      fontSize: 14,
       textAlign: 'center',
     },
 
     errorText: {
-      fontFamily: FONT_MEDIUM,
+      fontFamily: FONT_BOLD,
       fontSize: 13.5,
-      color: C.danger,
+      color: '#DC2626',
       textAlign: 'center',
       lineHeight: 19,
     },
 
     retryBtn: {
       paddingHorizontal: 22,
-      paddingVertical: 10,
+      paddingVertical: 12,
       borderRadius: 12,
+      borderWidth: 2,
     },
 
     retryText: {
-      fontFamily: FONT_BOLD,
-      fontSize: 12.5,
+      fontFamily: FONT_XB,
+      fontSize: 13,
     },
   });
 }

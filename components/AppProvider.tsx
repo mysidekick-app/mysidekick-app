@@ -83,56 +83,56 @@ export const accentPalettes: Record<
 > = {
   black: {
     light: '#5A5A5A',
-    standard: '#333333',
+    standard: '#FF8FA9',
     deep: '#111111',
     wash: '#E9E9E9',
   },
 
   red: {
     light: '#FF8E86',
-    standard: '#E05252',
+    standard: '#FF7F7F',
     deep: '#A92F39',
     wash: '#FFF0EE',
   },
 
   orange: {
     light: '#FFB064',
-    standard: '#EE8332',
+    standard: '#F4A460',
     deep: '#B7551B',
     wash: '#FFF3E7',
   },
 
   mustard: {
     light: '#EACB61',
-    standard: '#C89B27',
+    standard: '#FFF68F',
     deep: '#8E6A13',
     wash: '#FFF8DD',
   },
 
   green: {
     light: '#7CCB93',
-    standard: '#3E9D66',
+    standard: '#AAF39F',
     deep: '#236A47',
     wash: '#EAF8EF',
   },
 
   blue: {
     light: '#71B8FF',
-    standard: '#2379E8',
+    standard: '#AEEEEE',
     deep: '#1451A3',
     wash: '#EAF3FF',
   },
 
   indigo: {
     light: '#8599F2',
-    standard: '#5268D6',
+    standard: '#A7C7E7',
     deep: '#344399',
     wash: '#EEF0FF',
   },
 
   violet: {
     light: '#B28BEA',
-    standard: '#8452C7',
+    standard: '#E0B0FF',
     deep: '#5B3296',
     wash: '#F4EEFF',
   },

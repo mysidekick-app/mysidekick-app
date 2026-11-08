@@ -4,6 +4,7 @@ import {
   Modal,
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   View,
@@ -98,10 +99,6 @@ function formatTime(seconds: number) {
 
 /**
  * Generates a word-search puzzle where words ARE allowed to overlap.
- *
- * Same letter on the same cell = allowed.
- * Different letter on the same cell = not allowed.
- * Words can cross horizontally, vertically and diagonally.
  */
 function generateGrid(
   words: string[],
@@ -276,6 +273,28 @@ function generateGrid(
   };
 }
 
+// ─── Theme Palettes ──────────────────────────────────────────────────────────
+
+const DARK_PALETTE = {
+  bg: '#090909',
+  card: '#121212',
+  cardBorder: '#000000',
+  text: '#FFFFFF',
+  muted: '#A1A1AA',
+  divider: '#262626',
+  inputBg: '#1E1E1E',
+};
+
+const LIGHT_PALETTE = {
+  bg: '#FBFAF8',
+  card: '#FFFFFF',
+  cardBorder: '#000000',
+  text: '#000000',
+  muted: '#52525B',
+  divider: '#E4E4E7',
+  inputBg: '#F4F4F5',
+};
+
 export default function WordSearchScreen() {
   const params = useLocalSearchParams<{
     difficulty?: string;
@@ -283,19 +302,18 @@ export default function WordSearchScreen() {
     sessionId?: string;
   }>();
 
-  const { isDark, accentForeground, onAccent } = useApp();
+  const { isDark, accentForeground, onAccent } = useApp() as any;
+
+  const accent = accentForeground || '#FDE047';
+  const pageBg = accent;
+
+  const COLORS = isDark
+    ? DARK_PALETTE
+    : LIGHT_PALETTE;
+
+  const styles = makeStyles(COLORS);
 
   const { width, height } = useWindowDimensions();
-
-  const colors = {
-    background: isDark ? '#090909' : '#FBFAF8',
-    section: isDark ? '#151515' : '#FFFFFF',
-    text: isDark ? '#F4F2EE' : '#27241F',
-    muted: isDark ? '#AAA59D' : '#8F8A82',
-    border: isDark ? '#2A2A2A' : '#ECE9E4',
-    accent: accentForeground,
-    onAccent,
-  };
 
   const [difficulty] = useState<Difficulty>(() =>
     difficultyFromParams(
@@ -335,8 +353,6 @@ export default function WordSearchScreen() {
   const [selectedCells, setSelectedCells] =
     useState<Set<number>>(new Set());
 
-  // Lock the parent scroll while the player is dragging
-  // across the grid to select a word.
   const [foundCells, setFoundCells] =
     useState<Set<number>>(new Set());
 
@@ -387,20 +403,10 @@ export default function WordSearchScreen() {
   const foundWordsRef =
     useRef<Set<string>>(new Set());
 
-  /**
-   * Always keep the synchronous ref up to date.
-   *
-   * The timer uses this ref so it cannot accidentally
-   * save an older React state value when time reaches zero.
-   */
   useEffect(() => {
     foundWordsRef.current = foundWords;
   }, [foundWords]);
 
-  /**
-   * Initialize the game and create a session when
-   * one was not supplied by the route.
-   */
   useEffect(() => {
     let cancelled = false;
 
@@ -433,10 +439,6 @@ export default function WordSearchScreen() {
 
         let activeSessionId = sessionId;
 
-        /**
-         * If there is no session ID in the route,
-         * create the session now.
-         */
         if (!activeSessionId) {
           const { data: session, error } =
             await supabase
@@ -459,14 +461,6 @@ export default function WordSearchScreen() {
           activeSessionId = session.id;
         }
 
-        /**
-         * IMPORTANT:
-         *
-         * Always store the real session ID.
-         *
-         * This is the ID that must be used when inserting
-         * game_scores and completing the session.
-         */
         activeSessionIdRef.current =
           activeSessionId;
 
@@ -564,15 +558,6 @@ export default function WordSearchScreen() {
     wordCount,
   ]);
 
-  /**
-   * Save the score.
-   *
-   * This is used for:
-   * - completing all words
-   * - running out of time
-   *
-   * Time-up is a COMPLETED game, not an abandoned game.
-   */
   const recordScore = useCallback(
     async (
       wordsFound: number,
@@ -605,9 +590,6 @@ export default function WordSearchScreen() {
           return;
         }
 
-        /**
-         * Read the REAL session ID.
-         */
         const activeSessionId =
           activeSessionIdRef.current;
 
@@ -620,9 +602,6 @@ export default function WordSearchScreen() {
         const points =
           wordsFound * POINTS_PER_WORD;
 
-        /**
-         * Save the player's score.
-         */
         const {
           error: scoreError,
         } = await supabase
@@ -644,10 +623,6 @@ export default function WordSearchScreen() {
           );
         }
 
-        /**
-         * The score was successfully inserted.
-         * Now mark the session completed.
-         */
         if (
           !exitConfirmedRef.current
         ) {
@@ -689,14 +664,6 @@ export default function WordSearchScreen() {
           setScoreSaved(true);
         }
       } catch (error) {
-        /**
-         * IMPORTANT:
-         *
-         * Do NOT permanently mark the score as finalized
-         * when the database insert fails.
-         *
-         * This allows the time-up effect to retry if necessary.
-         */
         scoreFinalizedRef.current =
           false;
 
@@ -712,17 +679,6 @@ export default function WordSearchScreen() {
     [difficulty, genLevel],
   );
 
-  /**
-   * TIMER
-   *
-   * The timer ONLY counts down here.
-   *
-   * When it reaches zero, it stops the game and changes
-   * secondsLeft to 0.
-   *
-   * The separate time-up effect below is responsible
-   * for saving the score.
-   */
   useEffect(() => {
     if (
       !timerRunning ||
@@ -774,22 +730,6 @@ export default function WordSearchScreen() {
     };
   }, [timerRunning]);
 
-  /**
-   * TIME-UP FINALIZATION
-   *
-   * This is the important fix.
-   *
-   * When secondsLeft becomes 0:
-   *
-   * 1. Read foundWordsRef.current.
-   * 2. Calculate points from the words already found.
-   * 3. Save the score.
-   * 4. Mark the game session completed.
-   * 5. Show the Time's Up modal.
-   *
-   * Example:
-   * 6 words found = 60 points.
-   */
   useEffect(() => {
     if (
       secondsLeft !== 0 ||
@@ -804,10 +744,6 @@ export default function WordSearchScreen() {
 
     setShowTimeUp(true);
 
-    // Try more than once in case the first Supabase request is interrupted
-    // exactly when the timer reaches zero. The score is only finalized after
-    // the database insert succeeds, so a retry cannot intentionally replace a
-    // failed save with a completed/abandoned state.
     let cancelled = false;
 
     const saveTimeUpScore = async () => {
@@ -921,9 +857,6 @@ export default function WordSearchScreen() {
         return;
       }
 
-      // A word is valid only when the tapped letters exactly match
-      // one of the generated word placements. This lets the player
-      // tap letters individually in any order.
       const placement = puzzle.placements.find((candidate) => {
         if (candidate.cells.length !== selectedCells.size) {
           return false;
@@ -947,8 +880,6 @@ export default function WordSearchScreen() {
         const next = new Set(foundWords);
         next.add(placement.word);
 
-        // Keep the ref immediately in sync so the timer can never
-        // save an older word count.
         foundWordsRef.current = next;
         setFoundWords(next);
 
@@ -977,7 +908,6 @@ export default function WordSearchScreen() {
         }
       }
 
-      // Always clear the current selection after checking.
       setSelectedCells(new Set());
     }, [
       foundWords,
@@ -987,11 +917,6 @@ export default function WordSearchScreen() {
       timerRunning,
     ]);
 
-  /**
-   * Explicit exit remains ABANDONED.
-   *
-   * This is different from time-up.
-   */
   const handleExitGame =
     useCallback(async () => {
       if (
@@ -1082,45 +1007,49 @@ export default function WordSearchScreen() {
       <SafeAreaView
         style={[
           styles.safe,
-          {
-            backgroundColor:
-              colors.background,
-          },
+          { backgroundColor: pageBg },
         ]}
+        edges={['top', 'bottom']}
       >
+        <StatusBar barStyle="dark-content" backgroundColor={pageBg} />
         <View
           style={
             styles.initializing
           }
         >
-          <View
-            style={[
-              styles.initializingIcon,
-              {
-                backgroundColor:
-                  colors.accent,
-              },
-            ]}
-          >
-            <Text
+          <div style={{ position: 'relative', width: 64, height: 64, marginBottom: 8 }}>
+            <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 16 }} />
+            <View
               style={[
-                styles.initializingIconText,
+                styles.initializingIcon,
                 {
-                  color:
-                    colors.onAccent,
+                  backgroundColor: COLORS.card,
+                  borderColor: '#000000',
+                  borderWidth: 2.5,
+                  borderRadius: 16,
                 },
               ]}
             >
-              W
-            </Text>
-          </View>
+              <Text
+                style={[
+                  styles.initializingIconText,
+                  {
+                    color: COLORS.text,
+                    fontFamily: 'Poppins-ExtraBold',
+                  },
+                ]}
+              >
+                W
+              </Text>
+            </View>
+          </div>
 
           <Text
             style={[
               styles.initializingTitle,
               {
-                color:
-                  colors.text,
+                color: '#000000',
+                fontFamily: 'Poppins-ExtraBold',
               },
             ]}
           >
@@ -1131,8 +1060,8 @@ export default function WordSearchScreen() {
             style={[
               styles.initializingSub,
               {
-                color:
-                  colors.muted,
+                color: COLORS.muted,
+                fontFamily: 'Poppins-Regular',
               },
             ]}
           >
@@ -1152,49 +1081,48 @@ export default function WordSearchScreen() {
       <SafeAreaView
         style={[
           styles.safe,
-          {
-            backgroundColor:
-              colors.background,
-          },
+          { backgroundColor: pageBg },
         ]}
+        edges={['top', 'bottom']}
       >
+        <StatusBar barStyle="dark-content" backgroundColor={pageBg} />
+
         <View
           style={[
             styles.header,
-            {
-              borderBottomColor:
-                colors.border,
-            },
+            { borderBottomColor: '#000000', paddingBottom: 10, paddingTop: 12 },
           ]}
         >
-          <Pressable
-            onPress={() =>
-              router.replace(
-                '/modules/games',
-              )
-            }
-            style={[
-              styles.headerBack,
-              {
-                backgroundColor:
-                  colors.accent,
-              },
-            ]}
-            hitSlop={10}
-          >
-            <ChevronLeft
-              color="#FFFFFF"
-              size={22}
-              strokeWidth={2.4}
-            />
-          </Pressable>
+          <div style={{ position: 'relative' }}>
+            <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 8 }} />
+            <Pressable
+              onPress={() =>
+                router.replace(
+                  '/modules/games',
+                )
+              }
+              style={({ pressed }) => [
+                styles.headerBack,
+                { backgroundColor: '#000000', borderColor: '#000000', borderWidth: 2 },
+                pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
+              ]}
+              hitSlop={12}
+            >
+              <ChevronLeft
+                color="#FFFFFF"
+                size={22}
+                strokeWidth={2.8}
+              />
+            </Pressable>
+          </div>
 
           <Text
             style={[
               styles.headerTitle,
               {
-                color:
-                  colors.accent,
+                color: '#000000',
+                fontFamily: 'Poppins-ExtraBold',
+                fontSize: 22,
               },
             ]}
           >
@@ -1217,8 +1145,8 @@ export default function WordSearchScreen() {
             style={[
               styles.errorTitle,
               {
-                color:
-                  colors.text,
+                color: '#000000',
+                fontFamily: 'Poppins-ExtraBold',
               },
             ]}
           >
@@ -1229,8 +1157,8 @@ export default function WordSearchScreen() {
             style={[
               styles.errorMessage,
               {
-                color:
-                  colors.muted,
+                color: COLORS.muted,
+                fontFamily: 'Poppins-Regular',
               },
             ]}
           >
@@ -1238,36 +1166,42 @@ export default function WordSearchScreen() {
               'The puzzle could not be initialized.'}
           </Text>
 
-          <Pressable
-            style={[
-              styles.checkBtn,
-              {
-                backgroundColor:
-                  colors.accent,
-              },
-            ]}
-            onPress={() =>
-              router.replace({
-                pathname:
-                  '/modules/games/wordsearch',
-                params: {
-                  difficulty,
-                },
-              })
-            }
-          >
-            <Text
-              style={[
-                styles.checkBtnText,
+          <div style={{ position: 'relative', width: '80%', maxWidth: 220 }}>
+            <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 14 }} />
+            <Pressable
+              style={({ pressed }) => [
+                styles.checkBtn,
                 {
-                  color:
-                    colors.onAccent,
+                  backgroundColor: '#000000',
+                  borderColor: '#000000',
+                  borderWidth: 2.5,
+                  borderRadius: 14,
                 },
+                pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
               ]}
+              onPress={() =>
+                router.replace({
+                  pathname:
+                    '/modules/games/wordsearch',
+                  params: {
+                    difficulty,
+                  },
+                })
+              }
             >
-              Try Again
-            </Text>
-          </Pressable>
+              <Text
+                style={[
+                  styles.checkBtnText,
+                  {
+                    color: '#FFFFFF',
+                    fontFamily: 'Poppins-ExtraBold',
+                  },
+                ]}
+              >
+                Try Again
+              </Text>
+            </Pressable>
+          </div>
         </View>
       </SafeAreaView>
     );
@@ -1277,12 +1211,12 @@ export default function WordSearchScreen() {
     <SafeAreaView
       style={[
         styles.safe,
-        {
-          backgroundColor:
-            colors.background,
-        },
+        { backgroundColor: pageBg },
       ]}
+      edges={['top', 'bottom']}
     >
+      <StatusBar barStyle="dark-content" backgroundColor={pageBg} />
+
       <View
         style={
           styles.screenContent
@@ -1291,43 +1225,42 @@ export default function WordSearchScreen() {
         <View
           style={[
             styles.header,
-            {
-              borderBottomColor:
-                colors.border,
-            },
+            { borderBottomColor: '#000000', paddingBottom: 10, paddingTop: 12 },
           ]}
         >
-          <Pressable
-            onPress={() =>
-              setShowExitConfirm(
-                true,
-              )
-            }
-            style={[
-              styles.headerBack,
-              {
-                backgroundColor:
-                  colors.accent,
-              },
-            ]}
-            hitSlop={10}
-          >
-            <ChevronLeft
-              color="#FFFFFF"
-              size={22}
-              strokeWidth={2.4}
-            />
-          </Pressable>
+          <div style={{ position: 'relative' }}>
+            <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 8 }} />
+            <Pressable
+              onPress={() =>
+                setShowExitConfirm(
+                  true,
+                )
+              }
+              style={({ pressed }) => [
+                styles.headerBack,
+                { backgroundColor: '#000000', borderColor: '#000000', borderWidth: 2 },
+                pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
+              ]}
+              hitSlop={12}
+            >
+              <ChevronLeft
+                color="#FFFFFF"
+                size={22}
+                strokeWidth={2.8}
+              />
+            </Pressable>
+          </div>
 
           <Text
-          style={[
-            styles.headerTitle,
-            {
-              color:
-                isDark ? '#FFFFFF' : accentForeground,
-            },
-          ]}
-        >
+            style={[
+              styles.headerTitle,
+              {
+                color: '#000000',
+                fontFamily: 'Poppins-ExtraBold',
+                fontSize: 22,
+              },
+            ]}
+          >
             WORD SEARCH
           </Text>
 
@@ -1336,47 +1269,53 @@ export default function WordSearchScreen() {
               styles.headerRight
             }
           >
-            <View
-              style={[
-                styles.levelPill,
-                {
-                  backgroundColor:
-                    colors.section,
-                  borderColor:
-                    colors.border,
-                },
-              ]}
-            >
-              <Text
+            <div style={{ position: 'relative' }}>
+              <div style={{ position: 'absolute', top: 3, left: 3, right: -3, bottom: -3, backgroundColor: '#000000', borderRadius: 8 }} />
+              <View
                 style={[
-                  styles.levelText,
+                  styles.levelPill,
                   {
-                    color:
-                      colors.muted,
+                    backgroundColor: COLORS.card,
+                    borderColor: '#000000',
+                    borderWidth: 2,
+                    borderRadius: 8,
                   },
                 ]}
               >
-                {difficultyLabel(
-                  difficulty,
+                <Text
+                  style={[
+                    styles.levelText,
+                    {
+                      color: COLORS.text,
+                      fontFamily: 'Poppins-Bold',
+                    },
+                  ]}
+                >
+                  {difficultyLabel(
+                    difficulty,
+                  )}
+                </Text>
+              </View>
+            </div>
+
+            <div style={{ paddingHorizontal: 4 }}>
+              <Text
+                style={[
+                  styles.timerText,
+                  {
+                    color:
+                      secondsLeft <= 20
+                        ? '#DC2626'
+                        : '#000000',
+                    fontFamily: 'Poppins-Bold',
+                  },
+                ]}
+              >
+                {formatTime(
+                  secondsLeft,
                 )}
               </Text>
-            </View>
-
-            <Text
-              style={[
-                styles.timerText,
-                {
-                  color:
-                    secondsLeft <= 20
-                      ? '#FF6B6B'
-                      : colors.text,
-                },
-              ]}
-            >
-              {formatTime(
-                secondsLeft,
-              )}
-            </Text>
+            </div>
           </View>
         </View>
 
@@ -1400,11 +1339,11 @@ export default function WordSearchScreen() {
                       styles.wordChip,
                       {
                         backgroundColor: found
-                          ? colors.accent
-                          : colors.section,
-                        borderColor: found
-                          ? colors.accent
-                          : colors.border,
+                          ? '#000000'
+                          : COLORS.card,
+                        borderColor: '#000000',
+                        borderWidth: 1.5,
+                        borderRadius: 6,
                       },
                     ]}
                   >
@@ -1413,8 +1352,9 @@ export default function WordSearchScreen() {
                         styles.wordChipText,
                         {
                           color: found
-                            ? colors.onAccent
-                            : colors.text,
+                            ? '#FFFFFF'
+                            : COLORS.text,
+                          fontFamily: 'Poppins-Bold',
                         },
                         found && {
                           textDecorationLine: 'line-through',
@@ -1430,32 +1370,41 @@ export default function WordSearchScreen() {
           </View>
 
         <View style={styles.gameControlsTop}>
-          <Pressable
-            style={[
-              styles.checkBtn,
-              {
-                backgroundColor: colors.accent,
-              },
-            ]}
-            onPress={checkSelection}
-          >
-            <Text
-              style={[
-                styles.checkBtnText,
+          <div style={{ position: 'relative', width: '100%' }}>
+            <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 14 }} />
+            <Pressable
+              style={({ pressed }) => [
+                styles.checkBtn,
                 {
-                  color: colors.onAccent,
+                  backgroundColor: '#000000',
+                  borderColor: '#000000',
+                  borderWidth: 2.5,
+                  borderRadius: 14,
                 },
+                pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
               ]}
+              onPress={checkSelection}
             >
-              Check Word
-            </Text>
-          </Pressable>
+              <Text
+                style={[
+                  styles.checkBtnText,
+                  {
+                    color: '#FFFFFF',
+                    fontFamily: 'Poppins-ExtraBold',
+                  },
+                ]}
+              >
+                Check Word
+              </Text>
+            </Pressable>
+          </div>
 
           <Text
             style={[
               styles.scoreText,
               {
-                color: colors.muted,
+                color: '#000000',
+                fontFamily: 'Poppins-Bold',
               },
             ]}
           >
@@ -1466,7 +1415,7 @@ export default function WordSearchScreen() {
         <Text
           style={[
             styles.instructionText,
-            { color: colors.muted },
+            { color: '#000000', fontFamily: 'Poppins-Bold' },
           ]}
         >
           Tap each letter to highlight a word
@@ -1486,77 +1435,85 @@ export default function WordSearchScreen() {
                 styles.gridWrap
               }
             >
-            <View
-              style={[
-                styles.grid,
-                {
-                  width:
-                    cellSize *
-                    gridSize,
-                  height:
-                    cellSize *
-                    gridSize,
-                },
-              ]}
-            >
-              {puzzle.grid.map(
-                (
-                  letter,
-                  index,
-                ) => {
-                  const highlighted =
-                    foundCells.has(
+            <div style={{ position: 'relative' }}>
+              <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 16 }} />
+              <View
+                style={[
+                  styles.gridContainer,
+                  { backgroundColor: COLORS.card, borderColor: '#000000', borderWidth: 3, borderRadius: 16, padding: 8 },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.grid,
+                    {
+                      width:
+                        cellSize *
+                        gridSize,
+                      height:
+                        cellSize *
+                        gridSize,
+                    },
+                  ]}
+                >
+                  {puzzle.grid.map(
+                    (
+                      letter,
                       index,
-                    ) ||
-                    selectedCells.has(
-                      index,
-                    );
+                    ) => {
+                      const highlighted =
+                        foundCells.has(
+                          index,
+                        ) ||
+                        selectedCells.has(
+                          index,
+                        );
 
-                  return (
-                    <Pressable
-                      key={index}
-                      onPress={() => toggleCell(index)}
-                      disabled={!timerRunning || gameEndedRef.current || exitConfirmedRef.current}
-                      style={[
-                        styles.cell,
-                        {
-                          width:
-                            cellSize,
-                          height:
-                            cellSize,
-                          backgroundColor:
-                            highlighted
-                              ? colors.accent
-                              : colors.section,
-                          borderColor:
-                            colors.border,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.cellText,
-                          {
-                            color:
-                              highlighted
-                                ? colors.onAccent
-                                : colors.text,
-                            fontSize:
-                              Math.max(
-                                9,
-                                cellSize *
-                                  0.42,
-                              ),
-                          },
-                        ]}
-                      >
-                        {letter}
-                      </Text>
-                    </Pressable>
-                  );
-                },
-              )}
-            </View>
+                      return (
+                        <Pressable
+                          key={index}
+                          onPress={() => toggleCell(index)}
+                          disabled={!timerRunning || gameEndedRef.current || exitConfirmedRef.current}
+                          style={({ pressed }) => [
+                            styles.cell,
+                            {
+                              width:
+                                cellSize,
+                              height:
+                                cellSize,
+                              backgroundColor:
+                                highlighted
+                                  ? accent
+                                  : COLORS.card,
+                              borderColor: '#000000',
+                            },
+                            pressed && { transform: [{ translateX: 1 }, { translateY: 1 }] },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.cellText,
+                              {
+                                color: highlighted ? '#000000' : COLORS.text,
+                                fontSize:
+                                  Math.max(
+                                    9,
+                                    cellSize *
+                                      0.42,
+                                  ),
+                                fontFamily: 'Poppins-ExtraBold',
+                              },
+                            ]}
+                          >
+                            {letter}
+                          </Text>
+                        </Pressable>
+                      );
+                    },
+                  )}
+                </View>
+              </View>
+            </div>
             </View>
           </ScrollView>
         </View>
@@ -1583,115 +1540,130 @@ export default function WordSearchScreen() {
             styles.modalOverlay
           }
         >
-          <View
-            style={[
-              styles.modalCard,
-              {
-                backgroundColor:
-                  colors.section,
-                borderColor:
-                  colors.border,
-              },
-            ]}
-          >
-
-            <Text
-              style={[
-                styles.modalTitle,
-                {
-                  color:
-                    colors.text,
-                },
-              ]}
-            >
-              Exit Game?
-            </Text>
-
-            <Text
-              style={[
-                styles.modalSub,
-                {
-                  color:
-                    colors.muted,
-                },
-              ]}
-            >
-              Are you sure you want
-              to leave this game?
-            </Text>
-
-            <Text
-              style={[
-                styles.exitWarning,
-                {
-                  color:
-                    colors.muted,
-                },
-              ]}
-            >
-              Your current game will
-              be cancelled and no
-              points will be awarded.
-            </Text>
-
+          <div style={{ position: 'relative', width: '100%', maxWidth: 340 }}>
+            <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 16 }} />
             <View
-              style={
-                styles.modalBtns
-              }
+              style={[
+                styles.modalCard,
+                {
+                  backgroundColor: COLORS.card,
+                  borderColor: '#000000',
+                  borderWidth: 3,
+                  borderRadius: 16,
+                },
+              ]}
             >
-              <Pressable
-                style={[
-                  styles.btnSecondary,
-                  {
-                    borderColor:
-                      colors.border,
-                  },
-                ]}
-                onPress={() =>
-                  setShowExitConfirm(
-                    false,
-                  )
-                }
-              >
-                <Text
-                  style={[
-                    styles.btnSecondaryText,
-                    {
-                      color:
-                        colors.text,
-                    },
-                  ]}
-                >
-                  Keep Playing
-                </Text>
-              </Pressable>
 
-              <Pressable
+              <Text
                 style={[
-                  styles.btnPrimary,
+                  styles.modalTitle,
                   {
-                    backgroundColor:
-                      colors.accent,
+                    color: COLORS.text,
+                    fontFamily: 'Poppins-ExtraBold',
                   },
                 ]}
-                onPress={
-                  handleExitGame
+              >
+                Exit Game?
+              </Text>
+
+              <Text
+                style={[
+                  styles.modalSub,
+                  {
+                    color: COLORS.muted,
+                    fontFamily: 'Poppins-Medium',
+                  },
+                ]}
+              >
+                Are you sure you want
+                to leave this game?
+              </Text>
+
+              <Text
+                style={[
+                  styles.exitWarning,
+                  {
+                    color: COLORS.muted,
+                    fontFamily: 'Poppins-Regular',
+                  },
+                ]}
+              >
+                Your current game will
+                be cancelled and no
+                points will be awarded.
+              </Text>
+
+              <View
+                style={
+                  styles.modalBtns
                 }
               >
-                <Text
-                  style={[
-                    styles.btnPrimaryText,
-                    {
-                      color:
-                        colors.onAccent,
-                    },
-                  ]}
-                >
-                  Exit Game
-                </Text>
-              </Pressable>
+                <div style={{ position: 'relative', width: '100%' }}>
+                  <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.btnSecondary,
+                      {
+                        backgroundColor: COLORS.card,
+                        borderColor: '#000000',
+                        borderWidth: 2.5,
+                        borderRadius: 12,
+                      },
+                      pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
+                    ]}
+                    onPress={() =>
+                      setShowExitConfirm(
+                        false,
+                      )
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.btnSecondaryText,
+                        {
+                          color: COLORS.text,
+                          fontFamily: 'Poppins-ExtraBold',
+                        },
+                      ]}
+                    >
+                      Keep Playing
+                    </Text>
+                  </Pressable>
+                </div>
+
+                <div style={{ position: 'relative', width: '100%' }}>
+                  <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.btnPrimary,
+                      {
+                        backgroundColor: '#000000',
+                        borderColor: '#000000',
+                        borderWidth: 2.5,
+                        borderRadius: 12,
+                      },
+                      pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
+                    ]}
+                    onPress={
+                      handleExitGame
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.btnPrimaryText,
+                        {
+                          color: '#FFFFFF',
+                          fontFamily: 'Poppins-ExtraBold',
+                        },
+                      ]}
+                    >
+                      Exit Game
+                    </Text>
+                  </Pressable>
+                </div>
+              </View>
             </View>
-          </View>
+          </div>
         </View>
       </Modal>
 
@@ -1708,108 +1680,123 @@ export default function WordSearchScreen() {
             styles.modalOverlay
           }
         >
-          <View
-            style={[
-              styles.modalCard,
-              {
-                backgroundColor:
-                  colors.section,
-                borderColor:
-                  colors.border,
-              },
-            ]}
-          >
-            <Text
-              style={
-                styles.modalEmoji
-              }
-            >
-              ⭐
-            </Text>
-
-            <Text
-              style={[
-                styles.modalTitle,
-                {
-                  color:
-                    colors.text,
-                },
-              ]}
-            >
-              All Words Found!
-            </Text>
-
-            <Text
-              style={[
-                styles.modalSub,
-                {
-                  color:
-                    colors.muted,
-                },
-              ]}
-            >
-              {difficultyLabel(
-                difficulty,
-              )}{' '}
-              · {currentScore} pts
-            </Text>
-
+          <div style={{ position: 'relative', width: '100%', maxWidth: 340 }}>
+            <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 16 }} />
             <View
-              style={
-                styles.modalBtns
-              }
+              style={[
+                styles.modalCard,
+                {
+                  backgroundColor: COLORS.card,
+                  borderColor: '#000000',
+                  borderWidth: 3,
+                  borderRadius: 16,
+                },
+              ]}
             >
-              <Pressable
-                style={[
-                  styles.btnPrimary,
-                  {
-                    backgroundColor:
-                      colors.accent,
-                  },
-                ]}
-                onPress={
-                  handlePlayAgain
+              <Text
+                style={
+                  styles.modalEmoji
                 }
               >
-                <Text
-                  style={[
-                    styles.btnPrimaryText,
-                    {
-                      color:
-                        colors.onAccent,
-                    },
-                  ]}
-                >
-                  Play Again
-                </Text>
-              </Pressable>
+                ⭐
+              </Text>
 
-              <Pressable
+              <Text
                 style={[
-                  styles.btnSecondary,
+                  styles.modalTitle,
                   {
-                    borderColor:
-                      colors.border,
+                    color: COLORS.text,
+                    fontFamily: 'Poppins-ExtraBold',
                   },
                 ]}
-                onPress={
-                  handleExitGame
+              >
+                All Words Found!
+              </Text>
+
+              <Text
+                style={[
+                  styles.modalSub,
+                  {
+                    color: COLORS.muted,
+                    fontFamily: 'Poppins-Medium',
+                  },
+                ]}
+              >
+                {difficultyLabel(
+                  difficulty,
+                )}{' '}
+                · {currentScore} pts
+              </Text>
+
+              <View
+                style={
+                  styles.modalBtns
                 }
               >
-                <Text
-                  style={[
-                    styles.btnSecondaryText,
-                    {
-                      color:
-                        colors.text,
-                    },
-                  ]}
-                >
-                  Exit Game
-                </Text>
-              </Pressable>
+                <div style={{ position: 'relative', width: '100%' }}>
+                  <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.btnPrimary,
+                      {
+                        backgroundColor: '#000000',
+                        borderColor: '#000000',
+                        borderWidth: 2.5,
+                        borderRadius: 12,
+                      },
+                      pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
+                    ]}
+                    onPress={
+                      handlePlayAgain
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.btnPrimaryText,
+                        {
+                          color: '#FFFFFF',
+                          fontFamily: 'Poppins-ExtraBold',
+                        },
+                      ]}
+                    >
+                      Play Again
+                    </Text>
+                  </Pressable>
+                </div>
+
+                <div style={{ position: 'relative', width: '100%' }}>
+                  <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.btnSecondary,
+                      {
+                        backgroundColor: COLORS.card,
+                        borderColor: '#000000',
+                        borderWidth: 2.5,
+                        borderRadius: 12,
+                      },
+                      pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
+                    ]}
+                    onPress={
+                      handleExitGame
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.btnSecondaryText,
+                        {
+                          color: COLORS.text,
+                          fontFamily: 'Poppins-ExtraBold',
+                        },
+                      ]}
+                    >
+                      Exit Game
+                    </Text>
+                  </Pressable>
+                </div>
+              </View>
             </View>
-          </View>
+          </div>
         </View>
       </Modal>
 
@@ -1826,424 +1813,401 @@ export default function WordSearchScreen() {
             styles.modalOverlay
           }
         >
-          <View
-            style={[
-              styles.modalCard,
-              {
-                backgroundColor:
-                  colors.section,
-                borderColor:
-                  colors.border,
-              },
-            ]}
-          >
-            <Text
-              style={
-                styles.modalEmoji
-              }
-            >
-              ⏱️
-            </Text>
-
-            <Text
-              style={[
-                styles.modalTitle,
-                {
-                  color:
-                    colors.text,
-                },
-              ]}
-            >
-              Time's Up!
-            </Text>
-
-            <Text
-              style={[
-                styles.modalSub,
-                {
-                  color:
-                    colors.muted,
-                },
-              ]}
-            >
-              {foundWords.size}/
-              {words.length} found ·{' '}
-              {currentScore} pts
-            </Text>
-
+          <div style={{ position: 'relative', width: '100%', maxWidth: 340 }}>
+            <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 16 }} />
             <View
-              style={
-                styles.modalBtns
-              }
+              style={[
+                styles.modalCard,
+                {
+                  backgroundColor: COLORS.card,
+                  borderColor: '#000000',
+                  borderWidth: 3,
+                  borderRadius: 16,
+                },
+              ]}
             >
-              <Pressable
-                style={[
-                  styles.btnPrimary,
-                  {
-                    backgroundColor:
-                      colors.accent,
-                  },
-                ]}
-                onPress={
-                  handlePlayAgain
+              <Text
+                style={
+                  styles.modalEmoji
                 }
               >
-                <Text
-                  style={[
-                    styles.btnPrimaryText,
-                    {
-                      color:
-                        colors.onAccent,
-                    },
-                  ]}
-                >
-                  Play Again
-                </Text>
-              </Pressable>
+                ⏱️
+              </Text>
 
-              <Pressable
+              <Text
                 style={[
-                  styles.btnSecondary,
+                  styles.modalTitle,
                   {
-                    borderColor:
-                      colors.border,
+                    color: COLORS.text,
+                    fontFamily: 'Poppins-ExtraBold',
                   },
                 ]}
-                onPress={
-                  handleExitGame
+              >
+                Time's Up!
+              </Text>
+
+              <Text
+                style={[
+                  styles.modalSub,
+                  {
+                    color: COLORS.muted,
+                    fontFamily: 'Poppins-Medium',
+                  },
+                ]}
+              >
+                {foundWords.size}/
+                {words.length} found ·{' '}
+                {currentScore} pts
+              </Text>
+
+              <View
+                style={
+                  styles.modalBtns
                 }
               >
-                <Text
-                  style={[
-                    styles.btnSecondaryText,
-                    {
-                      color:
-                        colors.text,
-                    },
-                  ]}
-                >
-                  Exit Game
-                </Text>
-              </Pressable>
+                <div style={{ position: 'relative', width: '100%' }}>
+                  <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.btnPrimary,
+                      {
+                        backgroundColor: '#000000',
+                        borderColor: '#000000',
+                        borderWidth: 2.5,
+                        borderRadius: 12,
+                      },
+                      pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
+                    ]}
+                    onPress={
+                      handlePlayAgain
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.btnPrimaryText,
+                        {
+                          color: '#FFFFFF',
+                          fontFamily: 'Poppins-ExtraBold',
+                        },
+                      ]}
+                    >
+                      Play Again
+                    </Text>
+                  </Pressable>
+                </div>
+
+                <div style={{ position: 'relative', width: '100%' }}>
+                  <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.btnSecondary,
+                      {
+                        backgroundColor: COLORS.card,
+                        borderColor: '#000000',
+                        borderWidth: 2.5,
+                        borderRadius: 12,
+                      },
+                      pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
+                    ]}
+                    onPress={
+                      handleExitGame
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.btnSecondaryText,
+                        {
+                          color: COLORS.text,
+                          fontFamily: 'Poppins-ExtraBold',
+                        },
+                      ]}
+                    >
+                      Exit Game
+                    </Text>
+                  </Pressable>
+                </div>
+              </View>
             </View>
-          </View>
+          </div>
         </View>
       </Modal>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-  },
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
-  screenContent: {
-    flex: 1,
-    minHeight: 0,
-  },
+function makeStyles(C: typeof DARK_PALETTE) {
+  return StyleSheet.create({
+    safe: {
+      flex: 1,
+    },
 
-  header: {
-    position: 'relative',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 25,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ECE9E4',
-    zIndex: 100,
-  },
+    screenContent: {
+      flex: 1,
+      minHeight: 0,
+    },
 
-  headerBack: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 20,
+      borderBottomWidth: 0,
+      zIndex: 100,
+    },
 
-  headerTitle: {
-    fontFamily: 'Poppins-ExtraBold',
-    fontSize: 16,
-    letterSpacing: 1.5,
-  },
+    headerBack: {
+      width: 40,
+      height: 40,
+      borderRadius: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
 
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
+    headerTitle: {
+      letterSpacing: 1,
+    },
 
-  levelPill: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
+    headerRight: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
 
-  levelText: {
-    fontFamily: 'Poppins-Medium',
-    fontSize: 11,
-  },
+    levelPill: {
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+    },
 
-  timerText: {
-    fontFamily: 'Poppins-Bold',
-    fontSize: 14,
-    fontVariant: ['tabular-nums'],
-    minWidth: 42,
-    textAlign: 'right',
-  },
+    levelText: {
+      fontSize: 11,
+    },
 
-  gameArea: {
-    flex: 1,
-    minHeight: 0,
-  },
+    timerText: {
+      fontSize: 14,
+      fontVariant: ['tabular-nums'],
+      minWidth: 42,
+      textAlign: 'right',
+    },
 
-  boardScroll: {
-    flex: 1,
-    minHeight: 0,
-  },
+    gameArea: {
+      flex: 1,
+      minHeight: 0,
+    },
 
-  boardScrollContent: {
-    flexGrow: 1,
-    paddingBottom: 24,
-  },
+    boardScroll: {
+      flex: 1,
+      minHeight: 0,
+    },
 
-  instructionText: {
-    fontFamily: 'Poppins-Medium',
-    fontSize: 12,
-    textAlign: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
+    boardScrollContent: {
+      flexGrow: 1,
+      paddingBottom: 24,
+    },
 
-  wordsContainer: {
-    width: '100%',
-    flexGrow: 0,
-    flexShrink: 0,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
+    instructionText: {
+      fontSize: 12,
+      textAlign: 'center',
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+    },
 
-  wordsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
+    wordsContainer: {
+      width: '100%',
+      flexGrow: 0,
+      flexShrink: 0,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+    },
 
-  wordChip: {
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
+    wordsRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+    },
 
-  wordChipText: {
-    fontFamily: 'Poppins-Medium',
-    fontSize: 11,
-  },
+    wordChip: {
+      paddingHorizontal: 9,
+      paddingVertical: 5,
+    },
 
-  gridWrap: {
-    minHeight: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: 24,
-    paddingBottom: 4,
-  },
+    wordChipText: {
+      fontSize: 11,
+    },
 
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignSelf: 'center',
-  },
+    gridWrap: {
+      minHeight: '100%',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingTop: 24,
+      paddingBottom: 4,
+    },
 
-  cell: {
-    borderWidth: 0.5,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+    gridContainer: {
+      overflow: 'hidden',
+    },
 
-  cellText: {
-    fontFamily: 'Poppins-Bold',
-  },
+    grid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignSelf: 'center',
+    },
 
-  gameControlsTop: {
-    width: '100%',
-    paddingHorizontal: 12,
-    paddingTop: 12,
-    paddingBottom: 4,
-    alignItems: 'center',
-    gap: 4,
-  },
+    cell: {
+      borderWidth: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
 
-  bottomControls: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 48,
-    height: 96,
-    paddingHorizontal: 12,
-    paddingTop: 20,
-    paddingBottom: 20,
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 6,
-    zIndex: 9999,
-    elevation: 9999,
-  },
+    cellText: {
+      // font specified inline
+    },
 
-  scoreText: {
-    fontFamily: 'Poppins-Medium',
-    fontSize: 12,
-    paddingTop: 6,
-  },
+    gameControlsTop: {
+      width: '100%',
+      paddingHorizontal: 18,
+      paddingTop: 12,
+      paddingBottom: 4,
+      alignItems: 'center',
+      gap: 8,
+    },
 
-  checkBtn: {
-    borderRadius: 14,
-    paddingVertical: 13,
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '100%',
-    minHeight: 48,
-    flexShrink: 0,
-  },
+    scoreText: {
+      fontSize: 13,
+      paddingTop: 2,
+    },
 
-  checkBtnText: {
-    fontFamily: 'Poppins-Bold',
-    fontSize: 16,
-  },
+    checkBtn: {
+      paddingVertical: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: '100%',
+      minHeight: 48,
+      flexShrink: 0,
+    },
 
-  initializing: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 30,
-    gap: 10,
-  },
+    checkBtnText: {
+      fontSize: 15,
+      letterSpacing: 1.2,
+    },
 
-  initializingIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
+    initializing: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 30,
+      gap: 10,
+    },
 
-  initializingIconText: {
-    fontFamily: 'Poppins-ExtraBold',
-    fontSize: 30,
-  },
+    initializingIcon: {
+      width: 64,
+      height: 64,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 8,
+    },
 
-  initializingTitle: {
-    fontFamily: 'Poppins-ExtraBold',
-    fontSize: 20,
-    textAlign: 'center',
-  },
+    initializingIconText: {
+      fontSize: 30,
+    },
 
-  initializingSub: {
-    fontFamily: 'Poppins-Regular',
-    fontSize: 13,
-    textAlign: 'center',
-  },
+    initializingTitle: {
+      fontSize: 20,
+      textAlign: 'center',
+    },
 
-  errorState: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 28,
-    gap: 12,
-  },
+    initializingSub: {
+      fontSize: 13,
+      textAlign: 'center',
+    },
 
-  errorTitle: {
-    fontFamily: 'Poppins-ExtraBold',
-    fontSize: 22,
-    textAlign: 'center',
-  },
+    errorState: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 28,
+      gap: 12,
+    },
 
-  errorMessage: {
-    fontFamily: 'Poppins-Regular',
-    fontSize: 13,
-    lineHeight: 20,
-    textAlign: 'center',
-    marginBottom: 8,
-  },
+    errorTitle: {
+      fontSize: 22,
+      textAlign: 'center',
+    },
 
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.75)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
+    errorMessage: {
+      fontSize: 13,
+      lineHeight: 20,
+      textAlign: 'center',
+      marginBottom: 8,
+    },
 
-  modalCard: {
-    borderRadius: 20,
-    padding: 28,
-    alignItems: 'center',
-    borderWidth: 1,
-    width: '90%',
-    gap: 8,
-  },
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.75)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 24,
+    },
 
-  modalEmoji: {
-    fontSize: 48,
-  },
+    modalCard: {
+      padding: 24,
+      alignItems: 'center',
+      width: '100%',
+      gap: 12,
+    },
 
-  modalTitle: {
-    fontFamily: 'Poppins-ExtraBold',
-    fontSize: 24,
-    textAlign: 'center',
-  },
+    modalEmoji: {
+      fontSize: 44,
+    },
 
-  modalSub: {
-    fontFamily: 'Poppins-Medium',
-    fontSize: 15,
-    textAlign: 'center',
-    lineHeight: 22,
-  },
+    modalTitle: {
+      fontSize: 22,
+      letterSpacing: 0.5,
+      textAlign: 'center',
+    },
 
-  exitWarning: {
-    fontFamily: 'Poppins-Regular',
-    fontSize: 13,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
+    modalSub: {
+      fontSize: 14,
+      textAlign: 'center',
+    },
 
-  modalBtns: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 16,
-    width: '100%',
-  },
+    exitWarning: {
+      fontSize: 13,
+      textAlign: 'center',
+      marginTop: -4,
+    },
 
-  btnPrimary: {
-    flex: 1,
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
+    modalBtns: {
+      flexDirection: 'column',
+      gap: 12,
+      marginTop: 12,
+      width: '100%',
+    },
 
-  btnPrimaryText: {
-    fontFamily: 'Poppins-Bold',
-    fontSize: 15,
-  },
+    btnPrimary: {
+      width: '100%',
+      paddingVertical: 14,
+      alignItems: 'center',
+    },
 
-  btnSecondary: {
-    flex: 1,
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-    borderWidth: 1,
-  },
+    btnPrimaryText: {
+      fontSize: 15,
+      letterSpacing: 1,
+    },
 
-  btnSecondaryText: {
-    fontFamily: 'Poppins-SemiBold',
-    fontSize: 15,
-    textAlign: 'center',
-  },
-});
+    btnSecondary: {
+      width: '100%',
+      paddingVertical: 14,
+      alignItems: 'center',
+    },
+
+    btnSecondaryText: {
+      fontSize: 15,
+      letterSpacing: 1,
+      textAlign: 'center',
+    },
+  });
+}

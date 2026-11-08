@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   View,
@@ -22,22 +23,22 @@ import { supabase } from '@/lib/supabase';
 
 const DARK_PALETTE = {
   bg: '#090909',
-  card: '#151515',
-  cardBorder: '#2A2A2A',
-  text: '#F4F2EE',
-  muted: '#AAA59D',
+  card: '#121212',
+  cardBorder: '#000000',
+  text: '#FFFFFF',
+  muted: '#A1A1AA',
   divider: '#262626',
-  danger: '#E05252',
+  danger: '#EF4444',
 };
 
 const LIGHT_PALETTE = {
   bg: '#FBFAF8',
   card: '#FFFFFF',
-  cardBorder: '#ECE9E4',
-  text: '#27241F',
-  muted: '#8F8A82',
-  divider: '#F0EEEA',
-  danger: '#E05252',
+  cardBorder: '#000000',
+  text: '#000000',
+  muted: '#52525B',
+  divider: '#E4E4E7',
+  danger: '#EF4444',
 };
 
 const FONT = 'Poppins-Regular';
@@ -233,11 +234,12 @@ export default function AffirmationsScreen() {
     isDark,
     accentForeground,
     onAccent,
-  } = useApp();
+  } = useApp() as any;
 
   const { user } = useAuth();
 
-  const accent = accentForeground;
+  const accent = accentForeground || '#FDE047';
+  const pageBg = accent;
 
   const COLORS = isDark
     ? DARK_PALETTE
@@ -344,12 +346,6 @@ export default function AffirmationsScreen() {
           },
         );
 
-        /*
-         * Important:
-         * Do NOT remove the affirmation from the screen.
-         * Local storage is the source of truth for the
-         * current affirmation/timer.
-         */
         setError(
           'Affirmation saved on this device.',
         );
@@ -376,11 +372,6 @@ export default function AffirmationsScreen() {
 
       const generatedAt = Date.now();
 
-      /*
-       * Update UI immediately.
-       * This prevents the affirmation from reverting
-       * while Supabase is saving.
-       */
       setAffirmationIdx(nextIdx);
       setAffirmation(nextText);
       setLastGenerated(generatedAt);
@@ -388,18 +379,11 @@ export default function AffirmationsScreen() {
       setSaveMsg(null);
       setError(null);
 
-      /*
-       * Persist immediately so closing/reopening the
-       * screen does not reset the affirmation.
-       */
       await persistLocal(
         nextIdx,
         generatedAt,
       );
 
-      /*
-       * Supabase save is secondary.
-       */
       await saveAffirmation(nextText);
 
       if (opts?.fromAuto) {
@@ -433,10 +417,6 @@ export default function AffirmationsScreen() {
         }
 
         if (!stored) {
-          /*
-           * First time opening affirmations.
-           * The timer starts NOW.
-           */
           const firstIdx = 0;
           const generatedAt = Date.now();
 
@@ -474,10 +454,6 @@ export default function AffirmationsScreen() {
         const elapsed =
           Date.now() - storedGeneratedAt;
 
-        /*
-         * Five hours have passed:
-         * generate a new affirmation immediately.
-         */
         if (
           elapsed >= REGEN_INTERVAL_MS
         ) {
@@ -504,17 +480,11 @@ export default function AffirmationsScreen() {
 
           setLoading(false);
 
-          /*
-           * Save in background.
-           */
           void saveAffirmation(nextText);
 
           return;
         }
 
-        /*
-         * Restore the existing affirmation.
-         */
         setAffirmationIdx(storedIndex);
         setAffirmation(
           AFFIRMATIONS[storedIndex],
@@ -529,10 +499,6 @@ export default function AffirmationsScreen() {
           loadError,
         );
 
-        /*
-         * Safe fallback.
-         * Timer starts from this opening.
-         */
         const fallbackIdx = 0;
         const generatedAt = Date.now();
 
@@ -634,15 +600,16 @@ export default function AffirmationsScreen() {
 
   return (
     <SafeAreaView
-      style={styles.safe}
+      style={[styles.safe, { backgroundColor: pageBg }]}
       edges={['top', 'bottom']}
     >
-      {/* Header */}
+      <StatusBar barStyle="dark-content" backgroundColor={pageBg} />
 
+      {/* Header */}
       <View
         style={[
           styles.header,
-          { paddingTop: 28 },
+          { paddingTop: 12 },
         ]}
       >
         <Pressable
@@ -651,19 +618,14 @@ export default function AffirmationsScreen() {
               '/(tabs)/modules/wellbeing',
             )
           }
-          style={[
-            styles.backBtn,
-            {
-              backgroundColor: accent,
-            },
-          ]}
+          style={({ pressed }) => [styles.backBtn, pressed && styles.pressedBtn]}
           hitSlop={12}
           accessibilityLabel="Go back"
         >
           <ChevronLeft
             color="#FFFFFF"
             size={22}
-            strokeWidth={2.4}
+            strokeWidth={2.8}
           />
         </Pressable>
 
@@ -671,7 +633,7 @@ export default function AffirmationsScreen() {
           style={styles.headerTitleWrap}
         >
           <Text
-            style={styles.headerTitle}
+            style={[styles.headerTitle, { color: '#000000' }]}
           >
             AFFIRMATIONS
           </Text>
@@ -681,14 +643,14 @@ export default function AffirmationsScreen() {
           onPress={() =>
             setMenuOpen(prev => !prev)
           }
-          style={styles.menuBtn}
+          style={({ pressed }) => [styles.menuBtn, pressed && styles.pressedBtn]}
           hitSlop={12}
           accessibilityLabel="Open settings menu"
         >
           <MoreVertical
-            color={COLORS.text}
-            size={22}
-            strokeWidth={2.3}
+            color="#000000"
+            size={24}
+            strokeWidth={2.5}
           />
         </Pressable>
       </View>
@@ -696,30 +658,21 @@ export default function AffirmationsScreen() {
       {/* Settings menu */}
 
       {menuOpen ? (
-        <View
-          style={[
-            styles.menu,
-            {
-              backgroundColor:
-                COLORS.card,
-              borderColor:
-                COLORS.cardBorder,
-            },
-          ]}
-        >
-          <Pressable
-            onPress={openSettings}
-            style={({ pressed }) => [
-              styles.menuItem,
-              pressed &&
-                styles.menuItemPressed,
-            ]}
-          >
-            <Text
-              style={styles.menuItemText}
-            >
-              Settings
-            </Text>
+        <View style={styles.menuShadeOverlay}>
+          <Pressable style={{ flex: 1 }} onPress={() => setMenuOpen(false)}>
+            <View style={styles.menuCardWrapper}>
+              <View style={styles.shadowBackdrop} />
+              <View style={[styles.menuCardBody, { backgroundColor: COLORS.card }]}>
+                <Pressable
+                  onPress={openSettings}
+                  style={styles.menuItem}
+                >
+                  <Text style={[styles.menuItemText, { color: COLORS.text }]}>
+                    Settings
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
           </Pressable>
         </View>
       ) : null}
@@ -734,9 +687,6 @@ export default function AffirmationsScreen() {
       >
         <View style={styles.centerContent}>
 
-          {/* Eyebrow */}
-
-
           {/* Affirmation card */}
 
           {loading ? (
@@ -745,28 +695,22 @@ export default function AffirmationsScreen() {
             >
               <ActivityIndicator
                 size="large"
-                color={accent}
+                color="#000000"
               />
             </View>
           ) : (
-            <View style={styles.card}>
-              <View
-                style={[
-                  styles.cardAccent,
-                  {
-                    backgroundColor:
-                      accent,
-                  },
-                ]}
-              />
-
-              <Text
-                style={
-                  styles.affirmationText
-                }
-              >
-                {affirmation}
-              </Text>
+            <View style={styles.cardContainer}>
+              <View style={styles.cardShadowBackdrop} />
+              <View style={[styles.card, { backgroundColor: COLORS.card, borderColor: '#000000' }]}>
+                <Text
+                  style={[
+                    styles.affirmationText,
+                    { color: COLORS.text },
+                  ]}
+                >
+                  {affirmation}
+                </Text>
+              </View>
             </View>
           )}
 
@@ -776,7 +720,7 @@ export default function AffirmationsScreen() {
             <Text
               style={[
                 styles.saveMsg,
-                { color: accent },
+                { color: '#000000' },
               ]}
             >
               {saveMsg}
@@ -799,47 +743,50 @@ export default function AffirmationsScreen() {
           style={styles.bottomControls}
         >
           <Text
-            style={styles.countdown}
+            style={[styles.countdown, { color: '#000000' }]}
           >
             {countdownText}
           </Text>
 
-          <Pressable
-            onPress={() =>
-              void generateNew()
-            }
-            disabled={saving}
-            style={({ pressed }) => [
-              styles.generateBtn,
-              {
-                backgroundColor:
-                  accent,
-              },
-              saving &&
-                styles.generateBtnDisabled,
-              pressed &&
-                styles.generateBtnPressed,
-            ]}
-            accessibilityLabel="Generate new affirmation"
-          >
-            {saving ? (
-              <ActivityIndicator
-                size="small"
-                color={onAccent}
-              />
-            ) : (
-              <Text
-                style={[
-                  styles.generateBtnText,
-                  {
-                    color: onAccent,
-                  },
-                ]}
-              >
-                GENERATE NEW AFFIRMATION
-              </Text>
-            )}
-          </Pressable>
+          <View style={styles.cardContainer}>
+            <View style={styles.cardShadowBackdrop} />
+            <Pressable
+              onPress={() =>
+                void generateNew()
+              }
+              disabled={saving}
+              style={({ pressed }) => [
+                styles.generateBtn,
+                {
+                  backgroundColor: '#000000',
+                  borderColor: '#000000',
+                },
+                saving &&
+                  styles.generateBtnDisabled,
+                pressed &&
+                  styles.pressedBtn,
+              ]}
+              accessibilityLabel="Generate new affirmation"
+            >
+              {saving ? (
+                <ActivityIndicator
+                  size="small"
+                  color="#FFFFFF"
+                />
+              ) : (
+                <Text
+                  style={[
+                    styles.generateBtnText,
+                    {
+                      color: '#FFFFFF',
+                    },
+                  ]}
+                >
+                  GENERATE NEW AFFIRMATION
+                </Text>
+              )}
+            </Pressable>
+          </View>
         </View>
 
       </ScrollView>
@@ -857,7 +804,10 @@ function makeStyles(C: Palette) {
   return StyleSheet.create({
     safe: {
       flex: 1,
-      backgroundColor: C.bg,
+    },
+
+    pressedBtn: {
+      transform: [{ translateX: 2 }, { translateY: 2 }],
     },
 
     /* Header */
@@ -866,19 +816,21 @@ function makeStyles(C: Palette) {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      paddingHorizontal: 16,
-      paddingTop: 28,
-      paddingVertical: 12,
-      borderBottomWidth: 1,
-      borderBottomColor: C.divider,
+      paddingHorizontal: 20,
+      paddingTop: 12,
+      paddingBottom: 10,
+      zIndex: 100,
     },
 
     backBtn: {
-      width: 38,
-      height: 38,
-      borderRadius: 19,
+      width: 40,
+      height: 40,
+      borderRadius: 8,
+      backgroundColor: '#000000',
       alignItems: 'center',
       justifyContent: 'center',
+      borderWidth: 2,
+      borderColor: '#000000',
     },
 
     headerTitleWrap: {
@@ -889,40 +841,50 @@ function makeStyles(C: Palette) {
 
     headerTitle: {
       fontFamily: FONT_XB,
-      fontSize: 16,
-      letterSpacing: 1.4,
-      color: C.text,
+      fontSize: 22,
+      letterSpacing: 1,
       textAlign: 'center',
     },
 
     menuBtn: {
-      width: 38,
-      height: 38,
+      width: 40,
+      height: 40,
       alignItems: 'center',
       justifyContent: 'center',
     },
 
-    menu: {
+    menuShadeOverlay: {
       position: 'absolute',
-      top: 76,
-      right: 14,
-      minWidth: 150,
-      borderWidth: 1,
-      borderRadius: 14,
-      paddingVertical: 6,
+      top: 55,
+      right: 20,
       zIndex: 1000,
-      elevation: 8,
-      shadowOffset: {
-        width: 0,
-        height: 4,
-      },
-      shadowOpacity: 0.18,
-      shadowRadius: 10,
+    },
+
+    menuCardWrapper: {
+      position: 'relative',
+      width: 170,
+    },
+
+    shadowBackdrop: {
+      position: 'absolute',
+      top: 4,
+      left: 4,
+      right: -4,
+      bottom: -4,
+      backgroundColor: '#000000',
+      borderRadius: 12,
+    },
+
+    menuCardBody: {
+      borderRadius: 12,
+      paddingVertical: 4,
+      borderWidth: 2.5,
+      borderColor: '#000000',
     },
 
     menuItem: {
-      paddingHorizontal: 16,
       paddingVertical: 12,
+      paddingHorizontal: 16,
     },
 
     menuItemPressed: {
@@ -930,24 +892,18 @@ function makeStyles(C: Palette) {
     },
 
     menuItemText: {
-      fontFamily: FONT_MEDIUM,
-      fontSize: 13.5,
-      color: C.text,
+      fontFamily: FONT_BOLD,
+      fontSize: 13,
     },
 
     /* Main scroll area */
 
     scroll: {
       flexGrow: 1,
-      paddingHorizontal: 20,
-      paddingTop: 20,
-      paddingBottom: 110,
+      paddingHorizontal: 18,
+      paddingTop: 18,
+      paddingBottom: 100,
     },
-
-    /*
-     * This makes the affirmation area occupy the available
-     * screen and centers the card vertically.
-     */
 
     centerContent: {
       flex: 1,
@@ -956,44 +912,39 @@ function makeStyles(C: Palette) {
       width: '100%',
     },
 
-    /* Eyebrow */
+    /* Card shadow container */
 
-    eyebrow: {
-      fontFamily: FONT_SEMI,
-      fontSize: 13,
-      letterSpacing: 0.4,
-      marginBottom: 18,
-      textTransform: 'uppercase',
-      textAlign: 'center',
+    cardContainer: {
+      position: 'relative',
+      width: '100%',
+      maxWidth: 520,
+      marginBottom: 16,
+    },
+
+    cardShadowBackdrop: {
+      position: 'absolute',
+      top: 4,
+      left: 4,
+      right: -4,
+      bottom: -4,
+      backgroundColor: '#000000',
+      borderRadius: 16,
     },
 
     /* Affirmation card */
 
     card: {
       width: '100%',
-      maxWidth: 520,
-      backgroundColor: C.card,
-      borderWidth: 1,
-      borderColor: C.cardBorder,
-      borderRadius: 18,
+      borderRadius: 16,
+      borderWidth: 3,
       paddingHorizontal: 24,
       paddingVertical: 26,
-      overflow: 'hidden',
-    },
-
-    cardAccent: {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      right: 0,
-      height: 4,
     },
 
     affirmationText: {
       fontFamily: FONT_MEDIUM,
       fontSize: 18,
       lineHeight: 28,
-      color: C.text,
       textAlign: 'center',
     },
 
@@ -1006,16 +957,16 @@ function makeStyles(C: Palette) {
     /* Feedback */
 
     saveMsg: {
-      fontFamily: FONT_SEMI,
-      fontSize: 12.5,
+      fontFamily: FONT_XB,
+      fontSize: 13,
       marginTop: 14,
       textAlign: 'center',
     },
 
     errorText: {
-      fontFamily: FONT_MEDIUM,
-      fontSize: 12.5,
-      color: C.danger,
+      fontFamily: FONT_BOLD,
+      fontSize: 13,
+      color: '#DC2626',
       textAlign: 'center',
       marginTop: 8,
       lineHeight: 18,
@@ -1031,9 +982,8 @@ function makeStyles(C: Palette) {
     },
 
     countdown: {
-      fontFamily: FONT,
-      fontSize: 12.5,
-      color: C.muted,
+      fontFamily: FONT_BOLD,
+      fontSize: 13,
       textAlign: 'center',
       marginBottom: 14,
       letterSpacing: 0.3,
@@ -1043,25 +993,20 @@ function makeStyles(C: Palette) {
 
     generateBtn: {
       width: '100%',
-      maxWidth: 520,
       alignItems: 'center',
       justifyContent: 'center',
       paddingVertical: 16,
-      borderRadius: 14,
-      marginBottom: 12,
+      borderRadius: 16,
+      borderWidth: 3,
     },
 
     generateBtnDisabled: {
       opacity: 0.5,
     },
 
-    generateBtnPressed: {
-      opacity: 0.82,
-    },
-
     generateBtnText: {
-      fontFamily: FONT_BOLD,
-      fontSize: 13,
+      fontFamily: FONT_XB,
+      fontSize: 15,
       letterSpacing: 1.2,
     },
   });

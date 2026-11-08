@@ -4,6 +4,7 @@ import {
   Modal,
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   View,
@@ -516,38 +517,46 @@ export default function SudokuScreen() {
     <SafeAreaView
       style={[
         styles.safeArea,
-        { backgroundColor: colors.background },
+        { backgroundColor: accentForeground },
       ]}
+      edges={['top', 'bottom']}
     >
+      <StatusBar barStyle="dark-content" backgroundColor={accentForeground} />
+
       {/* Header */}
 
       <View
         style={[
           styles.header,
-          { borderBottomColor: colors.border },
+          { borderBottomColor: '#000000', paddingBottom: 10, paddingTop: 12 },
         ]}
       >
-        <Pressable
-          onPress={handleBackPress}
-          style={[
-            styles.headerBack,
-            { backgroundColor: colors.accent },
-          ]}
-          hitSlop={10}
-        >
-          <ChevronLeft
-            color="#FFFFFF"
-            size={22}
-            strokeWidth={2.4}
-          />
-        </Pressable>
+        <div style={{ position: 'relative' }}>
+          <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 8 }} />
+          <Pressable
+            onPress={handleBackPress}
+            style={({ pressed }) => [
+              styles.headerBack,
+              { backgroundColor: '#000000', borderColor: '#000000', borderWidth: 2 },
+              pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
+            ]}
+            hitSlop={12}
+          >
+            <ChevronLeft
+              color="#FFFFFF"
+              size={22}
+              strokeWidth={2.8}
+            />
+          </Pressable>
+        </div>
 
         <Text
           style={[
             styles.headerTitle,
             {
-              color:
-                isDark ? '#FFFFFF' : accentForeground,
+              color: '#000000',
+              fontFamily: 'Poppins-ExtraBold',
+              fontSize: 22,
             },
           ]}
         >
@@ -555,24 +564,29 @@ export default function SudokuScreen() {
         </Text>
 
         <View style={styles.headerRight}>
-          <View
-            style={[
-              styles.levelPill,
-              {
-                backgroundColor: colors.section,
-                borderColor: colors.border,
-              },
-            ]}
-          >
-            <Text
+          <div style={{ position: 'relative' }}>
+            <div style={{ position: 'absolute', top: 3, left: 3, right: -3, bottom: -3, backgroundColor: '#000000', borderRadius: 8 }} />
+            <View
               style={[
-                styles.levelText,
-                { color: colors.muted },
+                styles.levelPill,
+                {
+                  backgroundColor: colors.section,
+                  borderColor: '#000000',
+                  borderWidth: 2,
+                  borderRadius: 8,
+                },
               ]}
             >
-              {difficultyLabel(difficulty)}
-            </Text>
-          </View>
+              <Text
+                style={[
+                  styles.levelText,
+                  { color: colors.text, fontFamily: 'Poppins-Bold' },
+                ]}
+              >
+                {difficultyLabel(difficulty)}
+              </Text>
+            </View>
+          </div>
 
           <Text
             style={[
@@ -580,8 +594,9 @@ export default function SudokuScreen() {
               {
                 color:
                   secondsLeft <= 20
-                    ? '#FF6B6B'
-                    : colors.text,
+                    ? '#DC2626'
+                    : '#000000',
+                fontFamily: 'Poppins-Bold',
               },
             ]}
           >
@@ -597,35 +612,42 @@ export default function SudokuScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <View
-          style={[
-            styles.gridContainer,
-            { borderColor: colors.accent },
-          ]}
-        >
-          <View style={styles.grid}>
-            {board.map((value, index) => {
-              const s = getCellStyle(index);
+        <div style={{ position: 'relative' }}>
+          <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 16 }} />
+          <View
+            style={[
+              styles.gridContainer,
+              { borderColor: '#000000', backgroundColor: isDark ? '#121212' : '#FFFFFF', borderWidth: 3, borderRadius: 16, padding: 8 },
+            ]}
+          >
+            <View style={styles.grid}>
+              {board.map((value, index) => {
+                const s = getCellStyle(index);
 
-              return (
-                <Pressable
-                  key={index}
-                  style={[styles.cell, s.cell]}
-                  onPress={() => handleCellPress(index)}
-                >
-                  <Text
-                    style={[
-                      styles.cellText,
-                      s.text,
+                return (
+                  <Pressable
+                    key={index}
+                    style={({ pressed }) => [
+                      styles.cell,
+                      s.cell,
+                      pressed && { transform: [{ translateX: 1 }, { translateY: 1 }] },
                     ]}
+                    onPress={() => handleCellPress(index)}
                   >
-                    {value !== 0 ? value.toString() : ''}
-                  </Text>
-                </Pressable>
-              );
-            })}
+                    <Text
+                      style={[
+                        styles.cellText,
+                        s.text,
+                      ]}
+                    >
+                      {value !== 0 ? value.toString() : ''}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
           </View>
-        </View>
+        </div>
 
         {/* Number pad */}
 
@@ -633,80 +655,86 @@ export default function SudokuScreen() {
           <View style={styles.numRow}>
             {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(
               (num) => (
-                <Pressable
-                  key={num}
-                  style={({ pressed }) => [
-                    styles.numBtn,
-                    {
-                      backgroundColor: colors.section,
-                      borderColor: colors.border,
-                    },
-                    pressed && {
-                      borderColor: colors.accent,
-                    },
-                  ]}
-                  onPress={() =>
-                    handleNumberPress(num)
-                  }
-                >
-                  <Text
-                    style={[
-                      styles.numBtnText,
-                      { color: colors.accent },
+                <div key={num} style={{ position: 'relative' }}>
+                  <div style={{ position: 'absolute', top: 3, left: 3, right: -3, bottom: -3, backgroundColor: '#000000', borderRadius: 10 }} />
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.numBtn,
+                      {
+                        backgroundColor: colors.section,
+                        borderColor: '#000000',
+                        borderWidth: 2,
+                        borderRadius: 10,
+                      },
+                      pressed && { transform: [{ translateX: 1 }, { translateY: 1 }] },
                     ]}
+                    onPress={() =>
+                      handleNumberPress(num)
+                    }
                   >
-                    {num}
-                  </Text>
-                </Pressable>
+                    <Text
+                      style={[
+                        styles.numBtnText,
+                        { color: colors.text, fontFamily: 'Poppins-ExtraBold' },
+                      ]}
+                    >
+                      {num}
+                    </Text>
+                  </Pressable>
+                </div>
               )
             )}
           </View>
 
-          <Pressable
-            style={({ pressed }) => [
-              styles.clearBtn,
-              {
-                backgroundColor: colors.section,
-                borderColor: colors.border,
-              },
-              pressed && {
-                borderColor: '#FF6B6B',
-                backgroundColor:
-                  'rgba(220,50,50,0.15)',
-              },
-            ]}
-            onPress={handleClear}
-          >
-            <Text
-              style={[
-                styles.clearBtnText,
-                { color: colors.muted },
+          <div style={{ position: 'relative', width: '100%' }}>
+            <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+            <Pressable
+              style={({ pressed }) => [
+                styles.clearBtn,
+                {
+                  backgroundColor: colors.section,
+                  borderColor: '#000000',
+                  borderWidth: 2.5,
+                  borderRadius: 12,
+                },
+                pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
               ]}
+              onPress={handleClear}
             >
-              Clear
-            </Text>
-          </Pressable>
+              <Text
+                style={[
+                  styles.clearBtnText,
+                  { color: colors.text, fontFamily: 'Poppins-ExtraBold', letterSpacing: 1 },
+                ]}
+              >
+                Clear
+              </Text>
+            </Pressable>
+          </div>
         </View>
 
         {/* Check */}
 
-        <Pressable
-          style={({ pressed }) => [
-            styles.checkBtn,
-            { backgroundColor: colors.accent },
-            pressed && { opacity: 0.8 },
-          ]}
-          onPress={handleCheck}
-        >
-          <Text
-            style={[
-              styles.checkBtnText,
-              { color: colors.onAccent },
+        <div style={{ position: 'relative', width: '100%' }}>
+          <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 14 }} />
+          <Pressable
+            style={({ pressed }) => [
+              styles.checkBtn,
+              { backgroundColor: '#000000', borderColor: '#000000', borderWidth: 2.5, borderRadius: 14 },
+              pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
             ]}
+            onPress={handleCheck}
           >
-            Check Puzzle
-          </Text>
-        </Pressable>
+            <Text
+              style={[
+                styles.checkBtnText,
+                { color: '#FFFFFF', fontFamily: 'Poppins-ExtraBold', letterSpacing: 1.2 },
+              ]}
+            >
+              Check Puzzle
+            </Text>
+          </Pressable>
+        </div>
       </ScrollView>
 
       {/* ─────────────────────────────────────────────────────────────────────
@@ -721,89 +749,104 @@ export default function SudokuScreen() {
         onRequestClose={handleContinueGame}
       >
         <View style={styles.modalOverlay}>
-          <View
-            style={[
-              styles.modalCard,
-              {
-                backgroundColor: colors.section,
-                borderColor: colors.border,
-              },
-            ]}
-          >
-
-            <Text
+          <div style={{ position: 'relative', width: '100%', maxWidth: 340 }}>
+            <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 16 }} />
+            <View
               style={[
-                styles.modalTitle,
-                { color: colors.text },
+                styles.modalCard,
+                {
+                  backgroundColor: colors.section,
+                  borderColor: '#000000',
+                  borderWidth: 3,
+                  borderRadius: 16,
+                },
               ]}
             >
-              Exit Game?
-            </Text>
 
-            <Text
-              style={[
-                styles.modalSubtitle,
-                { color: colors.muted },
-              ]}
-            >
-              Are you sure you want to leave this
-              Sudoku puzzle?
-            </Text>
-
-            <Text
-              style={[
-                styles.exitWarning,
-                { color: colors.muted },
-              ]}
-            >
-              Your current progress will be lost.
-            </Text>
-
-            <View style={styles.modalButtons}>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.modalBtn,
-                  {
-                    backgroundColor: colors.accent,
-                  },
-                  pressed && { opacity: 0.75 },
+              <Text
+                style={[
+                  styles.modalTitle,
+                  { color: colors.text, fontFamily: 'Poppins-ExtraBold' },
                 ]}
-                onPress={handleContinueGame}
               >
-                <Text
-                  style={[
-                    styles.modalBtnPrimaryText,
-                    { color: colors.onAccent },
-                  ]}
-                >
-                  Continue Game
-                </Text>
-              </Pressable>
+                Exit Game?
+              </Text>
 
-              <Pressable
-                style={({ pressed }) => [
-                  styles.modalBtn,
-                  styles.modalBtnSecondary,
-                  {
-                    backgroundColor:
-                      colors.background,
-                    borderColor: colors.border,
-                  },
-                  pressed && { opacity: 0.75 },
+              <Text
+                style={[
+                  styles.modalSubtitle,
+                  { color: colors.muted, fontFamily: 'Poppins-Medium' },
                 ]}
-                onPress={handleExitGame}
               >
-                <Text
-                  style={[
-                    styles.modalBtnSecondaryText,
-                    { color: colors.text },
-                  ]}
-                >
-                  Exit Game
-                </Text>
-              </Pressable>
+                Are you sure you want to leave this
+                Sudoku puzzle?
+              </Text>
+
+              <Text
+                style={[
+                  styles.exitWarning,
+                  { color: colors.muted, fontFamily: 'Poppins-Regular' },
+                ]}
+              >
+                Your current progress will be lost.
+              </Text>
+
+              <View style={styles.modalButtons}>
+                <div style={{ position: 'relative', width: '100%' }}>
+                  <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.modalBtn,
+                      {
+                        backgroundColor: '#000000',
+                        borderColor: '#000000',
+                        borderWidth: 2.5,
+                        borderRadius: 12,
+                      },
+                      pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
+                    ]}
+                    onPress={handleContinueGame}
+                  >
+                    <Text
+                      style={[
+                        styles.modalBtnPrimaryText,
+                        { color: '#FFFFFF', fontFamily: 'Poppins-ExtraBold' },
+                      ]}
+                    >
+                      Continue Game
+                    </Text>
+                  </Pressable>
+                </div>
+
+                <div style={{ position: 'relative', width: '100%' }}>
+                  <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.modalBtn,
+                      styles.modalBtnSecondary,
+                      {
+                        backgroundColor: colors.section,
+                        borderColor: '#000000',
+                        borderWidth: 2.5,
+                        borderRadius: 12,
+                      },
+                      pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
+                    ]}
+                    onPress={handleExitGame}
+                  >
+                    <Text
+                      style={[
+                        styles.modalBtnSecondaryText,
+                        { color: colors.text, fontFamily: 'Poppins-ExtraBold' },
+                      ]}
+                    >
+                      Exit Game
+                    </Text>
+                  </Pressable>
+                </div>
+              </View>
             </View>
-          </View>
+          </div>
         </View>
       </Modal>
 
@@ -818,134 +861,149 @@ export default function SudokuScreen() {
         statusBarTranslucent
       >
         <View style={styles.modalOverlay}>
-          <View
-            style={[
-              styles.modalCard,
-              {
-                backgroundColor: colors.section,
-                borderColor: colors.border,
-              },
-            ]}
-          >
-            <Text style={styles.modalEmoji}>⭐</Text>
-
-            <Text
-              style={[
-                styles.modalTitle,
-                { color: colors.text },
-              ]}
-            >
-              Puzzle Complete!
-            </Text>
-
-            <Text
-              style={[
-                styles.modalSubtitle,
-                { color: colors.muted },
-              ]}
-            >
-              {difficultyLabel(difficulty)}
-            </Text>
-
+          <div style={{ position: 'relative', width: '100%', maxWidth: 340 }}>
+            <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 16 }} />
             <View
               style={[
-                styles.modalStats,
-                { backgroundColor: colors.background },
+                styles.modalCard,
+                {
+                  backgroundColor: colors.section,
+                  borderColor: '#000000',
+                  borderWidth: 3,
+                  borderRadius: 16,
+                },
               ]}
             >
-              <View style={styles.modalStat}>
-                <Text
-                  style={[
-                    styles.modalStatLabel,
-                    { color: colors.muted },
-                  ]}
-                >
-                  Time Left
-                </Text>
+              <Text style={styles.modalEmoji}>⭐</Text>
 
-                <Text
-                  style={[
-                    styles.modalStatValue,
-                    { color: colors.accent },
-                  ]}
-                >
-                  {formatTime(secondsLeft)}
-                </Text>
-              </View>
+              <Text
+                style={[
+                  styles.modalTitle,
+                  { color: colors.text, fontFamily: 'Poppins-ExtraBold' },
+                ]}
+              >
+                Puzzle Complete!
+              </Text>
+
+              <Text
+                style={[
+                  styles.modalSubtitle,
+                  { color: colors.muted, fontFamily: 'Poppins-Medium' },
+                ]}
+              >
+                {difficultyLabel(difficulty)}
+              </Text>
 
               <View
                 style={[
-                  styles.modalDivider,
-                  { backgroundColor: colors.border },
+                  styles.modalStats,
+                  { backgroundColor: colors.givenBg, borderColor: '#000000', borderWidth: 2, borderRadius: 12 },
                 ]}
-              />
+              >
+                <View style={styles.modalStat}>
+                  <Text
+                    style={[
+                      styles.modalStatLabel,
+                      { color: colors.muted, fontFamily: 'Poppins-Bold' },
+                    ]}
+                  >
+                    Time Left
+                  </Text>
 
-              <View style={styles.modalStat}>
-                <Text
-                  style={[
-                    styles.modalStatLabel,
-                    { color: colors.muted },
-                  ]}
-                >
-                  Score
-                </Text>
+                  <Text
+                    style={[
+                      styles.modalStatValue,
+                      { color: colors.text, fontFamily: 'Poppins-ExtraBold' },
+                    ]}
+                  >
+                    {formatTime(secondsLeft)}
+                  </Text>
+                </View>
 
-                <Text
+                <View
                   style={[
-                    styles.modalStatValue,
-                    { color: colors.accent },
+                    styles.modalDivider,
+                    { backgroundColor: colors.border },
                   ]}
-                >
-                  {finalScore} pts
-                </Text>
+                />
+
+                <View style={styles.modalStat}>
+                  <Text
+                    style={[
+                      styles.modalStatLabel,
+                      { color: colors.muted, fontFamily: 'Poppins-Bold' },
+                    ]}
+                  >
+                    Score
+                  </Text>
+
+                  <Text
+                    style={[
+                      styles.modalStatValue,
+                      { color: colors.text, fontFamily: 'Poppins-ExtraBold' },
+                    ]}
+                  >
+                    {finalScore} pts
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.modalButtons}>
+                <div style={{ position: 'relative', width: '100%' }}>
+                  <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.modalBtn,
+                      {
+                        backgroundColor: '#000000',
+                        borderColor: '#000000',
+                        borderWidth: 2.5,
+                        borderRadius: 12,
+                      },
+                      pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
+                    ]}
+                    onPress={handlePlayAgain}
+                  >
+                    <Text
+                      style={[
+                        styles.modalBtnPrimaryText,
+                        { color: '#FFFFFF', fontFamily: 'Poppins-ExtraBold' },
+                      ]}
+                    >
+                      Play Again
+                    </Text>
+                  </Pressable>
+                </div>
+
+                <div style={{ position: 'relative', width: '100%' }}>
+                  <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.modalBtn,
+                      styles.modalBtnSecondary,
+                      {
+                        backgroundColor: colors.section,
+                        borderColor: '#000000',
+                        borderWidth: 2.5,
+                        borderRadius: 12,
+                      },
+                      pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
+                    ]}
+                    onPress={handleExitGame}
+                  >
+                    <Text
+                      style={[
+                        styles.modalBtnSecondaryText,
+                        { color: colors.text, fontFamily: 'Poppins-ExtraBold' },
+                      ]}
+                    >
+                      Exit Game
+                    </Text>
+                  </Pressable>
+                </div>
               </View>
             </View>
-
-            <View style={styles.modalButtons}>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.modalBtn,
-                  {
-                    backgroundColor: colors.accent,
-                  },
-                  pressed && { opacity: 0.75 },
-                ]}
-                onPress={handlePlayAgain}
-              >
-                <Text
-                  style={[
-                    styles.modalBtnPrimaryText,
-                    { color: colors.onAccent },
-                  ]}
-                >
-                  Play Again
-                </Text>
-              </Pressable>
-
-              <Pressable
-                style={({ pressed }) => [
-                  styles.modalBtn,
-                  styles.modalBtnSecondary,
-                  {
-                    backgroundColor:
-                      colors.background,
-                    borderColor: colors.border,
-                  },
-                  pressed && { opacity: 0.75 },
-                ]}
-                onPress={handleExitGame}
-              >
-                <Text
-                  style={[
-                    styles.modalBtnSecondaryText,
-                    { color: colors.text },
-                  ]}
-                >
-                  Exit Game
-                </Text>
-              </Pressable>
-            </View>
-          </View>
+          </div>
         </View>
       </Modal>
 
@@ -960,81 +1018,96 @@ export default function SudokuScreen() {
         statusBarTranslucent
       >
         <View style={styles.modalOverlay}>
-          <View
-            style={[
-              styles.modalCard,
-              {
-                backgroundColor: colors.section,
-                borderColor: colors.border,
-              },
-            ]}
-          >
-            <Text style={styles.modalEmoji}>⏱️</Text>
-
-            <Text
+          <div style={{ position: 'relative', width: '100%', maxWidth: 340 }}>
+            <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 16 }} />
+            <View
               style={[
-                styles.modalTitle,
-                { color: colors.text },
+                styles.modalCard,
+                {
+                  backgroundColor: colors.section,
+                  borderColor: '#000000',
+                  borderWidth: 3,
+                  borderRadius: 16,
+                },
               ]}
             >
-              Time's Up!
-            </Text>
+              <Text style={styles.modalEmoji}>⏱️</Text>
 
-            <Text
-              style={[
-                styles.modalSubtitle,
-                { color: colors.muted },
-              ]}
-            >
-              {difficultyLabel(difficulty)} · no
-              points awarded
-            </Text>
-
-            <View style={styles.modalButtons}>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.modalBtn,
-                  {
-                    backgroundColor: colors.accent,
-                  },
-                  pressed && { opacity: 0.75 },
+              <Text
+                style={[
+                  styles.modalTitle,
+                  { color: colors.text, fontFamily: 'Poppins-ExtraBold' },
                 ]}
-                onPress={handlePlayAgain}
               >
-                <Text
-                  style={[
-                    styles.modalBtnPrimaryText,
-                    { color: colors.onAccent },
-                  ]}
-                >
-                  Try Again
-                </Text>
-              </Pressable>
+                Time's Up!
+              </Text>
 
-              <Pressable
-                style={({ pressed }) => [
-                  styles.modalBtn,
-                  styles.modalBtnSecondary,
-                  {
-                    backgroundColor:
-                      colors.background,
-                    borderColor: colors.border,
-                  },
-                  pressed && { opacity: 0.75 },
+              <Text
+                style={[
+                  styles.modalSubtitle,
+                  { color: colors.muted, fontFamily: 'Poppins-Medium' },
                 ]}
-                onPress={handleExitGame}
               >
-                <Text
-                  style={[
-                    styles.modalBtnSecondaryText,
-                    { color: colors.text },
-                  ]}
-                >
-                  Exit Game
-                </Text>
-              </Pressable>
+                {difficultyLabel(difficulty)} · no
+                points awarded
+              </Text>
+
+              <View style={styles.modalButtons}>
+                <div style={{ position: 'relative', width: '100%' }}>
+                  <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.modalBtn,
+                      {
+                        backgroundColor: '#000000',
+                        borderColor: '#000000',
+                        borderWidth: 2.5,
+                        borderRadius: 12,
+                      },
+                      pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
+                    ]}
+                    onPress={handlePlayAgain}
+                  >
+                    <Text
+                      style={[
+                        styles.modalBtnPrimaryText,
+                        { color: '#FFFFFF', fontFamily: 'Poppins-ExtraBold' },
+                      ]}
+                    >
+                      Try Again
+                    </Text>
+                  </Pressable>
+                </div>
+
+                <div style={{ position: 'relative', width: '100%' }}>
+                  <div style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.modalBtn,
+                      styles.modalBtnSecondary,
+                      {
+                        backgroundColor: colors.section,
+                        borderColor: '#000000',
+                        borderWidth: 2.5,
+                        borderRadius: 12,
+                      },
+                      pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
+                    ]}
+                    onPress={handleExitGame}
+                  >
+                    <Text
+                      style={[
+                        styles.modalBtnSecondaryText,
+                        { color: colors.text, fontFamily: 'Poppins-ExtraBold' },
+                      ]}
+                    >
+                      Exit Game
+                    </Text>
+                  </Pressable>
+                </div>
+              </View>
             </View>
-          </View>
+          </div>
         </View>
       </Modal>
     </SafeAreaView>
@@ -1052,46 +1125,39 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 28,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
+    paddingHorizontal: 20,
+    borderBottomWidth: 0,
+    zIndex: 100,
   },
 
   headerBack: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 40,
+    height: 40,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   headerTitle: {
-    fontFamily: 'Poppins-ExtraBold',
-    fontSize: 16,
-    letterSpacing: 2,
+    letterSpacing: 1,
   },
 
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
   },
 
   levelPill: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
   },
 
   levelText: {
-    fontFamily: 'Poppins-Medium',
     fontSize: 11,
   },
 
   timerText: {
-    fontFamily: 'Poppins-Bold',
     fontSize: 14,
     fontVariant: ['tabular-nums'],
     minWidth: 42,
@@ -1100,27 +1166,26 @@ const styles = StyleSheet.create({
 
   scrollContent: {
     alignItems: 'center',
-    paddingVertical: 20,
-    paddingHorizontal: 12,
-    gap: 20,
+    paddingVertical: 18,
+    paddingHorizontal: 18,
+    gap: 18,
+    paddingBottom: 100,
   },
 
   gridContainer: {
-    borderWidth: 2,
-    borderRadius: 4,
     overflow: 'hidden',
   },
 
   grid: {
-    width: 342,
-    height: 342,
+    width: 333,
+    height: 333,
     flexDirection: 'row',
     flexWrap: 'wrap',
   },
 
   cell: {
-    width: 38,
-    height: 38,
+    width: 37,
+    height: 37,
     alignItems: 'center',
     justifyContent: 'center',
     borderLeftWidth: 0,
@@ -1128,64 +1193,54 @@ const styles = StyleSheet.create({
   },
 
   cellText: {
-    fontSize: 17,
+    fontSize: 16,
     textAlign: 'center',
   },
 
   numPad: {
     width: '100%',
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
   },
 
   numRow: {
     flexDirection: 'row',
-    gap: 6,
+    gap: 8,
     flexWrap: 'wrap',
     justifyContent: 'center',
   },
 
   numBtn: {
-    width: 48,
-    height: 48,
-    borderWidth: 1,
-    borderRadius: 10,
+    width: 38,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   numBtnText: {
-    fontSize: 20,
-    fontWeight: '700',
+    fontSize: 18,
   },
 
   clearBtn: {
-    flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    width: '100%',
   },
 
   clearBtnText: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 15,
   },
 
   checkBtn: {
-    borderRadius: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 40,
+    paddingVertical: 16,
     alignItems: 'center',
-    width: '80%',
+    width: '100%',
   },
 
   checkBtnText: {
-    fontSize: 16,
-    fontWeight: '700',
-    letterSpacing: 0.5,
+    fontSize: 15,
   },
 
   // ─── Modals ───────────────────────────────────────────────────────────────
@@ -1199,22 +1254,18 @@ const styles = StyleSheet.create({
   },
 
   modalCard: {
-    borderWidth: 1,
-    borderRadius: 20,
-    padding: 28,
+    padding: 24,
     alignItems: 'center',
     width: '100%',
-    maxWidth: 340,
     gap: 12,
   },
 
   modalEmoji: {
-    fontSize: 52,
+    fontSize: 44,
   },
 
   modalTitle: {
-    fontSize: 24,
-    fontWeight: '800',
+    fontSize: 22,
     letterSpacing: 0.5,
     textAlign: 'center',
   },
@@ -1233,10 +1284,9 @@ const styles = StyleSheet.create({
   modalStats: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 12,
-    padding: 16,
+    padding: 14,
     width: '100%',
-    gap: 16,
+    gap: 12,
     marginTop: 4,
   },
 
@@ -1247,47 +1297,44 @@ const styles = StyleSheet.create({
   },
 
   modalStatLabel: {
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 11,
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
 
   modalStatValue: {
-    fontSize: 22,
-    fontWeight: '800',
+    fontSize: 18,
   },
 
   modalDivider: {
-    width: 1,
-    height: 40,
+    width: 2,
+    height: 30,
   },
 
   modalButtons: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 8,
+    flexDirection: 'column',
+    gap: 12,
+    marginTop: 12,
     width: '100%',
   },
 
   modalBtn: {
-    flex: 1,
-    borderRadius: 12,
-    paddingVertical: 13,
+    width: '100%',
+    paddingVertical: 14,
     alignItems: 'center',
   },
 
   modalBtnSecondary: {
-    borderWidth: 1,
+    // border specified inline
   },
 
   modalBtnPrimaryText: {
     fontSize: 15,
-    fontWeight: '700',
+    letterSpacing: 1,
   },
 
   modalBtnSecondaryText: {
     fontSize: 15,
-    fontWeight: '600',
+    letterSpacing: 1,
   },
 });

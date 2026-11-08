@@ -516,15 +516,15 @@ const accentChoices: {
 }[] = [
   {
     key: 'black',
-    label: 'Black',
+    label: 'Bubblegum',
   },
   {
     key: 'red',
-    label: 'Red',
+    label: 'Berry',
   },
   {
     key: 'orange',
-    label: 'Orange',
+    label: 'Tangerine',
   },
   {
     key: 'mustard',
@@ -532,11 +532,11 @@ const accentChoices: {
   },
   {
     key: 'green',
-    label: 'Green',
+    label: 'Sage',
   },
   {
     key: 'blue',
-    label: 'Blue',
+    label: 'Powder',
   },
   {
     key: 'indigo',
@@ -544,7 +544,7 @@ const accentChoices: {
   },
   {
     key: 'violet',
-    label: 'Violet',
+    label: 'Royal',
   },
 ];
 
@@ -578,6 +578,8 @@ export default function ProfileScreen() {
   } = useApp();
 
   const { signOut, user } = useAuth();
+
+  const pageBg = accentForeground;
 
   useEffect(() => {
     if (!user?.id) {
@@ -707,23 +709,23 @@ export default function ProfileScreen() {
   const C = isDark
     ? {
         bg: '#090909',
-        card: '#151515',
-        border: '#2A2A2A',
-        text: '#F4F2EE',
-        muted: '#AAA59D',
+        card: '#121212',
+        border: '#000000',
+        text: '#FFFFFF',
+        muted: '#A1A1AA',
         input: '#1E1E1E',
-        inputBorder: '#363636',
-        divider: '#292929',
+        inputBorder: '#000000',
+        divider: '#262626',
       }
     : {
-        bg: '#FBFAF8',
+        bg: '#FFFFFF',
         card: '#FFFFFF',
-        border: '#ECE9E4',
-        text: '#27241F',
-        muted: '#8F8A82',
-        input: '#FCFBF9',
-        inputBorder: '#E0DDD7',
-        divider: '#F1EFEB',
+        border: '#000000',
+        text: '#000000',
+        muted: '#52525B',
+        input: '#F4F4F5',
+        inputBorder: '#000000',
+        divider: '#E4E4E7',
       };
 
   const settingRows: {
@@ -768,7 +770,7 @@ export default function ProfileScreen() {
       style={[
         styles.safe,
         {
-          backgroundColor: C.bg,
+          backgroundColor: pageBg,
         },
       ]}
     >
@@ -776,11 +778,14 @@ export default function ProfileScreen() {
         style={[
           styles.header,
           {
-            borderBottomColor:
-              C.border,
+            backgroundColor: pageBg,
+            borderBottomColor: '#000000',
           },
         ]}
       >
+        <View
+          style={styles.headerSpacer}
+        />
         <View
           style={styles.headerSpacer}
         />
@@ -795,17 +800,19 @@ export default function ProfileScreen() {
         }
       >
         {/* PROFILE CARD */}
-        <View
-          style={[
-            styles.profileCard,
-            {
-              backgroundColor:
-                C.card,
-              borderColor:
-                C.border,
-            },
-          ]}
-        >
+        <View style={styles.cardContainer}>
+          <View style={{ position: 'absolute', top: 4, left: 4, right: -7, bottom: -7, backgroundColor: '#000000', borderRadius: 16 }} />
+          <View
+            style={[
+              styles.profileCard,
+              {
+                backgroundColor:
+                  C.card,
+                borderColor:
+                  '#000000',
+              },
+            ]}
+          >
           <View
             style={
               styles.avatarRow
@@ -817,6 +824,7 @@ export default function ProfileScreen() {
                 {
                   backgroundColor:
                     accentWash,
+                  borderColor: '#000000',
                 },
               ]}
             >
@@ -826,27 +834,31 @@ export default function ProfileScreen() {
               />
 
               {editing && (
-                <Pressable
-                  onPress={() =>
-                    setSidekickPickerOpen(
-                      true
-                    )
-                  }
-                  style={[
-                    styles.camera,
-                    {
-                      backgroundColor:
-                        accentForeground,
-                    },
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityLabel="Edit profile picture"
-                >
-                  <Pencil
-                    color="#FFF"
-                    size={13}
-                  />
-                </Pressable>
+                <View style={{ position: 'relative' }}>
+                  <View style={{ position: 'absolute', top: 2, left: 2, right: -2, bottom: -2, backgroundColor: '#000000', borderRadius: 12 }} />
+                  <Pressable
+                    onPress={() =>
+                      setSidekickPickerOpen(
+                        true
+                      )
+                    }
+                    style={[
+                      styles.camera,
+                      {
+                        backgroundColor:
+                          accentForeground,
+                        borderColor: '#000000',
+                      },
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Edit profile picture"
+                  >
+                    <Pencil
+                      color="#000000"
+                      size={13}
+                    />
+                  </Pressable>
+                </View>
               )}
             </View>
 
@@ -998,7 +1010,7 @@ export default function ProfileScreen() {
                       styles.profileTitleText,
                       {
                         color:
-                          accentForeground,
+                          isDark ? accentForeground : '#000000',
                       },
                     ]}
                   >
@@ -1088,59 +1100,64 @@ export default function ProfileScreen() {
             </Text>
           )}
 
-          <Pressable
-            onPress={
-              editing
-                ? save
-                : () => {
-                    setName(
-                      display_name
-                    );
-                    setProfileTitle(
-                      title
-                    );
-                    setProfileBio(
-                      bio
-                    );
-                    setEditing(
-                      true
-                    );
-                  }
-            }
-            style={[
-              styles.primaryButton,
-              {
-                backgroundColor:
-                  accentForeground,
-              },
-            ]}
-          >
-            {editing ? (
-              <Check
-                color="#FFF"
-                size={17}
-              />
-            ) : (
-              <Pencil
-                color="#FFF"
-                size={16}
-              />
-            )}
-
-            <Text
-              style={[
-                styles.primaryText,
+          <View style={{ position: 'relative', width: '100%' }}>
+            <View style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+            <Pressable
+              onPress={
+                editing
+                  ? save
+                  : () => {
+                      setName(
+                        display_name
+                      );
+                      setProfileTitle(
+                        title
+                      );
+                      setProfileBio(
+                        bio
+                      );
+                      setEditing(
+                        true
+                      );
+                    }
+              }
+              style={({ pressed }) => [
+                styles.primaryButton,
                 {
-                  color:
-                    onAccent,
+                  backgroundColor: '#000000',
+                  borderColor: accentForeground,
+                  borderWidth: 2,
                 },
+                pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
               ]}
             >
-              {editing
-                ? 'Save changes'
-                : 'Edit Profile'}
-            </Text>
-          </Pressable>
+              {editing ? (
+                <Check
+                  color={accentForeground}
+                  size={17}
+                />
+              ) : (
+                <Pencil
+                  color={accentForeground}
+                  size={16}
+                />
+              )}
+
+              <Text
+                style={[
+                  styles.primaryText,
+                  {
+                    color:
+                      accentForeground,
+                  },
+                ]}
+              >
+                {editing
+                  ? 'Save changes'
+                  : 'Edit Profile'}
+              </Text>
+            </Pressable>
+          </View>
 
           <View
             style={
@@ -1174,6 +1191,7 @@ export default function ProfileScreen() {
             </Pressable>
           </View>
         </View>
+        </View>
 
         {/* SETTINGS */}
         <Text
@@ -1181,24 +1199,26 @@ export default function ProfileScreen() {
             styles.settingsTitle,
             {
               color:
-                C.muted,
+                C.text,
             },
           ]}
         >
           SETTINGS
         </Text>
 
-        <View
-          style={[
-            styles.settingsCard,
-            {
-              backgroundColor:
-                C.card,
-              borderColor:
-                C.border,
-            },
-          ]}
-        >
+        <View style={styles.cardContainer}>
+          <View style={{ position: 'absolute', top: 4, left: 4, right: -7, bottom: -7, backgroundColor: '#000000', borderRadius: 16 }} />
+          <View
+            style={[
+              styles.settingsCard,
+              {
+                backgroundColor:
+                  C.card,
+                borderColor:
+                  '#000000',
+              },
+            ]}
+          >
           {settingRows.map(
             (
               {
@@ -1252,21 +1272,14 @@ export default function ProfileScreen() {
                   style={[
                     styles.rowIcon,
                     {
-                      backgroundColor:
-                        isDark
-                          ? '#292929'
-                          : '#F3F2EF',
+                      backgroundColor: accentForeground,
+                      borderColor: '#000000',
+                      borderWidth: 1.5,
                     },
                   ]}
                 >
                   <Icon
-                    color={
-                      isDark &&
-                      accent_family ===
-                        'black'
-                        ? '#FFFFFF'
-                        : accentForeground
-                    }
+                    color="#000000"
                     size={17}
                   />
                 </View>
@@ -1287,13 +1300,15 @@ export default function ProfileScreen() {
                   color={
                     isDark
                       ? '#77736C'
-                      : '#B2AEA7'
+                      : '#000000'
                   }
                   size={17}
+                  strokeWidth={2.5}
                 />
               </Pressable>
             )
           )}
+        </View>
         </View>
       </ScrollView>
 
@@ -1304,22 +1319,26 @@ export default function ProfileScreen() {
           'account'
         }
         transparent
-        animationType="slide"
+        animationType="fade"
         onRequestClose={() =>
           setOpenSetting(null)
         }
       >
         <View
           style={
-            styles.modalShade
+            styles.modalShadeCenter
           }
         >
+          <View style={{ width: '100%', maxWidth: 420, paddingHorizontal: 16 }}>
           <View
             style={[
-              styles.sheet,
+              styles.sheetCenter,
               {
                 backgroundColor:
                   C.card,
+                borderColor: '#000000',
+                borderWidth: 3,
+                borderRadius: 20,
               },
             ]}
           >
@@ -1360,7 +1379,7 @@ export default function ProfileScreen() {
                 styles.group,
                 {
                   color:
-                    C.muted,
+                    C.text,
                 },
               ]}
             >
@@ -1374,9 +1393,7 @@ export default function ProfileScreen() {
                   true
                 )
               }
-              style={
-                styles.settingRow
-              }
+              style={[styles.settingRow, { borderBottomColor: C.divider }]}
             >
               <View
                 style={[
@@ -1384,6 +1401,8 @@ export default function ProfileScreen() {
                   {
                     backgroundColor:
                       accentForeground,
+                    borderColor: '#000000',
+                    borderWidth: 1.5,
                   },
                 ]}
               >
@@ -1392,7 +1411,7 @@ export default function ProfileScreen() {
                     styles.currencySymbol,
                     {
                       color:
-                        onAccent,
+                        '#000000',
                     },
                   ]}
                 >
@@ -1435,9 +1454,10 @@ export default function ProfileScreen() {
                 color={
                   isDark
                     ? '#77736C'
-                    : '#B2AEA7'
+                    : '#000000'
                 }
                 size={17}
+                strokeWidth={2.5}
               />
             </Pressable>
 
@@ -1451,9 +1471,7 @@ export default function ProfileScreen() {
                   true
                 );
               }}
-              style={
-                styles.settingRow
-              }
+              style={[styles.settingRow, { borderBottomWidth: 0 }]}
             >
               <View
                 style={[
@@ -1461,6 +1479,8 @@ export default function ProfileScreen() {
                   {
                     backgroundColor:
                       accentForeground,
+                    borderColor: '#000000',
+                    borderWidth: 1.5,
                   },
                 ]}
               >
@@ -1469,7 +1489,7 @@ export default function ProfileScreen() {
                     styles.timezoneIconText,
                     {
                       color:
-                        onAccent,
+                        '#000000',
                     },
                   ]}
                 >
@@ -1514,38 +1534,46 @@ export default function ProfileScreen() {
                 color={
                   isDark
                     ? '#77736C'
-                    : '#B2AEA7'
+                    : '#000000'
                 }
                 size={17}
+                strokeWidth={2.5}
               />
             </Pressable>
 
-            <Pressable
-              onPress={() =>
-                setOpenSetting(
-                  null
-                )
-              }
-              style={[
-                styles.saveButton,
-                {
-                  backgroundColor:
-                    accentForeground,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.saveText,
+            <View style={{ position: 'relative', width: '100%', marginTop: 22 }}>
+              <View style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+              <Pressable
+                onPress={() =>
+                  setOpenSetting(
+                    null
+                  )
+                }
+                style={({ pressed }) => [
+                  styles.saveButton,
                   {
-                    color:
-                      onAccent,
+                    backgroundColor: '#000000',
+                    borderColor: accentForeground,
+                    borderWidth: 2,
+                    marginTop: 0,
                   },
+                  pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
                 ]}
               >
-                Done
-              </Text>
-            </Pressable>
+                <Text
+                  style={[
+                    styles.saveText,
+                    {
+                      color:
+                        accentForeground,
+                    },
+                  ]}
+                >
+                  Done
+                </Text>
+              </Pressable>
+            </View>
+          </View>
           </View>
         </View>
       </Modal>
@@ -1557,22 +1585,26 @@ export default function ProfileScreen() {
           'display'
         }
         transparent
-        animationType="slide"
+        animationType="fade"
         onRequestClose={() =>
           setOpenSetting(null)
         }
       >
         <View
           style={
-            styles.modalShade
+            styles.modalShadeCenter
           }
         >
+          <View style={{ width: '100%', maxWidth: 420, paddingHorizontal: 16 }}>
           <View
             style={[
-              styles.sheet,
+              styles.sheetCenter,
               {
                 backgroundColor:
                   C.card,
+                borderColor: '#000000',
+                borderWidth: 3,
+                borderRadius: 20,
               },
             ]}
           >
@@ -1609,15 +1641,20 @@ export default function ProfileScreen() {
             </View>
 
             {/* THEME */}
-            <View
-              style={[
-                styles.subCard,
-                {
-                  borderColor:
-                    C.border,
-                },
-              ]}
-            >
+            <View style={{ position: 'relative', width: '100%', marginBottom: 16 }}>
+              <View style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 14 }} />
+              <View
+                style={[
+                  styles.subCard,
+                  {
+                    backgroundColor: C.card,
+                    borderColor:
+                      '#000000',
+                    borderWidth: 2,
+                    marginBottom: 0,
+                  },
+                ]}
+              >
               <View
                 style={
                   styles.panelTitleRow
@@ -1651,6 +1688,8 @@ export default function ProfileScreen() {
                       isDark
                         ? '#1A1A1A'
                         : '#F4F2EE',
+                    borderColor: '#000000',
+                    borderWidth: 1.5,
                   },
                 ]}
               >
@@ -1676,8 +1715,9 @@ export default function ProfileScreen() {
                         styles.modeOption,
                         theme_mode ===
                           mode && {
-                          backgroundColor:
-                            accentForeground,
+                          backgroundColor: '#000000',
+                          borderColor: accentForeground,
+                          borderWidth: 1.5,
                         },
                       ]}
                     >
@@ -1686,12 +1726,12 @@ export default function ProfileScreen() {
                           styles.modeText,
                           {
                             color:
-                              C.muted,
+                              C.text,
                           },
                           theme_mode ===
                             mode && {
                             color:
-                              onAccent,
+                              accentForeground,
                           },
                         ]}
                       >
@@ -1709,17 +1749,23 @@ export default function ProfileScreen() {
                 )}
               </View>
             </View>
+            </View>
 
             {/* ACCENT */}
-            <View
-              style={[
-                styles.subCard,
-                {
-                  borderColor:
-                    C.border,
-                },
-              ]}
-            >
+            <View style={{ position: 'relative', width: '100%', marginBottom: 16 }}>
+              <View style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 14 }} />
+              <View
+                style={[
+                  styles.subCard,
+                  {
+                    backgroundColor: C.card,
+                    borderColor:
+                      '#000000',
+                    borderWidth: 2,
+                    marginBottom: 0,
+                  },
+                ]}
+              >
               <Text
                 style={[
                   styles.panelLabel,
@@ -1756,36 +1802,33 @@ export default function ProfileScreen() {
                         styles.swatchWrap
                       }
                     >
-                      <View
-                        style={[
-                          styles.swatch,
-                          {
-                            backgroundColor:
-                              accentPalettes[
-                                key
-                              ]
-                                .standard,
-                          },
-                          accent_family ===
-                            key && {
-                            borderColor:
-                              isDark
-                                ? '#FFF'
-                                : '#26231F',
-                            borderWidth: 3,
-                          },
-                        ]}
-                      >
-                        {accent_family ===
-                          key && (
-                          <Check
-                            color="#FFF"
-                            size={14}
-                            strokeWidth={
-                              3
-                            }
-                          />
-                        )}
+                      <View style={{ position: 'relative' }}>
+                        <View style={{ position: 'absolute', top: 2, left: 2, right: -2, bottom: -2, backgroundColor: '#000000', borderRadius: 16 }} />
+                        <View
+                          style={[
+                            styles.swatch,
+                            {
+                              backgroundColor:
+                                accentPalettes[
+                                  key
+                                ]
+                                  .standard,
+                              borderColor: '#000000',
+                              borderWidth: accent_family === key ? 2 : 1.5,
+                            },
+                          ]}
+                        >
+                          {accent_family ===
+                            key && (
+                            <Check
+                              color="#000000"
+                              size={14}
+                              strokeWidth={
+                                3
+                              }
+                            />
+                          )}
+                        </View>
                       </View>
 
                       <Text
@@ -1793,7 +1836,7 @@ export default function ProfileScreen() {
                           styles.swatchLabel,
                           {
                             color:
-                              C.muted,
+                              C.text,
                           },
                         ]}
                       >
@@ -1804,33 +1847,41 @@ export default function ProfileScreen() {
                 )}
               </View>
             </View>
+            </View>
 
-            <Pressable
-              onPress={() =>
-                setOpenSetting(
-                  null
-                )
-              }
-              style={[
-                styles.saveButton,
-                {
-                  backgroundColor:
-                    accentForeground,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.saveText,
+            <View style={{ position: 'relative', width: '100%', marginTop: 6 }}>
+              <View style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+              <Pressable
+                onPress={() =>
+                  setOpenSetting(
+                    null
+                  )
+                }
+                style={({ pressed }) => [
+                  styles.saveButton,
                   {
-                    color:
-                      onAccent,
+                    backgroundColor: '#000000',
+                    borderColor: accentForeground,
+                    borderWidth: 2,
+                    marginTop: 0,
                   },
+                  pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
                 ]}
               >
-                Done
-              </Text>
-            </Pressable>
+                <Text
+                  style={[
+                    styles.saveText,
+                    {
+                      color:
+                        accentForeground,
+                    },
+                  ]}
+                >
+                  Done
+                </Text>
+              </Pressable>
+            </View>
+          </View>
           </View>
         </View>
       </Modal>
@@ -1842,23 +1893,27 @@ export default function ProfileScreen() {
           'privacy'
         }
         transparent
-        animationType="slide"
+        animationType="fade"
         onRequestClose={() =>
           setOpenSetting(null)
         }
       >
         <View
           style={
-            styles.modalShade
+            styles.modalShadeCenter
           }
         >
+          <View style={{ width: '100%', maxWidth: 460, height: '80%', paddingHorizontal: 16 }}>
           <View
             style={[
-              styles.sheet,
-              styles.privacySheet,
+              styles.sheetCenter,
+              styles.privacySheetCenter,
               {
                 backgroundColor:
                   C.card,
+                borderColor: '#000000',
+                borderWidth: 3,
+                borderRadius: 20,
               },
             ]}
           >
@@ -1908,32 +1963,39 @@ export default function ProfileScreen() {
               />
             </View>
 
-            <Pressable
-              onPress={() =>
-                setOpenSetting(
-                  null
-                )
-              }
-              style={[
-                styles.saveButton,
-                {
-                  backgroundColor:
-                    accentForeground,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.saveText,
+            <View style={{ position: 'relative', width: '100%', marginTop: 12 }}>
+              <View style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+              <Pressable
+                onPress={() =>
+                  setOpenSetting(
+                    null
+                  )
+                }
+                style={({ pressed }) => [
+                  styles.saveButton,
                   {
-                    color:
-                      onAccent,
+                    backgroundColor: '#000000',
+                    borderColor: accentForeground,
+                    borderWidth: 2,
+                    marginTop: 0,
                   },
+                  pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
                 ]}
               >
-                Done
-              </Text>
-            </Pressable>
+                <Text
+                  style={[
+                    styles.saveText,
+                    {
+                      color:
+                        accentForeground,
+                    },
+                  ]}
+                >
+                  Done
+                </Text>
+              </Pressable>
+            </View>
+          </View>
           </View>
         </View>
       </Modal>
@@ -1945,22 +2007,26 @@ export default function ProfileScreen() {
           'reset'
         }
         transparent
-        animationType="slide"
+        animationType="fade"
         onRequestClose={() =>
           setOpenSetting(null)
         }
       >
         <View
           style={
-            styles.modalShade
+            styles.modalShadeCenter
           }
         >
+          <View style={{ width: '100%', maxWidth: 420, paddingHorizontal: 16 }}>
           <View
             style={[
-              styles.sheet,
+              styles.sheetCenter,
               {
                 backgroundColor:
                   C.card,
+                borderColor: '#000000',
+                borderWidth: 3,
+                borderRadius: 20,
               },
             ]}
           >
@@ -2010,32 +2076,39 @@ export default function ProfileScreen() {
               undone.
             </Text>
 
-            <Pressable
-              onPress={() =>
-                setOpenSetting(
-                  null
-                )
-              }
-              style={[
-                styles.saveButton,
-                {
-                  backgroundColor:
-                    '#C53A2F',
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.saveText,
+            <View style={{ position: 'relative', width: '100%', marginTop: 22 }}>
+              <View style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+              <Pressable
+                onPress={() =>
+                  setOpenSetting(
+                    null
+                  )
+                }
+                style={({ pressed }) => [
+                  styles.saveButton,
                   {
-                    color:
-                      '#FFF',
+                    backgroundColor: '#C53A2F',
+                    borderColor: '#000000',
+                    borderWidth: 2,
+                    marginTop: 0,
                   },
+                  pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
                 ]}
               >
-                Reset
-              </Text>
-            </Pressable>
+                <Text
+                  style={[
+                    styles.saveText,
+                    {
+                      color:
+                        '#FFF',
+                    },
+                  ]}
+                >
+                  Reset
+                </Text>
+              </Pressable>
+            </View>
+          </View>
           </View>
         </View>
       </Modal>
@@ -2044,19 +2117,23 @@ export default function ProfileScreen() {
       <Modal
         visible={sidekickPickerOpen}
         transparent
-        animationType="slide"
+        animationType="fade"
         onRequestClose={() =>
           setSidekickPickerOpen(false)
         }
       >
-        <View style={styles.modalShade}>
+        <View style={styles.modalShadeCenter}>
+          <View style={{ width: '100%', maxWidth: 440, height: '85%', paddingHorizontal: 16 }}>
           <View
             style={[
-              styles.sheet,
-              styles.sidekickSheet,
+              styles.sheetCenter,
+              styles.sidekickSheetCenter,
               {
                 backgroundColor:
                   C.card,
+                borderColor: '#000000',
+                borderWidth: 3,
+                borderRadius: 20,
               },
             ]}
           >
@@ -2139,7 +2216,8 @@ export default function ProfileScreen() {
                           borderColor:
                             selected
                               ? accentForeground
-                              : C.border,
+                              : '#000000',
+                          borderWidth: selected ? 2.5 : 1.5,
                         },
                       ]}
                     >
@@ -2161,11 +2239,13 @@ export default function ProfileScreen() {
                             {
                               backgroundColor:
                                 accentForeground,
+                              borderColor: '#000000',
+                              borderWidth: 1.5,
                             },
                           ]}
                         >
                           <Check
-                            color="#FFF"
+                            color="#000000"
                             size={12}
                             strokeWidth={3}
                           />
@@ -2177,30 +2257,37 @@ export default function ProfileScreen() {
               )}
             </ScrollView>
 
-            <Pressable
-              onPress={() =>
-                setSidekickPickerOpen(false)
-              }
-              style={[
-                styles.saveButton,
-                {
-                  backgroundColor:
-                    accentForeground,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.saveText,
+            <View style={{ position: 'relative', width: '100%', marginTop: 12 }}>
+              <View style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+              <Pressable
+                onPress={() =>
+                  setSidekickPickerOpen(false)
+                }
+                style={({ pressed }) => [
+                  styles.saveButton,
                   {
-                    color:
-                      onAccent,
+                    backgroundColor: '#000000',
+                    borderColor: accentForeground,
+                    borderWidth: 2,
+                    marginTop: 0,
                   },
+                  pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
                 ]}
               >
-                Done
-              </Text>
-            </Pressable>
+                <Text
+                  style={[
+                    styles.saveText,
+                    {
+                      color:
+                        accentForeground,
+                    },
+                  ]}
+                >
+                  Done
+                </Text>
+              </Pressable>
+            </View>
+          </View>
           </View>
         </View>
       </Modal>
@@ -2211,7 +2298,7 @@ export default function ProfileScreen() {
           timezoneOpen
         }
         transparent
-        animationType="slide"
+        animationType="fade"
         onRequestClose={() => {
           setTimezoneOpen(
             false
@@ -2223,15 +2310,19 @@ export default function ProfileScreen() {
       >
         <View
           style={
-            styles.modalShade
+            styles.modalShadeCenter
           }
         >
+          <View style={{ width: '100%', maxWidth: 440, height: '85%', paddingHorizontal: 16 }}>
           <View
             style={[
-              styles.sheet,
+              styles.sheetCenter,
               {
                 backgroundColor:
                   C.card,
+                borderColor: '#000000',
+                borderWidth: 3,
+                borderRadius: 20,
               },
             ]}
           >
@@ -2295,7 +2386,8 @@ export default function ProfileScreen() {
                   backgroundColor:
                     C.input,
                   borderColor:
-                    C.inputBorder,
+                    '#000000',
+                  borderWidth: 1.5,
                 },
               ]}
             >
@@ -2346,7 +2438,7 @@ export default function ProfileScreen() {
                         styles.timezoneGroupTitle,
                         {
                           color:
-                            accentForeground,
+                            isDark ? accentForeground : '#000000',
                         },
                       ]}
                     >
@@ -2423,7 +2515,7 @@ export default function ProfileScreen() {
                             item.value && (
                             <Check
                               color={
-                                accentForeground
+                                isDark ? accentForeground : '#000000'
                               }
                               size={
                                 18
@@ -2462,35 +2554,42 @@ export default function ProfileScreen() {
               )}
             </ScrollView>
 
-            <Pressable
-              onPress={() => {
-                setTimezoneOpen(
-                  false
-                );
-                setTimezoneSearch(
-                  ''
-                );
-              }}
-              style={[
-                styles.saveButton,
-                {
-                  backgroundColor:
-                    accentForeground,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.saveText,
+            <View style={{ position: 'relative', width: '100%', marginTop: 12 }}>
+              <View style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+              <Pressable
+                onPress={() => {
+                  setTimezoneOpen(
+                    false
+                  );
+                  setTimezoneSearch(
+                    ''
+                  );
+                }}
+                style={({ pressed }) => [
+                  styles.saveButton,
                   {
-                    color:
-                      onAccent,
+                    backgroundColor: '#000000',
+                    borderColor: accentForeground,
+                    borderWidth: 2,
+                    marginTop: 0,
                   },
+                  pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
                 ]}
               >
-                Done
-              </Text>
-            </Pressable>
+                <Text
+                  style={[
+                    styles.saveText,
+                    {
+                      color:
+                        accentForeground,
+                    },
+                  ]}
+                >
+                  Done
+                </Text>
+              </Pressable>
+            </View>
+          </View>
           </View>
         </View>
       </Modal>
@@ -2536,22 +2635,24 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: 28,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
+    paddingTop: 12,
+    paddingBottom: 10,
+    borderBottomWidth: 0,
   },
 
   headerSpacer: {
-    width: 1,
-    height: 1,
+    width: 40,
+    height: 40,
   },
 
   headerTitle: {
     fontFamily: FONT_XB,
-    fontSize: 16,
-    letterSpacing: 1.4,
+    fontSize: 20,
+    letterSpacing: 1,
+    textAlign: 'center',
+    flex: 1,
   },
 
   content: {
@@ -2559,9 +2660,15 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
 
+  cardContainer: {
+    position: 'relative',
+    width: '100%',
+    marginBottom: 16,
+  },
+
   profileCard: {
-    borderRadius: 20,
-    borderWidth: 1,
+    borderRadius: 16,
+    borderWidth: 3,
     padding: 22,
   },
 
@@ -2576,7 +2683,7 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    borderWidth: 0,
+    borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
@@ -2592,7 +2699,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: '#FFF',
   },
 
   profileCopy: {
@@ -2659,8 +2765,8 @@ const styles = StyleSheet.create({
   input: {
     width: '100%',
     minHeight: 44,
-    borderWidth: 1,
-    borderRadius: 11,
+    borderWidth: 2,
+    borderRadius: 10,
     paddingHorizontal: 13,
     fontSize: 13,
     fontFamily: FONT,
@@ -2681,7 +2787,7 @@ const styles = StyleSheet.create({
 
   primaryButton: {
     height: 45,
-    borderRadius: 13,
+    borderRadius: 12,
     paddingHorizontal: 20,
     flexDirection: 'row',
     alignItems: 'center',
@@ -2713,17 +2819,17 @@ const styles = StyleSheet.create({
   },
 
   settingsTitle: {
-    fontFamily: FONT_BOLD,
-    fontSize: 10,
-    letterSpacing: 1.5,
-    marginBottom: 9,
-    marginTop: 28,
+    fontFamily: FONT_XB,
+    fontSize: 12,
+    letterSpacing: 1,
+    marginBottom: 10,
+    marginTop: 12,
     marginLeft: 4,
   },
 
   settingsCard: {
-    borderRadius: 17,
-    borderWidth: 1,
+    borderRadius: 16,
+    borderWidth: 3,
     paddingHorizontal: 14,
   },
 
@@ -2731,14 +2837,14 @@ const styles = StyleSheet.create({
     minHeight: 58,
     flexDirection: 'row',
     alignItems: 'center',
-    borderBottomWidth: 1,
+    borderBottomWidth: 1.5,
     gap: 12,
   },
 
   rowIcon: {
     width: 32,
     height: 32,
-    borderRadius: 10,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2770,23 +2876,28 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
 
-  modalShade: {
+  modalShadeCenter: {
     flex: 1,
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
+    alignItems: 'center',
     backgroundColor:
-      'rgba(0,0,0,0.45)',
+      'rgba(0, 0, 0, 0.88)',
   },
 
-  sheet: {
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+  sheetCenter: {
+    borderRadius: 20,
     padding: 22,
-    paddingBottom: 34,
-    maxHeight: '90%',
+    paddingBottom: 24,
+    maxHeight: '85%',
+    width: '100%',
   },
 
-  privacySheet: {
-    height: '90%',
+  privacySheetCenter: {
+    height: '80%',
+  },
+
+  sidekickSheetCenter: {
+    height: '85%',
   },
 
   privacyContent: {
@@ -2817,7 +2928,7 @@ const styles = StyleSheet.create({
   },
 
   subCard: {
-    borderWidth: 1,
+    borderWidth: 2,
     borderRadius: 14,
     padding: 16,
     marginBottom: 16,
@@ -2843,8 +2954,9 @@ const styles = StyleSheet.create({
 
   modeToggle: {
     flexDirection: 'row',
-    borderRadius: 11,
+    borderRadius: 10,
     padding: 3,
+    borderWidth: 1.5,
   },
 
   modeOption: {
@@ -2876,7 +2988,6 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    borderColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2894,19 +3005,16 @@ const styles = StyleSheet.create({
   },
 
   saveButton: {
-    borderRadius: 14,
+    borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
     marginTop: 22,
   },
 
   saveText: {
-    fontFamily: FONT_SEMI,
+    fontFamily: FONT_XB,
     fontSize: 15,
-  },
-
-  sidekickSheet: {
-    maxHeight: '92%',
+    letterSpacing: 0.5,
   },
 
   sidekickDescription: {
@@ -2917,7 +3025,7 @@ const styles = StyleSheet.create({
   },
 
   sidekickScroll: {
-    maxHeight: 470,
+    maxHeight: 380,
   },
 
   sidekickGrid: {
@@ -2930,8 +3038,8 @@ const styles = StyleSheet.create({
   sidekickOption: {
     width: '18.5%',
     aspectRatio: 1,
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: 12,
+    borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 10,
@@ -2963,8 +3071,8 @@ const styles = StyleSheet.create({
 
   timezoneSearchBox: {
     height: 46,
-    borderWidth: 1,
-    borderRadius: 12,
+    borderWidth: 1.5,
+    borderRadius: 10,
     marginBottom: 8,
     justifyContent: 'center',
   },
@@ -2977,7 +3085,7 @@ const styles = StyleSheet.create({
   },
 
   timezoneScroll: {
-    maxHeight: 400,
+    maxHeight: 300,
   },
 
   timezoneGroupTitle: {
@@ -2993,7 +3101,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     minHeight: 58,
     paddingVertical: 9,
-    borderBottomWidth: 1,
+    borderBottomWidth: 1.5,
   },
 
   timezoneCopy: {

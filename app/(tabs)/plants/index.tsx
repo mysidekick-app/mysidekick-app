@@ -5,6 +5,7 @@ import {
   Modal,
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
@@ -48,11 +49,6 @@ const SUNLIGHT_OPTIONS = [
   'Bright',
   'Direct',
 ];
-
-const FONT = 'Poppins-Regular';
-const FONT_MED = 'Poppins-Medium';
-const FONT_SEMI = 'Poppins-SemiBold';
-const FONT_BOLD = 'Poppins-Bold';
 
 const PLANT_FIELDS =
   'id, name, species, watering_interval_days, sunlight, last_watered_on, notes';
@@ -190,13 +186,28 @@ const prettyDue = (
   };
 };
 
+function isAccentBlack(color?: string): boolean {
+  if (!color) return false;
+  const normalized = color.trim().toLowerCase();
+  return (
+    normalized === '#000000' ||
+    normalized === '#000' ||
+    normalized === 'black' ||
+    normalized === 'rgb(0,0,0)' ||
+    normalized === 'rgba(0,0,0,1)'
+  );
+}
+
 export default function PlantsScreen() {
   const {
     accentForeground,
-    accentWash,
+    accentColor: rawAccent,
     isDark,
     onAccent,
-  } = useApp();
+  } = useApp() as any;
+
+  const pageBg = rawAccent || accentForeground || '#FDE047';
+  const isAccentPureBlack = isAccentBlack(pageBg);
 
   const [plants, setPlants] = useState<Plant[]>([]);
   const [loading, setLoading] = useState(true);
@@ -225,30 +236,6 @@ export default function PlantsScreen() {
     useState<string | null>(null);
   const [deletingId, setDeletingId] =
     useState<string | null>(null);
-
-  const C = isDark
-    ? {
-        bg: '#090909',
-        card: '#151515',
-        border: '#2A2A2A',
-        text: '#F4F2EE',
-        muted: '#AAA59D',
-        input: '#1E1E1E',
-        inputBorder: '#363636',
-        inactive: '#292929',
-        inactiveText: '#8E8A84',
-      }
-    : {
-        bg: '#FBFAF8',
-        card: '#FFFFFF',
-        border: '#ECE9E4',
-        text: '#27241F',
-        muted: '#8F8A82',
-        input: '#FCFBF9',
-        inputBorder: '#E0DDD7',
-        inactive: '#EEEDEA',
-        inactiveText: '#8A8883',
-      };
 
   const resetForm = () => {
     setEditingPlantId(null);
@@ -591,37 +578,36 @@ export default function PlantsScreen() {
       style={[
         styles.safe,
         {
-          backgroundColor: C.bg,
+          backgroundColor: pageBg,
         },
       ]}
     >
+      <StatusBar
+        barStyle={isAccentPureBlack ? 'light-content' : 'dark-content'}
+        backgroundColor={pageBg}
+      />
+
       {/* HEADER */}
 
       <View
         style={[
           styles.header,
-          {
-            borderBottomColor: C.border,
-          },
         ]}
       >
         <Pressable
           onPress={() =>
             router.push('/modules')
           }
-          style={[
+          style={({ pressed }) => [
             styles.headerBack,
-            {
-              backgroundColor:
-                accentForeground,
-            },
+            pressed && styles.pressedBtn,
           ]}
           hitSlop={12}
         >
           <ChevronLeft
             color="#FFFFFF"
             size={22}
-            strokeWidth={2.4}
+            strokeWidth={2.8}
           />
         </Pressable>
 
@@ -629,8 +615,7 @@ export default function PlantsScreen() {
           style={[
             styles.headerTitle,
             {
-              color:
-                isDark ? '#FFFFFF' : accentForeground,
+              color: '#000000',
             },
           ]}
         >
@@ -639,12 +624,16 @@ export default function PlantsScreen() {
 
         <Pressable
           onPress={() => setMenuOpen(true)}
-          style={styles.headerBtn}
+          style={({ pressed }) => [
+            styles.headerBtn,
+            pressed && styles.pressedBtn,
+          ]}
           hitSlop={12}
         >
           <MoreVertical
-            color={C.text}
+            color="#000000"
             size={22}
+            strokeWidth={2.5}
           />
         </Pressable>
       </View>
@@ -663,23 +652,23 @@ export default function PlantsScreen() {
             style={[
               styles.menuCard,
               {
-                backgroundColor: C.card,
-                borderColor: C.border,
+                backgroundColor: isDark ? '#121212' : '#FFFFFF',
+                borderColor: '#000000',
               },
             ]}
             onPress={(event) => event.stopPropagation()}
           >
-<Pressable
-  onPress={() => {
-    setMenuOpen(false);
-    router.push('/(tabs)/profile');
-  }}
-  style={styles.menuItem}
->
+            <Pressable
+              onPress={() => {
+                setMenuOpen(false);
+                router.push('/(tabs)/profile');
+              }}
+              style={styles.menuItem}
+            >
               <Text
                 style={[
                   styles.menuItemText,
-                  { color: C.text },
+                  { color: isDark ? '#FFFFFF' : '#000000' },
                 ]}
               >
                 Settings
@@ -689,7 +678,7 @@ export default function PlantsScreen() {
         </Pressable>
       </Modal>
 
-      {/* PLANT LIST */}
+      {/* PLANT LIST (2 PER ROW GRID) */}
 
       <ScrollView
         contentContainerStyle={
@@ -702,7 +691,7 @@ export default function PlantsScreen() {
             style={[
               styles.error,
               {
-                color: '#C53A2F',
+                color: '#EF4444',
               },
             ]}
           >
@@ -715,7 +704,7 @@ export default function PlantsScreen() {
             style={[
               styles.emptyText,
               {
-                color: C.muted,
+                color: '#000000',
               },
             ]}
           >
@@ -727,13 +716,14 @@ export default function PlantsScreen() {
               style={[
                 styles.emptyIcon,
                 {
-                  backgroundColor:
-                    accentWash,
+                  backgroundColor: '#000000',
+                  borderColor: '#FFFFFF',
+                  borderWidth: 2,
                 },
               ]}
             >
               <Sprout
-                color={accentForeground}
+                color={pageBg}
                 size={24}
               />
             </View>
@@ -742,7 +732,7 @@ export default function PlantsScreen() {
               style={[
                 styles.emptyTitle,
                 {
-                  color: C.text,
+                  color: '#000000',
                 },
               ]}
             >
@@ -753,7 +743,7 @@ export default function PlantsScreen() {
               style={[
                 styles.emptyText,
                 {
-                  color: C.muted,
+                  color: '#000000',
                 },
               ]}
             >
@@ -762,199 +752,177 @@ export default function PlantsScreen() {
             </Text>
           </View>
         ) : (
-          <View style={styles.list}>
+          <View style={styles.gridContainer}>
             {sorted.map((plant) => {
               const due =
                 prettyDue(plant);
 
               return (
-                <Pressable
+                <View
                   key={plant.id}
-                  onPress={() =>
-                    setDetailOpen(plant)
-                  }
-                  style={({ pressed }) => [
-                    styles.card,
-                    {
-                      backgroundColor:
-                        C.card,
-                      borderColor:
-                        C.border,
-                    },
-                    pressed && {
-                      opacity: 0.7,
-                    },
-                  ]}
+                  style={styles.cardContainer}
                 >
-                  {/* TOP ROW */}
-
-                  <View
-                    style={styles.cardTop}
+                  <View style={styles.cardShadowBackdrop} />
+                  <Pressable
+                    onPress={() =>
+                      setDetailOpen(plant)
+                    }
+                    style={({ pressed }) => [
+                      styles.card,
+                      {
+                        backgroundColor: isDark ? '#121212' : '#FFFFFF',
+                        borderColor: '#000000',
+                      },
+                      pressed && styles.pressedBtn,
+                    ]}
                   >
+                    {/* TOP ROW */}
+
                     <View
-                      style={[
-                        styles.cardIcon,
-                        {
-                          backgroundColor:
-                            accentWash,
-                        },
-                      ]}
+                      style={styles.cardTop}
                     >
-                      <Sprout
-                        color={
-                          accentForeground
-                        }
-                        size={18}
-                        strokeWidth={2.2}
-                      />
+                      <View
+                        style={[
+                          styles.cardIcon,
+                          {
+                            backgroundColor: pageBg,
+                          },
+                        ]}
+                      >
+                        <Sprout
+                          color="#000000"
+                          size={18}
+                          strokeWidth={2.4}
+                        />
+                      </View>
+
+                      {/* EDIT PEN */}
+
+                      <Pressable
+                        onPress={(event) => {
+                          event.stopPropagation();
+                          openEdit(plant);
+                        }}
+                        hitSlop={12}
+                        style={({ pressed }) => [
+                          styles.editPenButton,
+                          pressed && {
+                            opacity: 0.5,
+                          },
+                        ]}
+                      >
+                        <Pencil
+                          color={isDark ? pageBg : '#000000'}
+                          size={18}
+                          strokeWidth={2.4}
+                        />
+                      </Pressable>
                     </View>
 
-                    {/* EDIT PEN */}
+                    {/* PLANT NAME */}
 
-                    <Pressable
-                      onPress={(event) => {
-                        event.stopPropagation();
-                        openEdit(plant);
-                      }}
-                      hitSlop={12}
-                      style={({ pressed }) => [
-                        styles.editPenButton,
-                        pressed && {
-                          opacity: 0.5,
-                        },
-                      ]}
-                    >
-                      <Pencil
-                        color={C.text}
-                        size={19}
-                        strokeWidth={2.2}
-                      />
-                    </Pressable>
-                  </View>
-
-                  {/* PLANT NAME */}
-
-                  <View style={styles.cardBodyPressable}>
-                    <Text
-                      style={[
-                        styles.plantName,
-                        {
-                          color: C.text,
-                        },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {plant.name}
-                    </Text>
-
-                    {plant.species ? (
+                    <View style={styles.cardBodyPressable}>
                       <Text
                         style={[
-                          styles.plantSpecies,
+                          styles.plantName,
                           {
-                            color:
-                              C.muted,
+                            color: isDark ? pageBg : '#000000',
                           },
                         ]}
                         numberOfLines={1}
                       >
-                        {plant.species}
+                        {plant.name}
                       </Text>
-                    ) : null}
 
-                    {/* DUE TAG */}
+                      {plant.species ? (
+                        <Text
+                          style={[
+                            styles.plantSpecies,
+                            {
+                              color: isDark ? '#A1A1AA' : '#52525B',
+                            },
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {plant.species}
+                        </Text>
+                      ) : null}
 
-                    <View
-                      style={[
-                        styles.duePill,
+                      {/* DUE TAG */}
 
-                        /*
-                         * OVERDUE = RED
-                         */
-                        due.overdue &&
-                          styles.duePillOverdue,
-
-                        /*
-                         * TODAY / TOMORROW
-                         */
-                        !due.overdue &&
-                          due.soon && {
-                            backgroundColor:
-                              accentWash,
-                          },
-
-                        /*
-                         * FUTURE = INACTIVE GREY
-                         */
-                        !due.overdue &&
-                          !due.soon && {
-                            backgroundColor:
-                              C.inactive,
-                          },
-                      ]}
-                    >
-                      <Text
+                      <View
                         style={[
-                          styles.duePillText,
-                          {
-                            color:
-                              due.overdue
-                                ? '#FFFFFF'
-                                : due.soon
-                                  ? accentForeground
-                                  : C.inactiveText,
-                          },
+                          styles.duePill,
+                          due.overdue &&
+                            styles.duePillOverdue,
+                          !due.overdue &&
+                            due.soon && {
+                              backgroundColor: pageBg,
+                            },
+                          !due.overdue &&
+                            !due.soon && {
+                              backgroundColor: isDark ? '#27272A' : '#F4F4F5',
+                            },
                         ]}
                       >
-                        {due.label}
-                      </Text>
-                    </View>
+                        <Text
+                          style={[
+                            styles.duePillText,
+                            {
+                              color:
+                                due.overdue
+                                  ? '#FFFFFF'
+                                  : due.soon
+                                    ? '#000000'
+                                    : (isDark ? '#FFFFFF' : '#000000'),
+                            },
+                          ]}
+                        >
+                          {due.label}
+                        </Text>
+                      </View>
 
-                    {/* META */}
+                      {/* META */}
 
-                    <View
-                      style={styles.cardMeta}
-                    >
                       <View
-                        style={
-                          styles.metaItem
-                        }
+                        style={styles.cardMeta}
                       >
-                        <Sun
-                          color={C.muted}
-                          size={12}
-                        />
+                        <View
+                          style={
+                            styles.metaItem
+                          }
+                        >
+                          <Sun
+                            color={isDark ? '#A1A1AA' : '#52525B'}
+                            size={12}
+                          />
+
+                          <Text
+                            style={[
+                              styles.metaText,
+                              {
+                                color: isDark ? '#A1A1AA' : '#52525B',
+                              },
+                            ]}
+                          >
+                            {plant.sunlight}
+                          </Text>
+                        </View>
 
                         <Text
                           style={[
                             styles.metaText,
                             {
-                              color:
-                                C.muted,
+                              color: isDark ? '#A1A1AA' : '#52525B',
                             },
                           ]}
                         >
-                          {plant.sunlight}
+                          · {plant.watering_interval_days}d
                         </Text>
                       </View>
-
-                      <Text
-                        style={[
-                          styles.metaText,
-                          {
-                            color: C.muted,
-                          },
-                        ]}
-                      >
-                        ·{' '}
-                        {
-                          plant.watering_interval_days
-                        }
-                        d cycle
-                      </Text>
                     </View>
-                  </View>
-                </Pressable>
+                  </Pressable>
+                </View>
               );
             })}
           </View>
@@ -968,18 +936,17 @@ export default function PlantsScreen() {
         style={({ pressed }) => [
           styles.fab,
           {
-            backgroundColor:
-              accentForeground,
+            backgroundColor: '#000000',
+            borderWidth: 2,
+            borderColor: pageBg,
           },
-          pressed && {
-            opacity: 0.85,
-          },
+          pressed && styles.pressedBtn,
         ]}
       >
         <Plus
-          color="#FFFFFF"
+          color={pageBg}
           size={28}
-          strokeWidth={2.6}
+          strokeWidth={2.8}
         />
       </Pressable>
 
@@ -988,24 +955,20 @@ export default function PlantsScreen() {
       <Modal
         visible={modalOpen}
         transparent
-        animationType="slide"
+        animationType="fade"
         onRequestClose={
           closePlantModal
         }
       >
-        <View style={styles.modalShade}>
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            style={styles.keyboardModal}
-          >
-          <View
+        <Pressable style={styles.centeredModalBackdrop} onPress={closePlantModal}>
+          <Pressable
             style={[
-              styles.modalCard,
+              styles.centeredModalCard,
               {
-                backgroundColor:
-                  C.card,
+                backgroundColor: isDark ? '#18181B' : '#FFFFFF',
               },
             ]}
+            onPress={(e) => e.stopPropagation()}
           >
             <View
               style={styles.modalTitleRow}
@@ -1014,7 +977,7 @@ export default function PlantsScreen() {
                 style={[
                   styles.modalTitle,
                   {
-                    color: C.text,
+                    color: pageBg,
                   },
                 ]}
               >
@@ -1030,8 +993,9 @@ export default function PlantsScreen() {
                 hitSlop={12}
               >
                 <X
-                  color={C.muted}
+                  color={isDark ? '#FFFFFF' : '#000000'}
                   size={21}
+                  strokeWidth={2.5}
                 />
               </Pressable>
             </View>
@@ -1049,7 +1013,7 @@ export default function PlantsScreen() {
                     styles.error,
                     {
                       color:
-                        '#C53A2F',
+                        '#EF4444',
                       marginTop: 4,
                     },
                   ]}
@@ -1064,7 +1028,7 @@ export default function PlantsScreen() {
                 style={[
                   styles.label,
                   {
-                    color: C.muted,
+                    color: isDark ? '#A1A1AA' : '#52525B',
                   },
                 ]}
               >
@@ -1076,16 +1040,16 @@ export default function PlantsScreen() {
                 onChangeText={setName}
                 placeholder="e.g. Monstera"
                 placeholderTextColor={
-                  C.muted
+                  isDark ? '#71717A' : '#A1A1AA'
                 }
                 style={[
                   styles.input,
                   {
                     backgroundColor:
-                      C.input,
+                      isDark ? '#27272A' : '#F4F4F5',
                     borderColor:
-                      C.inputBorder,
-                    color: C.text,
+                      '#000000',
+                    color: isDark ? '#FFFFFF' : '#000000',
                   },
                 ]}
                 autoFocus
@@ -1097,7 +1061,7 @@ export default function PlantsScreen() {
                 style={[
                   styles.label,
                   {
-                    color: C.muted,
+                    color: isDark ? '#A1A1AA' : '#52525B',
                   },
                 ]}
               >
@@ -1111,16 +1075,16 @@ export default function PlantsScreen() {
                 }
                 placeholder="e.g. Monstera deliciosa"
                 placeholderTextColor={
-                  C.muted
+                  isDark ? '#71717A' : '#A1A1AA'
                 }
                 style={[
                   styles.input,
                   {
                     backgroundColor:
-                      C.input,
+                      isDark ? '#27272A' : '#F4F4F5',
                     borderColor:
-                      C.inputBorder,
-                    color: C.text,
+                      '#000000',
+                    color: isDark ? '#FFFFFF' : '#000000',
                   },
                 ]}
               />
@@ -1131,7 +1095,7 @@ export default function PlantsScreen() {
                 style={[
                   styles.label,
                   {
-                    color: C.muted,
+                    color: isDark ? '#A1A1AA' : '#52525B',
                   },
                 ]}
               >
@@ -1147,7 +1111,7 @@ export default function PlantsScreen() {
                   style={[
                     styles.frequencyText,
                     {
-                      color: C.text,
+                      color: isDark ? '#FFFFFF' : '#000000',
                     },
                   ]}
                 >
@@ -1167,16 +1131,16 @@ export default function PlantsScreen() {
                   keyboardType="number-pad"
                   placeholder="7"
                   placeholderTextColor={
-                    C.muted
+                    isDark ? '#71717A' : '#A1A1AA'
                   }
                   style={[
                     styles.intervalInput,
                     {
                       backgroundColor:
-                        C.input,
+                        isDark ? '#27272A' : '#F4F4F5',
                       borderColor:
-                        C.inputBorder,
-                      color: C.text,
+                        '#000000',
+                      color: isDark ? '#FFFFFF' : '#000000',
                     },
                   ]}
                   selectTextOnFocus
@@ -1186,7 +1150,7 @@ export default function PlantsScreen() {
                   style={[
                     styles.frequencyText,
                     {
-                      color: C.text,
+                      color: isDark ? '#FFFFFF' : '#000000',
                     },
                   ]}
                 >
@@ -1200,7 +1164,7 @@ export default function PlantsScreen() {
                 style={[
                   styles.label,
                   {
-                    color: C.muted,
+                    color: isDark ? '#A1A1AA' : '#52525B',
                   },
                 ]}
               >
@@ -1223,16 +1187,11 @@ export default function PlantsScreen() {
                         styles.chip,
                         {
                           borderColor:
-                            C.border,
+                            '#000000',
                           backgroundColor:
-                            C.card,
-                        },
-                        sunlight ===
-                          option && {
-                          backgroundColor:
-                            accentForeground,
-                          borderColor:
-                            accentForeground,
+                            sunlight === option
+                              ? pageBg
+                              : (isDark ? '#27272A' : '#F4F4F5'),
                         },
                       ]}
                     >
@@ -1241,14 +1200,9 @@ export default function PlantsScreen() {
                           styles.chipText,
                           {
                             color:
-                              C.muted,
-                          },
-                          sunlight ===
-                            option && {
-                            color:
-                              onAccent,
-                            fontFamily:
-                              FONT_SEMI,
+                              sunlight === option
+                                ? '#000000'
+                                : (isDark ? '#FFFFFF' : '#000000'),
                           },
                         ]}
                       >
@@ -1268,9 +1222,9 @@ export default function PlantsScreen() {
                 }
                 label="Last watered"
                 accent={
-                  accentForeground
+                  pageBg
                 }
-                onAccent={onAccent}
+                onAccent="#000000"
                 isDark={isDark}
                 placeholder="Select date"
               />
@@ -1281,7 +1235,7 @@ export default function PlantsScreen() {
                 style={[
                   styles.label,
                   {
-                    color: C.muted,
+                    color: isDark ? '#A1A1AA' : '#52525B',
                   },
                 ]}
               >
@@ -1293,17 +1247,17 @@ export default function PlantsScreen() {
                 onChangeText={setNotes}
                 placeholder="Care tips"
                 placeholderTextColor={
-                  C.muted
+                  isDark ? '#71717A' : '#A1A1AA'
                 }
                 style={[
                   styles.input,
                   styles.inputMultiline,
                   {
                     backgroundColor:
-                      C.input,
+                      isDark ? '#27272A' : '#F4F4F5',
                     borderColor:
-                      C.inputBorder,
-                    color: C.text,
+                      '#000000',
+                    color: isDark ? '#FFFFFF' : '#000000',
                   },
                 ]}
                 multiline
@@ -1316,8 +1270,8 @@ export default function PlantsScreen() {
               style={[
                 styles.saveFooter,
                 {
-                  backgroundColor: C.card,
-                  borderTopColor: C.border,
+                  backgroundColor: isDark ? '#18181B' : '#FFFFFF',
+                  borderTopColor: '#000000',
                 },
               ]}
             >
@@ -1327,23 +1281,22 @@ export default function PlantsScreen() {
                 style={({ pressed }) => [
                   styles.saveButton,
                   {
-                    backgroundColor:
-                      accentForeground,
+                    backgroundColor: '#000000',
+                    borderWidth: 2,
+                    borderColor: pageBg,
                   },
                   saving && {
                     opacity: 0.6,
                   },
                   pressed &&
-                    !saving && {
-                      opacity: 0.8,
-                    },
+                    !saving && styles.pressedBtn,
                 ]}
               >
                 <Text
                   style={[
                     styles.saveText,
                     {
-                      color: onAccent,
+                      color: pageBg,
                     },
                   ]}
                 >
@@ -1355,9 +1308,8 @@ export default function PlantsScreen() {
                 </Text>
               </Pressable>
             </View>
-          </View>
-          </KeyboardAvoidingView>
-        </View>
+          </Pressable>
+        </Pressable>
       </Modal>
 
       {/* PLANT DETAIL MODAL */}
@@ -1365,20 +1317,20 @@ export default function PlantsScreen() {
       <Modal
         visible={!!detailOpen}
         transparent
-        animationType="slide"
+        animationType="fade"
         onRequestClose={() =>
           setDetailOpen(null)
         }
       >
-        <View style={styles.modalShade}>
-          <View
+        <Pressable style={styles.centeredModalBackdrop} onPress={() => setDetailOpen(null)}>
+          <Pressable
             style={[
-              styles.modalCard,
+              styles.centeredModalCard,
               {
-                backgroundColor:
-                  C.card,
+                backgroundColor: isDark ? '#18181B' : '#FFFFFF',
               },
             ]}
+            onPress={(e) => e.stopPropagation()}
           >
             {detailOpen &&
               (() => {
@@ -1412,8 +1364,7 @@ export default function PlantsScreen() {
                           style={[
                             styles.modalTitle,
                             {
-                              color:
-                                C.text,
+                              color: pageBg,
                             },
                           ]}
                           numberOfLines={2}
@@ -1426,8 +1377,7 @@ export default function PlantsScreen() {
                             style={[
                               styles.detailSpecies,
                               {
-                                color:
-                                  C.muted,
+                                color: isDark ? '#A1A1AA' : '#52525B',
                               },
                             ]}
                           >
@@ -1445,10 +1395,9 @@ export default function PlantsScreen() {
                         hitSlop={12}
                       >
                         <X
-                          color={
-                            C.muted
-                          }
+                          color={isDark ? '#FFFFFF' : '#000000'}
                           size={21}
+                          strokeWidth={2.5}
                         />
                       </Pressable>
                     </View>
@@ -1468,10 +1417,10 @@ export default function PlantsScreen() {
                         <Droplets
                           color={
                             due.overdue
-                              ? '#C53A2F'
-                              : accentForeground
+                              ? '#EF4444'
+                              : pageBg
                           }
-                          size={16}
+                          size={18}
                         />
 
                         <Text
@@ -1480,8 +1429,8 @@ export default function PlantsScreen() {
                             {
                               color:
                                 due.overdue
-                                  ? '#C53A2F'
-                                  : C.text,
+                                  ? '#EF4444'
+                                  : (isDark ? '#FFFFFF' : '#000000'),
                             },
                           ]}
                         >
@@ -1495,16 +1444,15 @@ export default function PlantsScreen() {
                         }
                       >
                         <Sun
-                          color={C.muted}
-                          size={16}
+                          color={isDark ? '#A1A1AA' : '#52525B'}
+                          size={18}
                         />
 
                         <Text
                           style={[
                             styles.detailText,
                             {
-                              color:
-                                C.text,
+                              color: isDark ? '#FFFFFF' : '#000000',
                             },
                           ]}
                         >
@@ -1519,16 +1467,15 @@ export default function PlantsScreen() {
                         }
                       >
                         <Sprout
-                          color={C.muted}
-                          size={16}
+                          color={isDark ? '#A1A1AA' : '#52525B'}
+                          size={18}
                         />
 
                         <Text
                           style={[
                             styles.detailText,
                             {
-                              color:
-                                C.text,
+                              color: isDark ? '#FFFFFF' : '#000000',
                             },
                           ]}
                         >
@@ -1545,8 +1492,7 @@ export default function PlantsScreen() {
                           style={[
                             styles.detailSub,
                             {
-                              color:
-                                C.muted,
+                              color: isDark ? '#A1A1AA' : '#52525B',
                             },
                           ]}
                         >
@@ -1560,8 +1506,7 @@ export default function PlantsScreen() {
                           style={[
                             styles.detailSub,
                             {
-                              color:
-                                C.muted,
+                              color: isDark ? '#A1A1AA' : '#52525B',
                             },
                           ]}
                         >
@@ -1575,8 +1520,7 @@ export default function PlantsScreen() {
                           style={[
                             styles.detailSub,
                             {
-                              color:
-                                C.muted,
+                              color: isDark ? '#A1A1AA' : '#52525B',
                             },
                           ]}
                         >
@@ -1592,8 +1536,7 @@ export default function PlantsScreen() {
                           style={[
                             styles.detailNotes,
                             {
-                              color:
-                                C.muted,
+                              color: isDark ? '#A1A1AA' : '#52525B',
                             },
                           ]}
                         >
@@ -1620,10 +1563,9 @@ export default function PlantsScreen() {
                         style={({ pressed }) => [
                           styles.detailAction,
                           {
-                            backgroundColor:
-                              due.overdue
-                                ? '#C53A2F'
-                                : accentForeground,
+                            backgroundColor: '#000000',
+                            borderWidth: 2,
+                            borderColor: pageBg,
                           },
                           (isWatering ||
                             isDeleting) && {
@@ -1631,22 +1573,20 @@ export default function PlantsScreen() {
                           },
                           pressed &&
                             !isWatering &&
-                            !isDeleting && {
-                              opacity: 0.75,
-                            },
+                            !isDeleting && styles.pressedBtn,
                         ]}
                       >
                         <Droplets
-                          color={onAccent}
+                          color={pageBg}
                           size={17}
+                          strokeWidth={2.4}
                         />
 
                         <Text
                           style={[
                             styles.detailActionText,
                             {
-                              color:
-                                onAccent,
+                              color: pageBg,
                             },
                           ]}
                         >
@@ -1670,14 +1610,9 @@ export default function PlantsScreen() {
                           styles.detailAction,
                           styles.deleteAction,
                           {
-                            backgroundColor:
-                              isDark
-                                ? '#241815'
-                                : '#FBEAE8',
-                            borderColor:
-                              isDark
-                                ? '#3A2422'
-                                : '#F2C8C2',
+                            backgroundColor: isDark ? '#121212' : '#FFFFFF',
+                            borderWidth: 2,
+                            borderColor: '#EF4444',
                           },
                           (isWatering ||
                             isDeleting) && {
@@ -1685,18 +1620,13 @@ export default function PlantsScreen() {
                           },
                           pressed &&
                             !isWatering &&
-                            !isDeleting && {
-                              opacity: 0.75,
-                            },
+                            !isDeleting && styles.pressedBtn,
                         ]}
                       >
                         <Trash2
-                          color={
-                            isDark
-                              ? '#E5A39C'
-                              : '#C53A2F'
-                          }
+                          color="#EF4444"
                           size={17}
+                          strokeWidth={2.4}
                         />
 
                         <Text
@@ -1713,8 +1643,8 @@ export default function PlantsScreen() {
                   </>
                 );
               })()}
-          </View>
-        </View>
+          </Pressable>
+        </Pressable>
       </Modal>
 
       {/* DELETE CONFIRMATION MODAL */}
@@ -1727,19 +1657,19 @@ export default function PlantsScreen() {
           setDeleteTarget(null)
         }
       >
-        <View
-          style={styles.confirmShade}
+        <Pressable
+          style={styles.centeredModalBackdrop}
+          onPress={() => setDeleteTarget(null)}
         >
-          <View
+          <Pressable
             style={[
-              styles.confirmCard,
+              styles.centeredModalCard,
               {
-                backgroundColor:
-                  C.card,
-                borderColor:
-                  C.border,
+                backgroundColor: isDark ? '#18181B' : '#FFFFFF',
+                maxWidth: 360,
               },
             ]}
+            onPress={(e) => e.stopPropagation()}
           >
             <View
               style={
@@ -1747,8 +1677,9 @@ export default function PlantsScreen() {
               }
             >
               <Trash2
-                color="#C53A2F"
+                color="#EF4444"
                 size={22}
+                strokeWidth={2.4}
               />
             </View>
 
@@ -1756,7 +1687,7 @@ export default function PlantsScreen() {
               style={[
                 styles.confirmTitle,
                 {
-                  color: C.text,
+                  color: isDark ? '#FFFFFF' : '#000000',
                 },
               ]}
             >
@@ -1767,7 +1698,7 @@ export default function PlantsScreen() {
               style={[
                 styles.confirmText,
                 {
-                  color: C.muted,
+                  color: isDark ? '#A1A1AA' : '#52525B',
                 },
               ]}
             >
@@ -1787,19 +1718,18 @@ export default function PlantsScreen() {
                 style={({ pressed }) => [
                   styles.confirmButton,
                   {
-                    backgroundColor:
-                      C.inactive,
+                    backgroundColor: isDark ? '#27272A' : '#F4F4F5',
+                    borderWidth: 2,
+                    borderColor: '#000000',
                   },
-                  pressed && {
-                    opacity: 0.7,
-                  },
+                  pressed && styles.pressedBtn,
                 ]}
               >
                 <Text
                   style={[
                     styles.confirmCancelText,
                     {
-                      color: C.text,
+                      color: isDark ? '#FFFFFF' : '#000000',
                     },
                   ]}
                 >
@@ -1819,21 +1749,21 @@ export default function PlantsScreen() {
                 style={({ pressed }) => [
                   styles.confirmButton,
                   {
-                    backgroundColor:
-                      '#C53A2F',
+                    backgroundColor: '#000000',
+                    borderWidth: 2,
+                    borderColor: '#EF4444',
                   },
                   deletingId && {
                     opacity: 0.55,
                   },
                   pressed &&
-                    !deletingId && {
-                      opacity: 0.75,
-                    },
+                    !deletingId && styles.pressedBtn,
                 ]}
               >
                 <Text
                   style={[
                     styles.confirmDeleteText,
+                    { color: '#EF4444' },
                   ]}
                 >
                   {deletingId
@@ -1842,8 +1772,8 @@ export default function PlantsScreen() {
                 </Text>
               </Pressable>
             </View>
-          </View>
-        </View>
+          </Pressable>
+        </Pressable>
       </Modal>
     </SafeAreaView>
   );
@@ -1853,23 +1783,29 @@ const styles = StyleSheet.create({
   safe: {
     flex: 1,
   },
+  pressedBtn: {
+    transform: [{ translateX: 2 }, { translateY: 2 }],
+  },
 
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 28,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 10,
+    zIndex: 100,
   },
 
   headerBack: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: '#000000',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#000000',
   },
 
   headerBtn: {
@@ -1880,22 +1816,17 @@ const styles = StyleSheet.create({
   },
   menuShade: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.25)',
+    backgroundColor: 'rgba(0,0,0,0.5)',
     alignItems: 'flex-end',
     paddingTop: 64,
-    paddingRight: 12,
+    paddingRight: 20,
   },
 
   menuCard: {
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: 12,
+    borderWidth: 3,
     paddingVertical: 6,
     minWidth: 150,
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
   },
 
   menuItem: {
@@ -1904,23 +1835,23 @@ const styles = StyleSheet.create({
   },
 
   menuItemText: {
-    fontFamily: FONT_MED,
+    fontFamily: 'Poppins-Bold',
     fontSize: 14,
   },
 
-
   headerTitle: {
-    fontFamily: FONT_BOLD,
-    fontSize: 18,
-    letterSpacing: 1.5,
+    fontFamily: 'Poppins-ExtraBold',
+    fontSize: 20,
+    letterSpacing: 1,
   },
 
   content: {
-    padding: 16,
+    padding: 18,
+    paddingBottom: 50,
   },
 
   error: {
-    fontFamily: FONT_MED,
+    fontFamily: 'Poppins-Bold',
     fontSize: 13,
     marginBottom: 10,
   },
@@ -1934,53 +1865,76 @@ const styles = StyleSheet.create({
   emptyIcon: {
     width: 58,
     height: 58,
-    borderRadius: 18,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 16,
+    borderWidth: 2,
   },
 
   emptyTitle: {
-    fontFamily: FONT_BOLD,
-    fontSize: 17,
+    fontFamily: 'Poppins-ExtraBold',
+    fontSize: 18,
     marginBottom: 7,
   },
 
   emptyText: {
-    fontFamily: FONT,
+    fontFamily: 'Poppins-Medium',
     fontSize: 14,
     textAlign: 'center',
     lineHeight: 21,
   },
 
-  list: {
-    gap: 12,
+  gridContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+
+  cardContainer: {
+    width: '48%',
+    position: 'relative',
+    marginBottom: 16,
+  },
+
+  cardShadowBackdrop: {
+    position: 'absolute',
+    top: 4,
+    left: 4,
+    right: -4,
+    bottom: -4,
+    backgroundColor: '#000000',
+    borderRadius: 16,
   },
 
   card: {
-    borderRadius: 18,
-    borderWidth: 1,
-    padding: 14,
+    borderRadius: 16,
+    borderWidth: 3,
+    padding: 12,
+    minHeight: 160,
+    justifyContent: 'space-between',
   },
 
   cardTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 8,
   },
 
   cardIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
+    width: 32,
+    height: 32,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#000000',
   },
 
   editPenButton: {
-    width: 36,
-    height: 36,
+    width: 32,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1990,39 +1944,41 @@ const styles = StyleSheet.create({
   },
 
   plantName: {
-    fontFamily: FONT_BOLD,
+    fontFamily: 'Poppins-ExtraBold',
     fontSize: 15,
   },
 
   plantSpecies: {
-    fontFamily: FONT,
-    fontSize: 12,
+    fontFamily: 'Poppins-Medium',
+    fontSize: 11,
     marginTop: 2,
-    marginBottom: 8,
+    marginBottom: 6,
   },
 
   duePill: {
     alignSelf: 'flex-start',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-    marginTop: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    marginTop: 6,
+    borderWidth: 1.5,
+    borderColor: '#000000',
   },
 
   duePillOverdue: {
-    backgroundColor: '#C53A2F',
+    backgroundColor: '#EF4444',
   },
 
   duePillText: {
-    fontFamily: FONT_SEMI,
-    fontSize: 11,
+    fontFamily: 'Poppins-Bold',
+    fontSize: 10,
   },
 
   cardMeta: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    marginTop: 10,
+    justifyContent: 'space-between',
+    marginTop: 8,
   },
 
   metaItem: {
@@ -2032,8 +1988,8 @@ const styles = StyleSheet.create({
   },
 
   metaText: {
-    fontFamily: FONT,
-    fontSize: 11,
+    fontFamily: 'Poppins-Medium',
+    fontSize: 10,
   },
 
   fab: {
@@ -2052,61 +2008,55 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
 
-  keyboardModal: {
-      flex: 1,
-    },
+  centeredModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
 
-    modalShade: {
-      flex: 1,
-      justifyContent:
-        'flex-end',
-      backgroundColor:
-        'rgba(0,0,0,0.45)',
-    },
+  centeredModalCard: {
+    width: '100%',
+    maxWidth: 400,
+    borderRadius: 24,
+    borderWidth: 3,
+    borderColor: '#000000',
+    paddingTop: 22,
+    paddingBottom: 26,
+    paddingHorizontal: 22,
+    maxHeight: '85%',
+    shadowColor: '#000000',
+    shadowOffset: { width: 6, height: 6 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+    elevation: 8,
+  },
 
-    modalCard: {
-      borderTopLeftRadius:
-        24,
-      borderTopRightRadius:
-        24,
-      padding: 22,
-      paddingBottom: 24,
-      maxHeight:
-        '92%',
-      flexShrink: 1,
-    },
+  modalTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
 
-    modalTitleRow: {
-      flexDirection:
-        'row',
-      justifyContent:
-        'space-between',
-      alignItems:
-        'center',
-      marginBottom: 16,
-    },
+  modalTitle: {
+    fontFamily: 'Poppins-ExtraBold',
+    fontSize: 20,
+    flex: 1,
+    marginRight: 12,
+  },
 
-    modalTitle: {
-      fontFamily:
-        FONT_BOLD,
-      fontSize: 18,
-      flex: 1,
-      marginRight: 12,
-    },
-
-    modalScroll: {
-      flexGrow: 0,
-      flexShrink: 1,
-    },
-
-    modalScrollContent: {
-      paddingBottom: 24,
-    },
+  modalScroll: {
+    flexGrow: 0,
+    flexShrink: 1,
+  },
 
   saveFooter: {
     paddingTop: 12,
     paddingBottom: 0,
-    borderTopWidth: 1,
+    borderTopWidth: 2,
+    marginTop: 10,
   },
 
   detailTitleWrap: {
@@ -2115,25 +2065,26 @@ const styles = StyleSheet.create({
   },
 
   detailSpecies: {
-    fontFamily: FONT,
+    fontFamily: 'Poppins-Medium',
     fontSize: 13,
     marginTop: 4,
   },
 
   label: {
-    fontFamily: FONT_MED,
-    fontSize: 13,
-    marginTop: 14,
+    fontFamily: 'Poppins-Bold',
+    fontSize: 11,
+    letterSpacing: 0.5,
+    marginTop: 12,
     marginBottom: 6,
   },
 
   input: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    fontFamily: FONT,
-    fontSize: 15,
+    borderWidth: 2,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontFamily: 'Poppins-Medium',
+    fontSize: 14,
   },
 
   inputMultiline: {
@@ -2148,19 +2099,19 @@ const styles = StyleSheet.create({
   },
 
   frequencyText: {
-    fontFamily: FONT_MED,
-    fontSize: 15,
+    fontFamily: 'Poppins-Bold',
+    fontSize: 14,
   },
 
   intervalInput: {
     width: 70,
-    height: 44,
-    borderWidth: 1,
-    borderRadius: 12,
+    height: 42,
+    borderWidth: 2,
+    borderRadius: 10,
     paddingHorizontal: 12,
     textAlign: 'center',
-    fontFamily: FONT_MED,
-    fontSize: 15,
+    fontFamily: 'Poppins-Bold',
+    fontSize: 14,
   },
 
   chipRow: {
@@ -2172,25 +2123,26 @@ const styles = StyleSheet.create({
   chip: {
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderRadius: 10,
-    borderWidth: 1,
+    borderRadius: 8,
+    borderWidth: 2,
   },
 
   chipText: {
-    fontFamily: FONT,
-    fontSize: 13,
+    fontFamily: 'Poppins-Bold',
+    fontSize: 12,
   },
 
   saveButton: {
-    borderRadius: 14,
+    borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
-    marginTop: 22,
+    marginTop: 10,
   },
 
   saveText: {
-    fontFamily: FONT_SEMI,
+    fontFamily: 'Poppins-ExtraBold',
     fontSize: 15,
+    letterSpacing: 0.5,
   },
 
   detailSection: {
@@ -2206,19 +2158,19 @@ const styles = StyleSheet.create({
   },
 
   detailText: {
-    fontFamily: FONT_MED,
+    fontFamily: 'Poppins-Bold',
     fontSize: 14,
   },
 
   detailSub: {
-    fontFamily: FONT,
+    fontFamily: 'Poppins-Medium',
     fontSize: 13,
-    marginLeft: 26,
+    marginLeft: 28,
     lineHeight: 20,
   },
 
   detailNotes: {
-    fontFamily: FONT,
+    fontFamily: 'Poppins-Medium',
     fontSize: 14,
     lineHeight: 21,
     marginTop: 8,
@@ -2232,7 +2184,7 @@ const styles = StyleSheet.create({
 
   detailAction: {
     flex: 1,
-    borderRadius: 14,
+    borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
@@ -2241,55 +2193,40 @@ const styles = StyleSheet.create({
   },
 
   deleteAction: {
-    borderWidth: 1,
+    borderWidth: 2,
   },
 
   deleteText: {
-    fontFamily: FONT_SEMI,
+    fontFamily: 'Poppins-ExtraBold',
     fontSize: 14,
-    color: '#C53A2F',
+    color: '#EF4444',
   },
 
   detailActionText: {
-    fontFamily: FONT_SEMI,
+    fontFamily: 'Poppins-ExtraBold',
     fontSize: 14,
-  },
-
-  confirmShade: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-    backgroundColor:
-      'rgba(0,0,0,0.5)',
-  },
-
-  confirmCard: {
-    width: '100%',
-    maxWidth: 420,
-    borderRadius: 22,
-    borderWidth: 1,
-    padding: 24,
   },
 
   confirmIcon: {
     width: 46,
     height: 46,
-    borderRadius: 15,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#FBEAE8',
+    borderWidth: 2,
+    borderColor: '#EF4444',
     marginBottom: 16,
   },
 
   confirmTitle: {
-    fontFamily: FONT_BOLD,
+    fontFamily: 'Poppins-ExtraBold',
     fontSize: 19,
     marginBottom: 8,
   },
 
   confirmText: {
-    fontFamily: FONT,
+    fontFamily: 'Poppins-Medium',
     fontSize: 14,
     lineHeight: 21,
     marginBottom: 22,
@@ -2302,20 +2239,19 @@ const styles = StyleSheet.create({
 
   confirmButton: {
     flex: 1,
-    borderRadius: 13,
+    borderRadius: 10,
     paddingVertical: 13,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   confirmCancelText: {
-    fontFamily: FONT_SEMI,
+    fontFamily: 'Poppins-ExtraBold',
     fontSize: 14,
   },
 
   confirmDeleteText: {
-    fontFamily: FONT_SEMI,
+    fontFamily: 'Poppins-ExtraBold',
     fontSize: 14,
-    color: '#FFFFFF',
   },
 });

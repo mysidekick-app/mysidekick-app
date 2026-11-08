@@ -7,6 +7,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
@@ -32,24 +33,24 @@ import {
 /* ------------------------------------------------------------------ */
 const DARK_PALETTE = {
   bg: '#090909',
-  card: '#151515',
-  cardBorder: '#2A2A2A',
-  text: '#F4F2EE',
-  muted: '#AAA59D',
+  card: '#121212',
+  cardBorder: '#000000',
+  text: '#FFFFFF',
+  muted: '#A1A1AA',
   divider: '#262626',
-  danger: '#E05252',
-  inputBg: '#1C1C1C',
+  danger: '#EF4444',
+  inputBg: '#1E1E1E',
 };
 
 const LIGHT_PALETTE = {
   bg: '#FBFAF8',
   card: '#FFFFFF',
-  cardBorder: '#ECE9E4',
-  text: '#27241F',
-  muted: '#8F8A82',
-  divider: '#F0EEEA',
-  danger: '#E05252',
-  inputBg: '#F5F3EF',
+  cardBorder: '#000000',
+  text: '#000000',
+  muted: '#52525B',
+  divider: '#E4E4E7',
+  danger: '#EF4444',
+  inputBg: '#F4F4F5',
 };
 
 const FONT = 'Poppins-Regular';
@@ -183,11 +184,12 @@ export default function DelightsScreen() {
     isDark,
     accentForeground,
     onAccent,
-  } = useApp();
+  } = useApp() as any;
 
   const { user } = useAuth();
 
-  const accent = accentForeground;
+  const accent = accentForeground || '#FDE047';
+  const pageBg = accent;
 
   const COLORS = isDark
     ? DARK_PALETTE
@@ -532,37 +534,34 @@ export default function DelightsScreen() {
   /* ---------------------------------------------------------------- */
   return (
     <SafeAreaView
-      style={styles.safe}
+      style={[styles.safe, { backgroundColor: pageBg }]}
       edges={['top', 'bottom']}
     >
+      <StatusBar barStyle="dark-content" backgroundColor={pageBg} />
+
       {/* Header */}
       <View
         style={[
           styles.header,
-          { paddingTop: 28 },
+          { paddingTop: 12 },
         ]}
       >
         <Pressable
           onPress={() =>
             router.push('/(tabs)/modules/wellbeing')
           }
-          style={[
-            styles.backBtn,
-            {
-              backgroundColor: accent,
-            },
-          ]}
+          style={({ pressed }) => [styles.backBtn, pressed && styles.pressedBtn]}
           hitSlop={12}
           accessibilityLabel="Go back"
         >
           <ChevronLeft
             color="#FFFFFF"
             size={22}
-            strokeWidth={2.4}
+            strokeWidth={2.8}
           />
         </Pressable>
 
-        <Text style={styles.headerTitle}>
+        <Text style={[styles.headerTitle, { color: '#000000' }]}>
           DELIGHTS
         </Text>
 
@@ -570,39 +569,35 @@ export default function DelightsScreen() {
           onPress={() =>
             setMenuOpen((prev) => !prev)
           }
-          style={styles.menuBtn}
+          style={({ pressed }) => [styles.menuBtn, pressed && styles.pressedBtn]}
           hitSlop={12}
           accessibilityLabel="Open settings menu"
         >
           <MoreVertical
-            color={COLORS.text}
-            size={22}
-            strokeWidth={2.3}
+            color="#000000"
+            size={24}
+            strokeWidth={2.5}
           />
         </Pressable>
       </View>
 
       {/* Settings menu */}
       {menuOpen ? (
-        <View
-          style={[
-            styles.menu,
-            {
-              backgroundColor: COLORS.card,
-              borderColor: COLORS.cardBorder,
-            },
-          ]}
-        >
-          <Pressable
-            onPress={openSettings}
-            style={({ pressed }) => [
-              styles.menuItem,
-              pressed && styles.menuItemPressed,
-            ]}
-          >
-            <Text style={styles.menuItemText}>
-              Settings
-            </Text>
+        <View style={styles.menuShadeOverlay}>
+          <Pressable style={{ flex: 1 }} onPress={() => setMenuOpen(false)}>
+            <View style={styles.menuCardWrapper}>
+              <View style={styles.shadowBackdrop} />
+              <View style={[styles.menuCardBody, { backgroundColor: COLORS.card }]}>
+                <Pressable
+                  onPress={openSettings}
+                  style={styles.menuItem}
+                >
+                  <Text style={[styles.menuItemText, { color: COLORS.text }]}>
+                    Settings
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
           </Pressable>
         </View>
       ) : null}
@@ -629,42 +624,51 @@ export default function DelightsScreen() {
           <Text
             style={[
               styles.dateLabel,
-              { color: isDark ? '#FFFFFF' : accent },
+              { color: '#000000' },
             ]}
           >
             {prettyDateLabel(selectedDate)}
           </Text>
 
-          {/* Calendar */}
-          <WellbeingCalendar
-            selectedDate={selectedDate}
-            onSelectDate={
-              onSelectDate
-            }
-            accent={accent}
-            isDark={isDark}
-            entryDates={
-              allEntryDates
-            }
-          />
+          {/* Calendar with forced white background container */}
+          <View style={styles.cardContainer}>
+            <View style={styles.cardShadowBackdrop} />
+            <View style={[styles.calendarCardWrapper, { backgroundColor: '#FFFFFF', borderColor: '#000000' }]}>
+              <WellbeingCalendar
+                selectedDate={selectedDate}
+                onSelectDate={
+                  onSelectDate
+                }
+                accent={accent}
+                isDark={false}
+                entryDates={
+                  allEntryDates
+                }
+              />
+            </View>
+          </View>
 
           {/* Future notice */}
           {isFuture ? (
-            <View
-              style={
-                styles.futureNotice
-              }
-            >
-              <Text
-                style={
-                  styles.futureText
-                }
+            <View style={styles.cardContainer}>
+              <View style={styles.cardShadowBackdrop} />
+              <View
+                style={[
+                  styles.futureNotice,
+                  { backgroundColor: '#FEE2E2', borderColor: '#000000' },
+                ]}
               >
-                You can only log
-                delights for today
-                or earlier. Pick a
-                past date to continue.
-              </Text>
+                <Text
+                  style={
+                    styles.futureText
+                  }
+                >
+                  You can only log
+                  delights for today
+                  or earlier. Pick a
+                  past date to continue.
+                </Text>
+              </View>
             </View>
           ) : null}
 
@@ -675,237 +679,242 @@ export default function DelightsScreen() {
             >
               <ActivityIndicator
                 size="large"
-                color={accent}
+                color="#000000"
               />
 
               <Text
-                style={
-                  styles.stateText
-                }
+                style={[styles.stateText, { color: '#000000' }]}
               >
                 Loading your entry…
               </Text>
             </View>
           ) : error ? (
-            <View
-              style={styles.centerState}
-            >
-              <Text
-                style={styles.errorText}
-              >
-                {error}
-              </Text>
-
-              <Pressable
-                onPress={() =>
-                  loadEntry(
-                    selectedDate,
-                  )
-                }
+            <View style={styles.cardContainer}>
+              <View style={styles.cardShadowBackdrop} />
+              <View
                 style={[
-                  styles.retryBtn,
-                  {
-                    backgroundColor:
-                      accent,
-                  },
+                  styles.centerStateCard,
+                  { backgroundColor: '#FEE2E2', borderColor: '#000000' },
                 ]}
               >
                 <Text
-                  style={[
-                    styles.retryText,
-                    {
-                      color:
-                        onAccent,
-                    },
+                  style={styles.errorText}
+                >
+                  {error}
+                </Text>
+
+                <Pressable
+                  onPress={() =>
+                    loadEntry(
+                      selectedDate,
+                    )
+                  }
+                  style={({ pressed }) => [
+                    styles.retryBtn,
+                    { backgroundColor: '#000000', borderColor: '#000000' },
+                    pressed && styles.pressedBtn,
                   ]}
                 >
-                  Retry
-                </Text>
-              </Pressable>
+                  <Text
+                    style={[
+                      styles.retryText,
+                      {
+                        color: '#FFFFFF',
+                      },
+                    ]}
+                  >
+                    Retry
+                  </Text>
+                </Pressable>
+              </View>
             </View>
           ) : (
             <>
               {/* Delights grid */}
-              <View
-                style={
-                  styles.selectorCard
-                }
-              >
+              <View style={styles.cardContainer}>
+                <View style={styles.cardShadowBackdrop} />
                 <View
-                  style={
-                    styles.selectorHeader
-                  }
+                  style={[
+                    styles.selectorCard,
+                    { backgroundColor: COLORS.card, borderColor: '#000000' },
+                  ]}
                 >
                   <View
-                    style={{ flex: 1 }}
-                  >
-                    <Text
-                      style={
-                        styles.selectorEyebrow
-                      }
-                    >
-                      THE 9 DELIGHTS
-                    </Text>
-
-                    <Text
-                      style={
-                        styles.selectorHint
-                      }
-                    >
-                      Tap every delight
-                      you experienced
-                      today.
-                    </Text>
-                  </View>
-
-                  {/* Info icon */}
-                  <Pressable
-                    onPress={() =>
-                      setInfoOpen(true)
-                    }
-                    hitSlop={10}
-                    accessibilityLabel="About the 9 delights"
                     style={
-                      styles.gridInfoBtn
+                      styles.selectorHeader
                     }
                   >
-                    <Info
-                      color={
-                        COLORS.muted
-                      }
-                      size={17}
-                      strokeWidth={2.2}
-                    />
-                  </Pressable>
-                </View>
-
-                <View
-                  style={styles.chipGrid}
-                >
-                  {DELIGHTS.map((d) => {
-                    const isSelected =
-                      selected.has(
-                        d.key,
-                      );
-
-                    return (
-                      <View
-                        key={d.key}
+                    <View
+                      style={{ flex: 1 }}
+                    >
+                      <Text
                         style={
-                          styles.chipCell
+                          styles.selectorEyebrow
                         }
                       >
-                        <Pressable
-                          onPress={() =>
-                            !isFuture &&
-                            toggleDelight(
-                              d.key,
-                            )
-                          }
-                          disabled={
-                            isFuture
-                          }
-                          style={({
-                            pressed,
-                          }) => [
-                            styles.chipBtn,
-                            isSelected && {
-                              backgroundColor:
-                                accent,
-                              borderColor:
-                                accent,
-                            },
-                            isFuture &&
-                              styles.chipDisabled,
-                            pressed &&
-                              styles.chipPressed,
-                          ]}
-                          accessibilityLabel={`Delight: ${d.name}`}
-                          accessibilityRole="button"
-                        >
-                          <Text
-                            style={
-                              styles.chipEmoji
-                            }
-                          >
-                            {d.emoji}
-                          </Text>
+                        THE 9 DELIGHTS
+                      </Text>
 
-                          <Text
-                            style={[
-                              styles.chipLabel,
-                              isSelected && [
-                                styles.chipLabelSelected,
-                                {
-                                  color:
-                                    onAccent,
-                                },
-                              ],
-                            ]}
-                            numberOfLines={1}
-                          >
-                            {d.name.toUpperCase()}
-                          </Text>
-                        </Pressable>
-                      </View>
-                    );
-                  })}
-                </View>
+                      <Text
+                        style={[
+                          styles.selectorHint,
+                          { color: COLORS.muted },
+                        ]}
+                      >
+                        Tap every delight
+                        you experienced
+                        today.
+                      </Text>
+                    </View>
 
-                {selectedCount > 0 ? (
-                  <View
-                    style={
-                      styles.selectedSummary
-                    }
-                  >
-                    <Text
-                      style={
-                        styles.selectedText
+                    {/* Info icon */}
+                    <Pressable
+                      onPress={() =>
+                        setInfoOpen(true)
                       }
+                      hitSlop={10}
+                      accessibilityLabel="About the 9 delights"
+                      style={({ pressed }) => [
+                        styles.gridInfoBtn,
+                        { backgroundColor: COLORS.inputBg, borderColor: '#000000' },
+                        pressed && styles.pressedBtn,
+                      ]}
                     >
-                      {selectedCount} delight
-                      {selectedCount === 1
-                        ? ''
-                        : 's'}{' '}
-                      selected.
-                    </Text>
+                      <Info
+                        color={COLORS.text}
+                        size={17}
+                        strokeWidth={2.5}
+                      />
+                    </Pressable>
                   </View>
-                ) : null}
+
+                  <View
+                    style={styles.chipGrid}
+                  >
+                    {DELIGHTS.map((d) => {
+                      const isSelected =
+                        selected.has(
+                          d.key,
+                        );
+
+                      return (
+                        <View
+                          key={d.key}
+                          style={
+                            styles.chipCell
+                          }
+                        >
+                          <Pressable
+                            onPress={() =>
+                              !isFuture &&
+                              toggleDelight(
+                                d.key,
+                              )
+                            }
+                            disabled={
+                              isFuture
+                            }
+                            style={({
+                              pressed,
+                            }) => [
+                              styles.chipBtn,
+                              {
+                                backgroundColor: isSelected ? accent : COLORS.inputBg,
+                                borderColor: '#000000',
+                              },
+                              isFuture &&
+                                styles.chipDisabled,
+                              pressed &&
+                                styles.pressedBtn,
+                            ]}
+                            accessibilityLabel={`Delight: ${d.name}`}
+                            accessibilityRole="button"
+                          >
+                            <Text
+                              style={
+                                styles.chipEmoji
+                              }
+                            >
+                              {d.emoji}
+                            </Text>
+
+                            <Text
+                              style={[
+                                styles.chipLabel,
+                                { color: isSelected ? '#000000' : COLORS.muted },
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {d.name.toUpperCase()}
+                            </Text>
+                          </Pressable>
+                        </View>
+                      );
+                    })}
+                  </View>
+
+                  {selectedCount > 0 ? (
+                    <View
+                      style={[
+                        styles.selectedSummary,
+                        { borderTopColor: COLORS.divider },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.selectedText,
+                          { color: COLORS.text },
+                        ]}
+                      >
+                        {selectedCount} delight
+                        {selectedCount === 1
+                          ? ''
+                          : 's'}{' '}
+                        selected.
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
               </View>
 
               {/* Notes */}
-              <View
-                style={
-                  styles.editorCard
-                }
-              >
-                <Text
-                  style={
-                    styles.editorEyebrow
-                  }
-                >
-                  NOTES
-                </Text>
-
-                <TextInput
-                  value={content}
-                  onChangeText={
-                    setContent
-                  }
-                  placeholder="Add a note about your delights…"
-                  placeholderTextColor={
-                    COLORS.muted
-                  }
-                  multiline
-                  autoFocus={false}
-                  editable={!isFuture}
+              <View style={styles.cardContainer}>
+                <View style={styles.cardShadowBackdrop} />
+                <View
                   style={[
-                    styles.editor,
-                    isFuture &&
-                      styles.editorDisabled,
+                    styles.editorCard,
+                    { backgroundColor: COLORS.card, borderColor: '#000000' },
                   ]}
-                  textAlignVertical="top"
-                />
+                >
+                  <Text
+                    style={
+                      styles.editorEyebrow
+                    }
+                  >
+                    NOTES
+                  </Text>
+
+                  <TextInput
+                    value={content}
+                    onChangeText={
+                      setContent
+                    }
+                    placeholder="Add a note about your delights…"
+                    placeholderTextColor={
+                      COLORS.muted
+                    }
+                    multiline
+                    autoFocus={false}
+                    editable={!isFuture}
+                    style={[
+                      styles.editor,
+                      { color: COLORS.text },
+                      isFuture &&
+                        styles.editorDisabled,
+                    ]}
+                    textAlignVertical="top"
+                  />
+                </View>
               </View>
 
               {/* Save feedback */}
@@ -913,10 +922,7 @@ export default function DelightsScreen() {
                 <Text
                   style={[
                     styles.saveMsg,
-                    {
-                      color:
-                        accent,
-                    },
+                    { color: '#000000' },
                   ]}
                 >
                   {saveMsg}
@@ -924,160 +930,172 @@ export default function DelightsScreen() {
               ) : null}
 
               {/* Save */}
-              <Pressable
-                onPress={onSave}
-                disabled={
-                  saving ||
-                  isFuture ||
-                  selected.size === 0
-                }
-                style={({ pressed }) => [
-                  styles.saveBtn,
-                  {
-                    backgroundColor:
-                      accent,
-                  },
-                  (saving ||
+              <View style={styles.cardContainer}>
+                <View style={styles.cardShadowBackdrop} />
+                <Pressable
+                  onPress={onSave}
+                  disabled={
+                    saving ||
                     isFuture ||
-                    selected.size === 0) &&
-                    styles.saveBtnDisabled,
-                  pressed &&
-                    styles.saveBtnPressed,
-                ]}
-              >
-                {saving ? (
-                  <ActivityIndicator
-                    size="small"
-                    color={onAccent}
-                  />
-                ) : (
-                  <Text
-                    style={[
-                      styles.saveBtnText,
-                      {
-                        color:
-                          onAccent,
-                      },
-                    ]}
-                  >
-                    SAVE DELIGHTS
-                  </Text>
-                )}
-              </Pressable>
+                    selected.size === 0
+                  }
+                  style={({ pressed }) => [
+                    styles.saveBtn,
+                    {
+                      backgroundColor: '#000000',
+                      borderColor: '#000000',
+                    },
+                    (saving ||
+                      isFuture ||
+                      selected.size === 0) &&
+                      styles.saveBtnDisabled,
+                    pressed &&
+                      styles.pressedBtn,
+                  ]}
+                >
+                  {saving ? (
+                    <ActivityIndicator
+                      size="small"
+                      color="#FFFFFF"
+                    />
+                  ) : (
+                    <Text
+                      style={[
+                        styles.saveBtnText,
+                        {
+                          color: '#FFFFFF',
+                        },
+                      ]}
+                    >
+                      SAVE DELIGHTS
+                    </Text>
+                  )}
+                </Pressable>
+              </View>
             </>
           )}
 
           {/* Saved entries */}
           {savedEntries.length > 0 && (
-            <View
-              style={styles.savedCard}
-            >
-              <Text
-                style={styles.savedTitle}
+            <View style={styles.cardContainer}>
+              <View style={styles.cardShadowBackdrop} />
+              <View
+                style={[
+                  styles.savedCard,
+                  { backgroundColor: COLORS.card, borderColor: '#000000' },
+                ]}
               >
-                SAVED DELIGHTS
-              </Text>
+                <Text
+                  style={styles.savedTitle}
+                >
+                  SAVED DELIGHTS
+                </Text>
 
-              {savedEntries.map(
-                (entry) => {
-                  const dlights =
-                    (
-                      entry.delights ??
-                      []
-                    ).filter(
+                {savedEntries.map(
+                  (entry) => {
+                    const dlights =
                       (
-                        k,
-                      ): k is DelightKey =>
-                        DELIGHT_BY_KEY.has(
+                        entry.delights ??
+                        []
+                      ).filter(
+                        (
                           k,
-                        ),
-                    );
+                        ): k is DelightKey =>
+                          DELIGHT_BY_KEY.has(
+                            k,
+                          ),
+                      );
 
-                  return (
-                    <Pressable
-                      key={entry.id}
-                      onPress={() =>
-                        onSelectDate(
-                          entry.entry_date,
-                        )
-                      }
-                      style={({
-                        pressed,
-                      }) => [
-                        styles.savedRow,
-                        pressed &&
-                          styles.savedRowPressed,
-                      ]}
-                    >
-                      <View
-                        style={
-                          styles.savedDot
-                        }
-                      />
-
-                      <View
-                        style={{
-                          flex: 1,
-                        }}
-                      >
-                        <Text
-                          style={
-                            styles.savedDate
-                          }
-                        >
-                          {shortDateLabel(
+                    return (
+                      <Pressable
+                        key={entry.id}
+                        onPress={() =>
+                          onSelectDate(
                             entry.entry_date,
-                          )}
-                        </Text>
-
-                        <Text
-                          style={
-                            styles.savedDelights
-                          }
-                          numberOfLines={1}
-                        >
-                          {dlights.length >
-                          0
-                            ? dlights
-                                .map(
-                                  (k) =>
-                                    DELIGHT_BY_KEY.get(
-                                      k,
-                                    )?.emoji,
-                                )
-                                .join(
-                                  ' ',
-                                )
-                            : 'No delights'}
-                        </Text>
-
-                        {entry.content ? (
-                          <Text
-                            style={
-                              styles.savedContent
-                            }
-                            numberOfLines={1}
-                          >
-                            {entry.content}
-                          </Text>
-                        ) : null}
-                      </View>
-
-                      <Text
-                        style={[
-                          styles.savedEdit,
-                          {
-                            color:
-                              accent,
-                          },
+                          )
+                        }
+                        style={({
+                          pressed,
+                        }) => [
+                          styles.savedRow,
+                          { borderBottomColor: COLORS.divider },
+                          pressed &&
+                            styles.savedRowPressed,
                         ]}
                       >
-                        EDIT
-                      </Text>
-                    </Pressable>
-                  );
-                },
-              )}
+                        <View
+                          style={[
+                            styles.savedDot,
+                            { backgroundColor: accent },
+                          ]}
+                        />
+
+                        <View
+                          style={{
+                            flex: 1,
+                          }}
+                        >
+                          <Text
+                            style={[
+                              styles.savedDate,
+                              { color: COLORS.text },
+                            ]}
+                          >
+                            {shortDateLabel(
+                              entry.entry_date,
+                            )}
+                          </Text>
+
+                          <Text
+                            style={[
+                              styles.savedDelights,
+                              { color: COLORS.muted },
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {dlights.length >
+                            0
+                              ? dlights
+                                  .map(
+                                    (k) =>
+                                      DELIGHT_BY_KEY.get(
+                                        k,
+                                      )?.emoji,
+                                  )
+                                  .join(
+                                    ' ',
+                                  )
+                              : 'No delights'}
+                          </Text>
+
+                          {entry.content ? (
+                            <Text
+                              style={[
+                                styles.savedContent,
+                                { color: COLORS.muted },
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {entry.content}
+                            </Text>
+                          ) : null}
+                        </View>
+
+                        <Text
+                          style={[
+                            styles.savedEdit,
+                            {
+                              color: '#000000',
+                            },
+                          ]}
+                        >
+                          EDIT
+                        </Text>
+                      </Pressable>
+                    );
+                  },
+                )}
+              </View>
             </View>
           )}
         </ScrollView>
@@ -1107,89 +1125,101 @@ export default function DelightsScreen() {
             accessibilityLabel="Close info sheet"
           />
 
-          <View
-            style={
-              styles.sheetCard
-            }
-          >
+          <View style={styles.sheetCardWrapper}>
+            <View style={styles.sheetShadowBackdrop} />
             <View
-              style={
-                styles.sheetHeader
-              }
+              style={[
+                styles.sheetCard,
+                { backgroundColor: COLORS.card, borderColor: '#000000' },
+              ]}
             >
-              <Text
-                style={
-                  styles.sheetTitle
-                }
+              <View
+                style={[
+                  styles.sheetHeader,
+                  { borderBottomColor: COLORS.divider },
+                ]}
               >
-                THE 9 DELIGHTS
-              </Text>
-
-              <Pressable
-                onPress={() =>
-                  setInfoOpen(false)
-                }
-                style={
-                  styles.sheetCloseBtn
-                }
-                hitSlop={12}
-                accessibilityLabel="Close"
-              >
-                <X
-                  color={COLORS.text}
-                  size={20}
-                />
-              </Pressable>
-            </View>
-
-            <ScrollView
-              style={
-                styles.sheetScroll
-              }
-              contentContainerStyle={
-                styles.sheetScrollContent
-              }
-              showsVerticalScrollIndicator={
-                false
-              }
-            >
-              {DELIGHTS.map((d) => (
-                <View
-                  key={d.key}
-                  style={
-                    styles.sheetRow
-                  }
+                <Text
+                  style={[
+                    styles.sheetTitle,
+                    { color: COLORS.text },
+                  ]}
                 >
-                  <Text
-                    style={
-                      styles.sheetEmoji
-                    }
-                  >
-                    {d.emoji}
-                  </Text>
+                  THE 9 DELIGHTS
+                </Text>
 
+                <Pressable
+                  onPress={() =>
+                    setInfoOpen(false)
+                  }
+                  style={({ pressed }) => [
+                    styles.sheetCloseBtn,
+                    { backgroundColor: COLORS.inputBg, borderColor: '#000000' },
+                    pressed && styles.pressedBtn,
+                  ]}
+                  hitSlop={12}
+                  accessibilityLabel="Close"
+                >
+                  <X
+                    color={COLORS.text}
+                    size={20}
+                    strokeWidth={2.5}
+                  />
+                </Pressable>
+              </View>
+
+              <ScrollView
+                style={
+                  styles.sheetScroll
+                }
+                contentContainerStyle={
+                  styles.sheetScrollContent
+                }
+                showsVerticalScrollIndicator={
+                  false
+                }
+              >
+                {DELIGHTS.map((d) => (
                   <View
-                    style={{ flex: 1 }}
+                    key={d.key}
+                    style={[
+                      styles.sheetRow,
+                      { borderBottomColor: COLORS.divider },
+                    ]}
                   >
                     <Text
                       style={
-                        styles.sheetName
+                        styles.sheetEmoji
                       }
                     >
-                      {d.name}
+                      {d.emoji}
                     </Text>
 
-                    <Text
-                      style={
-                        styles.sheetDesc
-                      }
+                    <View
+                      style={{ flex: 1 }}
                     >
-                      {d.description}
-                    </Text>
+                      <Text
+                        style={[
+                          styles.sheetName,
+                          { color: COLORS.text },
+                        ]}
+                      >
+                        {d.name}
+                      </Text>
+
+                      <Text
+                        style={[
+                          styles.sheetDesc,
+                          { color: COLORS.muted },
+                        ]}
+                      >
+                        {d.description}
+                      </Text>
+                    </View>
                   </View>
-                </View>
-              ))}
-            </ScrollView>
+                ))}
+              </ScrollView>
+            </View>
           </View>
         </View>
       </Modal>
@@ -1206,63 +1236,78 @@ function makeStyles(C: Palette) {
   return StyleSheet.create({
     safe: {
       flex: 1,
-      backgroundColor: C.bg,
+    },
+
+    pressedBtn: {
+      transform: [{ translateX: 2 }, { translateY: 2 }],
     },
 
     header: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      paddingHorizontal: 16,
-      paddingTop: 28,
-      paddingVertical: 12,
-      borderBottomWidth: 1,
-      borderBottomColor: C.divider,
+      paddingHorizontal: 20,
+      paddingTop: 12,
+      paddingBottom: 10,
+      zIndex: 100,
     },
 
     backBtn: {
-      width: 38,
-      height: 38,
-      borderRadius: 19,
+      width: 40,
+      height: 40,
+      borderRadius: 8,
+      backgroundColor: '#000000',
       alignItems: 'center',
       justifyContent: 'center',
+      borderWidth: 2,
+      borderColor: '#000000',
     },
 
     headerTitle: {
       fontFamily: FONT_XB,
-      fontSize: 16,
-      letterSpacing: 1.4,
-      color: C.text,
+      fontSize: 22,
+      letterSpacing: 1,
     },
 
     menuBtn: {
-      width: 38,
-      height: 38,
+      width: 40,
+      height: 40,
       alignItems: 'center',
       justifyContent: 'center',
     },
 
-    menu: {
+    menuShadeOverlay: {
       position: 'absolute',
-      top: 76,
-      right: 14,
-      minWidth: 150,
-      borderWidth: 1,
-      borderRadius: 14,
-      paddingVertical: 6,
+      top: 55,
+      right: 20,
       zIndex: 1000,
-      elevation: 8,
-      shadowOffset: {
-        width: 0,
-        height: 4,
-      },
-      shadowOpacity: 0.18,
-      shadowRadius: 10,
+    },
+
+    menuCardWrapper: {
+      position: 'relative',
+      width: 170,
+    },
+
+    shadowBackdrop: {
+      position: 'absolute',
+      top: 4,
+      left: 4,
+      right: -4,
+      bottom: -4,
+      backgroundColor: '#000000',
+      borderRadius: 12,
+    },
+
+    menuCardBody: {
+      borderRadius: 12,
+      paddingVertical: 4,
+      borderWidth: 2.5,
+      borderColor: '#000000',
     },
 
     menuItem: {
-      paddingHorizontal: 16,
       paddingVertical: 12,
+      paddingHorizontal: 16,
     },
 
     menuItemPressed: {
@@ -1270,50 +1315,64 @@ function makeStyles(C: Palette) {
     },
 
     menuItemText: {
-      fontFamily: FONT_MEDIUM,
-      fontSize: 13.5,
-      color: C.text,
+      fontFamily: FONT_BOLD,
+      fontSize: 13,
     },
 
     scroll: {
-      padding: 16,
-      paddingBottom: 110,
+      padding: 18,
+      paddingBottom: 100,
     },
 
     dateLabel: {
-      fontFamily: FONT_SEMI,
-      fontSize: 13,
-      letterSpacing: 0.4,
+      fontFamily: FONT_XB,
+      fontSize: 14,
+      letterSpacing: 0.5,
       marginBottom: 14,
       textTransform: 'uppercase',
     },
 
-    futureNotice: {
-      backgroundColor:
-        'rgba(224,82,82,0.08)',
-      borderWidth: 1,
-      borderColor:
-        'rgba(224,82,82,0.35)',
-      borderRadius: 14,
-      paddingHorizontal: 14,
-      paddingVertical: 12,
+    cardContainer: {
+      position: 'relative',
+      width: '100%',
       marginBottom: 16,
+    },
+
+    cardShadowBackdrop: {
+      position: 'absolute',
+      top: 4,
+      left: 4,
+      right: -4,
+      bottom: -4,
+      backgroundColor: '#000000',
+      borderRadius: 16,
+    },
+
+    calendarCardWrapper: {
+      borderRadius: 16,
+      borderWidth: 3,
+      padding: 12,
+      overflow: 'hidden',
+    },
+
+    futureNotice: {
+      borderWidth: 3,
+      borderRadius: 16,
+      paddingHorizontal: 16,
+      paddingVertical: 14,
     },
 
     futureText: {
-      fontFamily: FONT_MEDIUM,
-      fontSize: 12.5,
+      fontFamily: FONT_BOLD,
+      fontSize: 13,
       lineHeight: 18,
-      color: C.danger,
+      color: '#DC2626',
     },
 
     selectorCard: {
-      backgroundColor: C.card,
-      borderWidth: 1,
-      borderColor: C.cardBorder,
+      borderWidth: 3,
       borderRadius: 16,
       padding: 16,
-      marginBottom: 16,
     },
 
     selectorHeader: {
@@ -1325,7 +1384,7 @@ function makeStyles(C: Palette) {
     },
 
     selectorEyebrow: {
-      fontFamily: FONT_BOLD,
+      fontFamily: FONT_XB,
       fontSize: 11,
       letterSpacing: 1.3,
       color: C.muted,
@@ -1335,19 +1394,16 @@ function makeStyles(C: Palette) {
     selectorHint: {
       fontFamily: FONT,
       fontSize: 12.5,
-      color: C.muted,
       lineHeight: 17,
     },
 
     gridInfoBtn: {
-      width: 28,
-      height: 28,
-      borderRadius: 14,
+      width: 32,
+      height: 32,
+      borderRadius: 10,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: C.inputBg,
-      borderWidth: 1,
-      borderColor: C.cardBorder,
+      borderWidth: 2,
       marginTop: 2,
     },
 
@@ -1366,17 +1422,11 @@ function makeStyles(C: Palette) {
     chipBtn: {
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: C.inputBg,
-      borderWidth: 1,
-      borderColor: C.cardBorder,
-      borderRadius: 14,
+      borderWidth: 2,
+      borderRadius: 12,
       paddingVertical: 14,
       paddingHorizontal: 6,
       gap: 6,
-    },
-
-    chipPressed: {
-      opacity: 0.85,
     },
 
     chipDisabled: {
@@ -1389,41 +1439,34 @@ function makeStyles(C: Palette) {
     },
 
     chipLabel: {
-      fontFamily: FONT_BOLD,
+      fontFamily: FONT_XB,
       fontSize: 9,
       letterSpacing: 0.6,
-      color: C.muted,
       textAlign: 'center',
     },
-
-    chipLabelSelected: {},
 
     selectedSummary: {
       marginTop: 14,
       paddingTop: 12,
-      borderTopWidth: 1,
-      borderTopColor: C.divider,
+      borderTopWidth: 2,
     },
 
     selectedText: {
       fontFamily: FONT_MEDIUM,
       fontSize: 13,
-      color: C.text,
       textAlign: 'center',
     },
 
     editorCard: {
-      backgroundColor: C.card,
-      borderWidth: 1,
-      borderColor: C.cardBorder,
+      borderWidth: 3,
       borderRadius: 16,
       paddingHorizontal: 16,
-      paddingVertical: 14,
+      paddingVertical: 16,
       minHeight: 160,
     },
 
     editorEyebrow: {
-      fontFamily: FONT_BOLD,
+      fontFamily: FONT_XB,
       fontSize: 11,
       letterSpacing: 1.3,
       color: C.muted,
@@ -1434,7 +1477,6 @@ function makeStyles(C: Palette) {
       fontFamily: FONT,
       fontSize: 15,
       lineHeight: 22,
-      color: C.text,
       minHeight: 100,
       padding: 0,
     },
@@ -1444,8 +1486,8 @@ function makeStyles(C: Palette) {
     },
 
     saveMsg: {
-      fontFamily: FONT_SEMI,
-      fontSize: 12.5,
+      fontFamily: FONT_XB,
+      fontSize: 13,
       marginTop: 12,
       textAlign: 'center',
     },
@@ -1453,22 +1495,18 @@ function makeStyles(C: Palette) {
     saveBtn: {
       alignItems: 'center',
       justifyContent: 'center',
-      paddingVertical: 15,
-      borderRadius: 14,
-      marginTop: 18,
+      paddingVertical: 16,
+      borderRadius: 16,
+      borderWidth: 3,
     },
 
     saveBtnDisabled: {
       opacity: 0.45,
     },
 
-    saveBtnPressed: {
-      opacity: 0.82,
-    },
-
     saveBtnText: {
-      fontFamily: FONT_BOLD,
-      fontSize: 13,
+      fontFamily: FONT_XB,
+      fontSize: 15,
       letterSpacing: 1.2,
     },
 
@@ -1479,47 +1517,68 @@ function makeStyles(C: Palette) {
       gap: 14,
     },
 
+    centerStateCard: {
+      borderWidth: 3,
+      borderRadius: 16,
+      padding: 24,
+      alignItems: 'center',
+      gap: 14,
+    },
+
     stateText: {
-      fontFamily: FONT,
-      fontSize: 13.5,
-      color: C.muted,
+      fontFamily: FONT_BOLD,
+      fontSize: 14,
       textAlign: 'center',
     },
 
     errorText: {
-      fontFamily: FONT_MEDIUM,
+      fontFamily: FONT_BOLD,
       fontSize: 13.5,
-      color: C.danger,
+      color: '#DC2626',
       textAlign: 'center',
       lineHeight: 19,
     },
 
     retryBtn: {
       paddingHorizontal: 22,
-      paddingVertical: 10,
+      paddingVertical: 12,
       borderRadius: 12,
+      borderWidth: 2,
     },
 
     retryText: {
-      fontFamily: FONT_BOLD,
-      fontSize: 12.5,
+      fontFamily: FONT_XB,
+      fontSize: 13,
     },
 
     sheetOverlay: {
       flex: 1,
       justifyContent: 'flex-end',
-      backgroundColor:
-        'rgba(0,0,0,0.6)',
+      backgroundColor: 'rgba(0,0,0,0.6)',
+      paddingHorizontal: 16,
+      paddingBottom: 24,
+    },
+
+    sheetCardWrapper: {
+      position: 'relative',
+      width: '100%',
+      maxHeight: '82%',
+    },
+
+    sheetShadowBackdrop: {
+      position: 'absolute',
+      top: 6,
+      left: 6,
+      right: -6,
+      bottom: -6,
+      backgroundColor: '#000000',
+      borderRadius: 22,
     },
 
     sheetCard: {
-      backgroundColor: C.card,
-      borderTopLeftRadius: 22,
-      borderTopRightRadius: 22,
-      borderWidth: 1,
-      borderBottomWidth: 0,
-      borderColor: C.cardBorder,
-      maxHeight: '82%',
+      borderRadius: 22,
+      borderWidth: 3,
+      overflow: 'hidden',
     },
 
     sheetHeader: {
@@ -1528,24 +1587,22 @@ function makeStyles(C: Palette) {
       justifyContent: 'space-between',
       paddingHorizontal: 18,
       paddingVertical: 16,
-      borderBottomWidth: 1,
-      borderBottomColor: C.divider,
+      borderBottomWidth: 2,
     },
 
     sheetTitle: {
       fontFamily: FONT_XB,
-      fontSize: 15,
+      fontSize: 16,
       letterSpacing: 1.3,
-      color: C.text,
     },
 
     sheetCloseBtn: {
-      width: 34,
-      height: 34,
-      borderRadius: 17,
-      backgroundColor: C.inputBg,
+      width: 36,
+      height: 36,
+      borderRadius: 10,
       alignItems: 'center',
       justifyContent: 'center',
+      borderWidth: 2,
     },
 
     sheetScroll: {
@@ -1564,7 +1621,6 @@ function makeStyles(C: Palette) {
       gap: 14,
       paddingVertical: 14,
       borderBottomWidth: 1,
-      borderBottomColor: C.divider,
     },
 
     sheetEmoji: {
@@ -1575,30 +1631,25 @@ function makeStyles(C: Palette) {
     },
 
     sheetName: {
-      fontFamily: FONT_SEMI,
+      fontFamily: FONT_XB,
       fontSize: 14,
-      color: C.text,
       marginBottom: 3,
     },
 
     sheetDesc: {
       fontFamily: FONT,
       fontSize: 12.5,
-      color: C.muted,
       lineHeight: 18,
     },
 
     savedCard: {
-      backgroundColor: C.card,
-      borderWidth: 1,
-      borderColor: C.cardBorder,
+      borderWidth: 3,
       borderRadius: 16,
       padding: 16,
-      marginTop: 22,
     },
 
     savedTitle: {
-      fontFamily: FONT_BOLD,
+      fontFamily: FONT_XB,
       fontSize: 11,
       letterSpacing: 1.3,
       color: C.muted,
@@ -1611,7 +1662,6 @@ function makeStyles(C: Palette) {
       gap: 12,
       paddingVertical: 10,
       borderBottomWidth: 1,
-      borderBottomColor: C.divider,
     },
 
     savedRowPressed: {
@@ -1619,35 +1669,33 @@ function makeStyles(C: Palette) {
     },
 
     savedDot: {
-      width: 8,
-      height: 8,
-      borderRadius: 4,
-      backgroundColor: C.muted,
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+      borderWidth: 1.5,
+      borderColor: '#000000',
     },
 
     savedDate: {
-      fontFamily: FONT_SEMI,
+      fontFamily: FONT_BOLD,
       fontSize: 12.5,
-      color: C.text,
     },
 
     savedDelights: {
-      fontFamily: FONT,
+      fontFamily: FONT_MEDIUM,
       fontSize: 11,
-      color: C.muted,
       marginTop: 2,
     },
 
     savedContent: {
       fontFamily: FONT,
       fontSize: 11,
-      color: C.muted,
       marginTop: 2,
       fontStyle: 'italic',
     },
 
     savedEdit: {
-      fontFamily: FONT_BOLD,
+      fontFamily: FONT_XB,
       fontSize: 10,
       letterSpacing: 0.8,
     },

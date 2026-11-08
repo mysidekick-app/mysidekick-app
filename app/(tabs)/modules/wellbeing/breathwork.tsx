@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   View,
@@ -26,20 +27,20 @@ import Animated, {
 
 const DARK_PALETTE = {
   bg: '#090909',
-  card: '#151515',
-  cardBorder: '#2A2A2A',
-  text: '#F4F2EE',
-  muted: '#AAA59D',
+  card: '#121212',
+  cardBorder: '#000000',
+  text: '#FFFFFF',
+  muted: '#A1A1AA',
   divider: '#262626',
 };
 
 const LIGHT_PALETTE = {
   bg: '#FBFAF8',
   card: '#FFFFFF',
-  cardBorder: '#ECE9E4',
-  text: '#27241F',
-  muted: '#8F8A82',
-  divider: '#F0EEEA',
+  cardBorder: '#000000',
+  text: '#000000',
+  muted: '#52525B',
+  divider: '#E4E4E7',
 };
 
 const FONT = 'Poppins-Regular';
@@ -73,13 +74,6 @@ const PHASE_LABELS: string[] = [
 
 /* ------------------------------------------------------------------ */
 /* Map perimeter progress (0..1) to x,y along the rectangle edges.     */
-/*                                                                    */
-/* Phase 0 (Inhale):     left edge, bottom -> top                     */
-/* Phase 1 (Hold):       top edge, left -> right                      */
-/* Phase 2 (Exhale):     right edge, top -> bottom                    */
-/* Phase 3 (Hold empty):  bottom edge, right -> left                  */
-/*                                                                    */
-/* Perimeter is divided into 4 equal segments (one per phase).        */
 /* ------------------------------------------------------------------ */
 
 function perimeterToXY(progress: number) {
@@ -118,18 +112,14 @@ function perimeterToXY(progress: number) {
 /* ================================================================== */
 
 export default function BreathworkScreen() {
-  const { isDark, accentForeground, onAccent } = useApp();
+  const { isDark, accentForeground, onAccent } = useApp() as any;
 
-  const accent = accentForeground;
+  const accent = accentForeground || '#FDE047';
+  const pageBg = accent;
   const COLORS = isDark ? DARK_PALETTE : LIGHT_PALETTE;
   const styles = makeStyles(COLORS);
 
-  /*
-   * In dark mode, the breathing elements should be white rather than
-   * using the user's accent color.
-   */
-  const breathingColor = isDark ? '#FFFFFF' : accent;
-  const resetColor = isDark ? '#AAA59D' : accent;
+  const trackBorderColor = isDark ? '#FFFFFF' : '#000000';
 
   const [running, setRunning] = useState(false);
   const [phase, setPhase] = useState<Phase>(0);
@@ -354,67 +344,62 @@ export default function BreathworkScreen() {
 
   return (
     <SafeAreaView
-      style={styles.safe}
+      style={[styles.safe, { backgroundColor: pageBg }]}
       edges={['top', 'bottom']}
     >
+      <StatusBar barStyle="dark-content" backgroundColor={pageBg} />
+
       {/* Header */}
-      <View style={[styles.header, { paddingTop: 28 }]}>
+      <View style={[styles.header, { paddingTop: 12 }]}>
         <Pressable
           onPress={() =>
             router.push('/(tabs)/modules/wellbeing')
           }
-          style={[
-            styles.backBtn,
-            { backgroundColor: accent },
-          ]}
+          style={({ pressed }) => [styles.backBtn, pressed && styles.pressedBtn]}
           hitSlop={12}
           accessibilityLabel="Go back"
         >
           <ChevronLeft
             color="#FFFFFF"
             size={22}
-            strokeWidth={2.4}
+            strokeWidth={2.8}
           />
         </Pressable>
 
-        <Text style={styles.headerTitle}>
+        <Text style={[styles.headerTitle, { color: '#000000' }]}>
           BREATHWORK
         </Text>
 
         <Pressable
           onPress={() => setMenuOpen(prev => !prev)}
-          style={styles.menuBtn}
+          style={({ pressed }) => [styles.menuBtn, pressed && styles.pressedBtn]}
           hitSlop={12}
           accessibilityLabel="Open settings menu"
         >
           <MoreVertical
-            color={COLORS.text}
-            size={22}
-            strokeWidth={2.3}
+            color="#000000"
+            size={24}
+            strokeWidth={2.5}
           />
         </Pressable>
       </View>
 
       {menuOpen ? (
-        <View
-          style={[
-            styles.menu,
-            {
-              backgroundColor: COLORS.card,
-              borderColor: COLORS.cardBorder,
-            },
-          ]}
-        >
-          <Pressable
-            onPress={openSettings}
-            style={({ pressed }) => [
-              styles.menuItem,
-              pressed && styles.menuItemPressed,
-            ]}
-          >
-            <Text style={styles.menuItemText}>
-              Settings
-            </Text>
+        <View style={styles.menuShadeOverlay}>
+          <Pressable style={{ flex: 1 }} onPress={() => setMenuOpen(false)}>
+            <View style={styles.menuCardWrapper}>
+              <View style={styles.shadowBackdrop} />
+              <View style={[styles.menuCardBody, { backgroundColor: COLORS.card }]}>
+                <Pressable
+                  onPress={openSettings}
+                  style={styles.menuItem}
+                >
+                  <Text style={[styles.menuItemText, { color: COLORS.text }]}>
+                    Settings
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
           </Pressable>
         </View>
       ) : null}
@@ -424,114 +409,106 @@ export default function BreathworkScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* Instruction */}
-        <Text style={styles.instruction}>
+        <Text style={[styles.instruction, { color: '#000000' }]}>
           Follow the dot. Inhale, hold, exhale, hold.
         </Text>
 
-        {/* Breathing rectangle */}
-        <View style={styles.rectWrap}>
-          <View
-            style={[
-              styles.rect,
+        {/* Breathing rectangle card container */}
+        <View style={styles.cardContainer}>
+          <View style={styles.cardShadowBackdrop} />
+          <View style={[styles.rectWrapCard, { backgroundColor: COLORS.card, borderColor: '#000000' }]}>
+            <View style={styles.rectWrap}>
+              <View
+                style={[
+                  styles.rect,
+                  { borderColor: trackBorderColor },
+                ]}
+              >
+                <Animated.View
+                  style={[
+                    styles.dot,
+                    {
+                      backgroundColor: accent,
+                      borderColor: '#000000',
+                      borderWidth: 2,
+                    },
+                    dotStyle,
+                  ]}
+                />
+              </View>
+            </View>
 
-              /*
-               * WHITE in black/dark mode.
-               * Accent in light mode.
-               */
-              { borderColor: breathingColor },
-            ]}
-          >
-            <Animated.View
-              style={[
-                styles.dot,
+            {/* Phase + countdown */}
+            <View style={styles.phaseRow}>
+              <Text
+                style={[
+                  styles.phaseLabel,
+                  { color: COLORS.text },
+                ]}
+              >
+                {PHASE_LABELS[phase]}
+              </Text>
 
-                /*
-                 * WHITE in black/dark mode.
-                 * Accent in light mode.
-                 */
-                {
-                  backgroundColor: breathingColor,
-                  shadowColor: breathingColor,
-                },
+              <Text style={[styles.countdown, { color: COLORS.text }]}>
+                {countdown}
+              </Text>
+            </View>
 
-                dotStyle,
-              ]}
-            />
+            {/* Cycles */}
+            <Text style={[styles.cycles, { color: COLORS.muted }]}>
+              {cycles}{' '}
+              {cycles === 1 ? 'cycle' : 'cycles'} completed
+            </Text>
           </View>
         </View>
 
-        {/* Phase + countdown */}
-        <View style={styles.phaseRow}>
-          <Text
-            style={[
-              styles.phaseLabel,
-
-              /*
-               * INHALE / HOLD / EXHALE are WHITE
-               * in black/dark mode.
-               */
-              { color: breathingColor },
-            ]}
-          >
-            {PHASE_LABELS[phase]}
-          </Text>
-
-          <Text style={styles.countdown}>
-            {countdown}
-          </Text>
-        </View>
-
-        {/* Cycles */}
-        <Text style={styles.cycles}>
-          {cycles}{' '}
-          {cycles === 1 ? 'cycle' : 'cycles'} completed
-        </Text>
-
         {/* Controls */}
         <View style={styles.controls}>
-          <Pressable
-            onPress={toggle}
-            style={({ pressed }) => [
-              styles.primaryBtn,
-              { backgroundColor: accent },
-              pressed && styles.primaryBtnPressed,
-            ]}
-            accessibilityLabel={
-              running ? 'Pause' : 'Start'
-            }
-          >
-            <Text
-              style={[
-                styles.primaryBtnText,
-                { color: onAccent },
+          <View style={styles.cardContainer}>
+            <View style={styles.cardShadowBackdrop} />
+            <Pressable
+              onPress={toggle}
+              style={({ pressed }) => [
+                styles.primaryBtn,
+                { backgroundColor: '#000000', borderColor: '#000000' },
+                pressed && styles.pressedBtn,
               ]}
+              accessibilityLabel={
+                running ? 'Pause' : 'Start'
+              }
             >
-              {running ? 'PAUSE' : 'START'}
-            </Text>
-          </Pressable>
+              <Text
+                style={[
+                  styles.primaryBtnText,
+                  { color: '#FFFFFF' },
+                ]}
+              >
+                {running ? 'PAUSE' : 'START'}
+              </Text>
+            </Pressable>
+          </View>
 
-          <Pressable
-            onPress={reset}
-            style={({ pressed }) => [
-              styles.secondaryBtn,
-              pressed && styles.secondaryBtnPressed,
-            ]}
-            accessibilityLabel="Reset"
-          >
-            <Text
-              style={[
-                styles.secondaryBtnText,
-
-                /*
-                 * RESET is LIGHT GREY in dark mode,
-                 * accent in light mode.
-                 */
-                { color: resetColor },
+          <View style={styles.cardContainer}>
+            <View style={styles.cardShadowBackdrop} />
+            <Pressable
+              onPress={reset}
+              style={({ pressed }) => [
+                styles.secondaryBtn,
+                { backgroundColor: COLORS.card, borderColor: '#000000' },
+                pressed && styles.pressedBtn,
               ]}
+              accessibilityLabel="Reset"
             >
-              RESET
-            </Text>
-          </Pressable>
+              <Text
+                style={[
+                  styles.secondaryBtnText,
+                  { color: COLORS.text },
+                ]}
+              >
+                RESET
+              </Text>
+            </Pressable>
+          </View>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -548,7 +525,10 @@ function makeStyles(C: Palette) {
   return StyleSheet.create({
     safe: {
       flex: 1,
-      backgroundColor: C.bg,
+    },
+
+    pressedBtn: {
+      transform: [{ translateX: 2 }, { translateY: 2 }],
     },
 
     /* Header */
@@ -556,100 +536,132 @@ function makeStyles(C: Palette) {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      paddingHorizontal: 16,
-      paddingTop: 28,
-      paddingVertical: 12,
-      borderBottomWidth: 1,
-      borderBottomColor: C.divider,
+      paddingHorizontal: 20,
+      paddingTop: 12,
+      paddingBottom: 10,
+      zIndex: 100,
     },
 
     backBtn: {
-      width: 38,
-      height: 38,
-      borderRadius: 19,
+      width: 40,
+      height: 40,
+      borderRadius: 8,
+      backgroundColor: '#000000',
       alignItems: 'center',
       justifyContent: 'center',
+      borderWidth: 2,
+      borderColor: '#000000',
     },
 
     headerTitle: {
       fontFamily: FONT_XB,
-      fontSize: 16,
-      letterSpacing: 1.4,
-      color: C.text,
+      fontSize: 22,
+      letterSpacing: 1,
     },
 
     menuBtn: {
-      width: 38,
-      height: 38,
+      width: 40,
+      height: 40,
       alignItems: 'center',
       justifyContent: 'center',
     },
 
-    menu: {
+    menuShadeOverlay: {
       position: 'absolute',
-      top: 76,
-      right: 14,
-      minWidth: 150,
-      borderWidth: 1,
-      borderRadius: 14,
-      paddingVertical: 6,
+      top: 55,
+      right: 20,
       zIndex: 1000,
-      elevation: 8,
-      shadowOffset: {
-        width: 0,
-        height: 4,
-      },
-      shadowOpacity: 0.18,
-      shadowRadius: 10,
+    },
+
+    menuCardWrapper: {
+      position: 'relative',
+      width: 170,
+    },
+
+    shadowBackdrop: {
+      position: 'absolute',
+      top: 4,
+      left: 4,
+      right: -4,
+      bottom: -4,
+      backgroundColor: '#000000',
+      borderRadius: 12,
+    },
+
+    menuCardBody: {
+      borderRadius: 12,
+      paddingVertical: 4,
+      borderWidth: 2.5,
+      borderColor: '#000000',
     },
 
     menuItem: {
-      paddingHorizontal: 16,
       paddingVertical: 12,
-    },
-
-    menuItemPressed: {
-      opacity: 0.6,
+      paddingHorizontal: 16,
     },
 
     menuItemText: {
-      fontFamily: FONT_MEDIUM,
-      fontSize: 13.5,
-      color: C.text,
+      fontFamily: FONT_BOLD,
+      fontSize: 13,
     },
 
     /* Scroll content */
     scrollContent: {
       flexGrow: 1,
       alignItems: 'center',
-      paddingHorizontal: 24,
-      paddingTop: 28,
-      paddingBottom: 48,
-      gap: 16,
+      paddingHorizontal: 18,
+      paddingTop: 18,
+      paddingBottom: 100,
     },
 
     /* Instruction */
     instruction: {
-      fontFamily: FONT_MEDIUM,
-      fontSize: 14.5,
+      fontFamily: FONT_BOLD,
+      fontSize: 14,
       lineHeight: 22,
-      color: C.muted,
       textAlign: 'center',
       maxWidth: 320,
+      marginBottom: 16,
+    },
+
+    cardContainer: {
+      position: 'relative',
+      width: '100%',
+      maxWidth: 400,
+      marginBottom: 16,
+    },
+
+    cardShadowBackdrop: {
+      position: 'absolute',
+      top: 4,
+      left: 4,
+      right: -4,
+      bottom: -4,
+      backgroundColor: '#000000',
+      borderRadius: 16,
+    },
+
+    rectWrapCard: {
+      width: '100%',
+      borderRadius: 16,
+      borderWidth: 3,
+      paddingVertical: 24,
+      alignItems: 'center',
+      gap: 16,
     },
 
     /* Rectangle wrapper */
     rectWrap: {
       alignItems: 'center',
       justifyContent: 'center',
-      marginTop: 8,
     },
 
     rect: {
       width: RECT_SIZE,
       height: RECT_SIZE,
-      borderWidth: 2,
+      borderWidth: 3,
       borderRadius: RECT_RADIUS,
+      backgroundColor: 'transparent',
     },
 
     dot: {
@@ -659,48 +671,40 @@ function makeStyles(C: Palette) {
       width: DOT_SIZE,
       height: DOT_SIZE,
       borderRadius: DOT_SIZE / 2,
-      shadowOpacity: 0.7,
-      shadowRadius: 10,
-      shadowOffset: {
-        width: 0,
-        height: 0,
-      },
-      elevation: 6,
     },
 
     /* Phase row */
     phaseRow: {
       alignItems: 'center',
-      marginTop: 8,
+      gap: 4,
     },
 
     phaseLabel: {
-      fontFamily: FONT_BOLD,
-      fontSize: 24,
+      fontFamily: FONT_XB,
+      fontSize: 18,
       letterSpacing: 2,
-      marginBottom: 6,
     },
 
     countdown: {
       fontFamily: FONT_XB,
-      fontSize: 44,
-      color: C.text,
+      fontSize: 40,
       fontVariant: ['tabular-nums'],
     },
 
     /* Cycles */
     cycles: {
-      fontFamily: FONT_MEDIUM,
+      fontFamily: FONT_BOLD,
       fontSize: 13,
-      color: C.muted,
       letterSpacing: 0.4,
     },
 
     /* Controls */
     controls: {
       width: '100%',
+      maxWidth: 400,
       alignItems: 'center',
-      gap: 14,
+      gap: 16,
+      marginTop: 8,
     },
 
     primaryBtn: {
@@ -708,16 +712,13 @@ function makeStyles(C: Palette) {
       alignItems: 'center',
       justifyContent: 'center',
       paddingVertical: 16,
-      borderRadius: 14,
-    },
-
-    primaryBtnPressed: {
-      opacity: 0.82,
+      borderRadius: 16,
+      borderWidth: 3,
     },
 
     primaryBtnText: {
-      fontFamily: FONT_BOLD,
-      fontSize: 13,
+      fontFamily: FONT_XB,
+      fontSize: 15,
       letterSpacing: 1.4,
     },
 
@@ -725,20 +726,14 @@ function makeStyles(C: Palette) {
       width: '100%',
       alignItems: 'center',
       justifyContent: 'center',
-      paddingVertical: 14,
-      borderRadius: 14,
-      borderWidth: 1,
-      borderColor: C.cardBorder,
-      backgroundColor: C.card,
-    },
-
-    secondaryBtnPressed: {
-      opacity: 0.7,
+      paddingVertical: 16,
+      borderRadius: 16,
+      borderWidth: 3,
     },
 
     secondaryBtnText: {
-      fontFamily: FONT_BOLD,
-      fontSize: 13,
+      fontFamily: FONT_XB,
+      fontSize: 15,
       letterSpacing: 1.4,
     },
   });

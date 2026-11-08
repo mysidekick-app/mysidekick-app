@@ -2,19 +2,24 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Platform } from 'react-native';
+import { router } from 'expo-router';
 import {
+  AlertTriangle,
   ArrowDownLeft,
   ArrowUpRight,
   Check,
+  ChevronLeft,
+  MoreVertical,
   Pencil,
   Plus,
   Trash2,
@@ -22,7 +27,6 @@ import {
   X,
 } from 'lucide-react-native';
 
-import { PageHeader } from '@/components/PageHeader';
 import { useApp } from '@/components/AppProvider';
 import { supabase } from '@/lib/supabase';
 import { CurrencyPickerModal } from '@/components/CurrencyPickerModal';
@@ -58,6 +62,7 @@ const FONT = 'Poppins-Regular';
 const FONT_MED = 'Poppins-Medium';
 const FONT_SEMI = 'Poppins-SemiBold';
 const FONT_BOLD = 'Poppins-Bold';
+const FONT_XB = 'Poppins-ExtraBold';
 
 export default function SplitScreen() {
   const {
@@ -66,7 +71,9 @@ export default function SplitScreen() {
     onAccent,
     currency_code,
     updateSettings,
-  } = useApp();
+  } = useApp() as any;
+
+  const pageBg = accentForeground || '#FDE047';
 
   const [splits, setSplits] = useState<Split[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -85,6 +92,10 @@ export default function SplitScreen() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [currencyOpen, setCurrencyOpen] = useState(false);
+  const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
+
+  // Delete target state for neo-brutalist alert
+  const [deleteSplitTarget, setDeleteSplitTarget] = useState<Split | null>(null);
 
   // Form state
   const [title, setTitle] = useState('');
@@ -98,14 +109,6 @@ export default function SplitScreen() {
 
   const fmt = (value: number) => formatMoney(value, currency_code);
 
-  /*
-   * Load splits and friends.
-   *
-   * IMPORTANT:
-   * finance_splits has user_id and RLS is based on auth.uid().
-   * We therefore get the current user first and explicitly use
-   * that user_id when reading and creating splits.
-   */
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -124,7 +127,6 @@ export default function SplitScreen() {
 
       setCurrentUserId(user.id);
 
-      // Load bills created by this user plus bills where this user is a participant.
       const {
         data: splitRows,
         error: splitErr,
@@ -162,14 +164,6 @@ export default function SplitScreen() {
         }
       }
 
-      // Use the same friendship system as Chat.
-      //
-      // Chat uses the `friendships` table with:
-      //   user_id
-      //   friend_user_id
-      //
-      // We check both sides because either person can be stored
-      // as the first user in the friendship row.
       const {
         data: friendshipRows,
         error: friendshipError,
@@ -210,8 +204,6 @@ export default function SplitScreen() {
         return;
       }
 
-      // social_profiles stores the profile owner in `user_id`.
-      // This is also how Chat loads the user's connected friends.
       const {
         data: profiles,
         error: profileErr,
@@ -308,11 +300,6 @@ export default function SplitScreen() {
     );
   };
 
-  /*
-   * Friends shown underneath the username search box.
-   *
-   * Search works against both username and display name.
-   */
   const filteredFriends = friends.filter((friend) => {
     const search = friendSearch.trim().toLowerCase();
 
@@ -452,7 +439,6 @@ export default function SplitScreen() {
           : [saved, ...current]
       );
 
-      // Only a new split sends chat messages. Editing should not spam peers.
       if (!editingSplitId) {
         for (const friend of selectedFriends) {
           const peerAmount = amountRows.find((item) => item.id === friend.id)?.amount ?? 0;
@@ -528,15 +514,18 @@ export default function SplitScreen() {
     setSavingPaidStatus(false);
   };
 
-  const remove = async (id: string) => {
-    const previous = splits;
+  const confirmDelete = async () => {
+    if (!deleteSplitTarget) return;
+    const split = deleteSplitTarget;
+    setDeleteSplitTarget(null);
 
-    setSplits((current) => current.filter((split) => split.id !== id));
+    const previous = splits;
+    setSplits((current) => current.filter((item) => item.id !== split.id));
 
     const { error: deleteError } = await supabase
       .from('finance_splits')
       .delete()
-      .eq('id', id);
+      .eq('id', split.id);
 
     if (deleteError) {
       console.error('Delete split error:', deleteError);
@@ -570,7 +559,6 @@ export default function SplitScreen() {
       return Number(split.total_amount) / Math.max(participantIds.length, 1);
     }
 
-    // Backward compatibility for older bills that did not store user IDs.
     if (userId === currentUserId && split.user_id === currentUserId) {
       return Number(split.share_amount);
     }
@@ -649,112 +637,139 @@ export default function SplitScreen() {
   const billsYouOwe = splits.filter((split) => isIncoming(split));
   const billsOwedToYou = splits.filter((split) => !isIncoming(split));
 
+  const C = isDark
+    ? {
+        cardBg: '#121212',
+        cardText: '#FFFFFF',
+        cardSubtext: '#A1A1AA',
+        trackBg: '#27272A',
+        inputBg: '#1E1E1E',
+        modalBg: '#18181B',
+      }
+    : {
+        cardBg: '#FFFFFF',
+        cardText: '#000000',
+        cardSubtext: '#52525B',
+        trackBg: '#E4E4E7',
+        inputBg: '#F4F4F5',
+        modalBg: '#FFFFFF',
+      };
+
   return (
-    <SafeAreaView
-      style={[styles.safe, isDark && styles.safeDark]}
-    >
-      <PageHeader
-        title="Split"
-        financeMode
-        onSetCurrency={() => setCurrencyOpen(true)}
-      />
+    <SafeAreaView style={[styles.safe, { backgroundColor: pageBg }]}>
+      <StatusBar barStyle="dark-content" backgroundColor={pageBg} />
+
+      {/* HEADER matching savings, debts, and transactions modules */}
+      <View style={styles.header}>
+        <Pressable
+          onPress={() => {
+            setSettingsMenuOpen(false);
+            router.push('/modules/finances');
+          }}
+          style={({ pressed }) => [styles.backButton, pressed && styles.pressedBtn]}
+          hitSlop={12}
+        >
+          <ChevronLeft color="#FFFFFF" size={22} strokeWidth={2.8} />
+        </Pressable>
+
+        <Text style={[styles.headerTitle, { color: '#000000' }]}>
+          SPLIT
+        </Text>
+
+        <Pressable
+          onPress={() => setSettingsMenuOpen((current) => !current)}
+          style={({ pressed }) => [styles.menuButton, pressed && styles.pressedBtn]}
+          hitSlop={12}
+        >
+          <MoreVertical color="#000000" size={24} strokeWidth={2.5} />
+        </Pressable>
+
+        {settingsMenuOpen && (
+          <View style={styles.menuShadeOverlay}>
+            <Pressable style={{ flex: 1 }} onPress={() => setSettingsMenuOpen(false)}>
+              <View style={styles.menuCardWrapper}>
+                <View style={styles.shadowBackdrop} />
+                <View style={[styles.menuCardBody, { backgroundColor: C.cardBg }]}>
+                  <Pressable
+                    onPress={() => {
+                      setSettingsMenuOpen(false);
+                      setCurrencyOpen(true);
+                    }}
+                    style={styles.menuItem}
+                  >
+                    <Text style={[styles.menuItemText, { color: C.cardText }]}>
+                      Currency ({currency_code})
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+            </Pressable>
+          </View>
+        )}
+      </View>
 
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        {error && <Text style={styles.error}>{error}</Text>}
+        {error && (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        )}
 
         <View style={styles.summaryRow}>
-          <View
-            style={[
-              styles.summaryCard,
-              isDark && styles.cardDark,
-              { flex: 1 },
-            ]}
-          >
-            <View
-              style={[
-                styles.summaryIcon,
-                { backgroundColor: accentForeground },
-              ]}
-            >
-              <ArrowUpRight color={onAccent} size={16} />
+          {/* You owe Summary Card */}
+          <View style={[styles.cardContainer, { flex: 1 }]}>
+            <View style={styles.cardShadowBackdrop} />
+            <View style={[styles.summaryCard, { backgroundColor: '#FFFFFF', borderColor: '#000000' }]}>
+              <View style={[styles.summaryIcon, { backgroundColor: pageBg, borderColor: '#000000' }]}>
+                <ArrowUpRight color="#000000" size={16} strokeWidth={2.5} />
+              </View>
+              <Text style={styles.summaryLabel}>You owe</Text>
+              <Text style={[styles.summaryValue, { color: '#DC2626' }]}>
+                {fmt(youOwe)}
+              </Text>
             </View>
-
-            <Text
-              style={[
-                styles.summaryLabel,
-                isDark && styles.darkMuted,
-              ]}
-            >
-              You owe
-            </Text>
-
-            <Text
-              style={[
-                styles.summaryValue,
-                { color: '#E05252' },
-              ]}
-            >
-              {fmt(youOwe)}
-            </Text>
           </View>
 
-          <View
-            style={[
-              styles.summaryCard,
-              isDark && styles.cardDark,
-              { flex: 1 },
-            ]}
-          >
-            <View
-              style={[
-                styles.summaryIcon,
-                { backgroundColor: accentForeground },
-              ]}
-            >
-              <ArrowDownLeft color={onAccent} size={16} />
+          {/* Owed to you Summary Card */}
+          <View style={[styles.cardContainer, { flex: 1 }]}>
+            <View style={styles.cardShadowBackdrop} />
+            <View style={[styles.summaryCard, { backgroundColor: '#FFFFFF', borderColor: '#000000' }]}>
+              <View style={[styles.summaryIcon, { backgroundColor: pageBg, borderColor: '#000000' }]}>
+                <ArrowDownLeft color="#000000" size={16} strokeWidth={2.5} />
+              </View>
+              <Text style={styles.summaryLabel}>Owed to you</Text>
+              <Text style={[styles.summaryValue, { color: '#16A34A' }]}>
+                {fmt(owedToYou)}
+              </Text>
             </View>
-
-            <Text
-              style={[
-                styles.summaryLabel,
-                isDark && styles.darkMuted,
-              ]}
-            >
-              Owed to you
-            </Text>
-
-            <Text
-              style={[
-                styles.summaryValue,
-                { color: '#3E9D66' },
-              ]}
-            >
-              {fmt(owedToYou)}
-            </Text>
           </View>
         </View>
 
         {loading ? (
-          <Text
-            style={[
-              styles.emptyText,
-              isDark && styles.darkMuted,
-            ]}
-          >
+          <Text style={[styles.emptyText, { color: '#000000' }]}>
             Loading...
           </Text>
         ) : splits.length === 0 ? (
           <View style={styles.empty}>
-            <Text
+            <View
               style={[
-                styles.emptyText,
-                isDark && styles.darkMuted,
+                styles.emptyIcon,
+                {
+                  backgroundColor: pageBg,
+                  borderColor: '#000000',
+                },
               ]}
             >
-              No splits yet. Tap + to split a bill with peers.
+              <UsersRound color="#000000" size={24} strokeWidth={2.5} />
+            </View>
+            <Text style={[styles.emptyTitle, { color: '#000000' }]}>
+              No splits yet
+            </Text>
+            <Text style={[styles.emptyText, { color: '#000000' }]}>
+              Tap + to split a bill with peers.
             </Text>
           </View>
         ) : (
@@ -764,22 +779,12 @@ export default function SplitScreen() {
               ['Bills owed to you', billsOwedToYou],
             ] as const).map(([sectionTitle, sectionSplits]) => (
               <View key={sectionTitle} style={styles.splitSection}>
-                <Text
-                  style={[
-                    styles.sectionTitle,
-                    isDark && styles.darkText,
-                  ]}
-                >
+                <Text style={[styles.sectionTitle, { color: C.cardText }]}>
                   {sectionTitle}
                 </Text>
 
                 {sectionSplits.length === 0 ? (
-                  <Text
-                    style={[
-                      styles.emptySectionText,
-                      isDark && styles.darkMuted,
-                    ]}
-                  >
+                  <Text style={[styles.emptySectionText, { color: C.cardSubtext }]}>
                     {sectionTitle === 'Bills you owe'
                       ? 'You have no outstanding bills.'
                       : 'No one owes you right now.'}
@@ -792,131 +797,136 @@ export default function SplitScreen() {
                       const payerName = getPayerName(split);
 
                       return (
-                        <Pressable
-                          key={split.id}
-                          onPress={() => openSplit(split)}
-                          style={[
-                            styles.splitCard,
-                            isDark && styles.cardDark,
-                          ]}
-                        >
-                          <View style={styles.splitTop}>
-                            <View
-                              style={[
-                                styles.splitIcon,
-                                { backgroundColor: accentForeground },
-                              ]}
-                            >
-                              <UsersRound
-                                color={onAccent}
-                                size={18}
-                              />
-                            </View>
-
-                            <View style={styles.splitCopy}>
-                              <Text
+                        <View key={split.id} style={styles.cardContainer}>
+                          <View style={styles.cardShadowBackdrop} />
+                          <Pressable
+                            onPress={() => openSplit(split)}
+                            style={[
+                              styles.splitCard,
+                              { backgroundColor: C.cardBg, borderColor: '#000000' },
+                            ]}
+                          >
+                            <View style={styles.splitTop}>
+                              <View
                                 style={[
-                                  styles.splitTitle,
-                                  isDark && styles.darkText,
-                                ]}
-                                numberOfLines={1}
-                              >
-                                {split.title}
-                              </Text>
-
-                              <Text
-                                style={[
-                                  styles.splitMeta,
-                                  isDark && styles.darkMuted,
+                                  styles.splitIcon,
+                                  { backgroundColor: pageBg, borderColor: '#000000' },
                                 ]}
                               >
-                                {incoming
-                                  ? `You owe ${payerName}`
-                                  : `${split.peer_names.join(', ')} owe you`}
-                              </Text>
-                            </View>
-
-                            {!incoming && (
-                              <Pressable
-                                onPress={() => remove(split.id)}
-                                hitSlop={8}
-                              >
-                                <Trash2
-                                  color={isDark ? '#5A5751' : '#C8C5BE'}
-                                  size={16}
+                                <UsersRound
+                                  color="#000000"
+                                  size={18}
+                                  strokeWidth={2.5}
                                 />
-                              </Pressable>
-                            )}
-                          </View>
+                              </View>
 
-                          <View style={styles.splitDetails}>
-                            <View style={styles.detailBlock}>
-                              <Text
-                                style={[
-                                  styles.detailLabel,
-                                  isDark && styles.darkMuted,
-                                ]}
-                              >
-                                Total
-                              </Text>
-                              <Text
-                                style={[
-                                  styles.detailValue,
-                                  isDark && styles.darkText,
-                                ]}
-                              >
-                                {fmt(Number(split.total_amount))}
-                              </Text>
+                              <View style={styles.splitCopy}>
+                                <Text
+                                  style={[
+                                    styles.splitTitle,
+                                    { color: C.cardText },
+                                  ]}
+                                  numberOfLines={1}
+                                >
+                                  {split.title}
+                                </Text>
+
+                                <Text
+                                  style={[
+                                    styles.splitMeta,
+                                    { color: C.cardSubtext },
+                                  ]}
+                                >
+                                  {incoming
+                                    ? `You owe ${payerName}`
+                                    : `${split.peer_names.join(', ')} owe you`}
+                                </Text>
+                              </View>
+
+                              {!incoming && (
+                                <Pressable
+                                  onPress={() => setDeleteSplitTarget(split)}
+                                  hitSlop={8}
+                                  style={({ pressed }) => pressed && styles.pressedBtn}
+                                >
+                                  <Trash2
+                                    color="#EF4444"
+                                    size={18}
+                                    strokeWidth={2.5}
+                                  />
+                                </Pressable>
+                              )}
                             </View>
 
-                            <View style={styles.detailBlock}>
-                              <Text
-                                style={[
-                                  styles.detailLabel,
-                                  isDark && styles.darkMuted,
-                                ]}
-                              >
-                                {incoming ? 'You owe' : 'Owed to you'}
-                              </Text>
-                              <Text
-                                style={[
-                                  styles.detailValue,
-                                  { color: incoming ? '#E05252' : '#3E9D66' },
-                                ]}
-                              >
-                                {fmt(incoming ? yourOutstanding : split.peer_names.reduce((sum, name) => sum + outstandingForName(split, name), 0))}
-                              </Text>
-                            </View>
+                            <View style={styles.splitDetails}>
+                              <View style={styles.detailBlock}>
+                                <Text
+                                  style={[
+                                    styles.detailLabel,
+                                    { color: C.cardSubtext },
+                                  ]}
+                                >
+                                  Total
+                                </Text>
+                                <Text
+                                  style={[
+                                    styles.detailValue,
+                                    { color: C.cardText },
+                                  ]}
+                                >
+                                  {fmt(Number(split.total_amount))}
+                                </Text>
+                              </View>
 
-                            <View style={styles.detailBlock}>
-                              <Text
-                                style={[
-                                  styles.detailLabel,
-                                  isDark && styles.darkMuted,
-                                ]}
-                              >
-                                Split with
-                              </Text>
-                              <View style={styles.peerNamesWrap}>
-                                {getDisplayParticipants(split).map(({ displayName, sourceName }) => {
-                                  const paid = (split.paid_names ?? []).includes(sourceName);
-                                  return (
-                                    <Text
-                                      key={`${split.id}-${sourceName}`}
-                                      style={[
-                                        styles.detailValue,
-                                        isDark && styles.darkText,
-                                        paid && styles.paidNameCrossed,
-                                      ]}
-                                    >
-                                      {displayName}
-                                    </Text>
-                                  );
-                                })}
+                              <View style={styles.detailBlock}>
+                                <Text
+                                  style={[
+                                    styles.detailLabel,
+                                    { color: C.cardSubtext },
+                                  ]}
+                                >
+                                  {incoming ? 'You owe' : 'Owed to you'}
+                                </Text>
+                                <Text
+                                  style={[
+                                    styles.detailValue,
+                                    { color: incoming ? '#DC2626' : '#16A34A' },
+                                  ]}
+                                >
+                                  {fmt(incoming ? yourOutstanding : split.peer_names.reduce((sum, name) => sum + outstandingForName(split, name), 0))}
+                                </Text>
+                              </View>
+
+                              <View style={styles.detailBlock}>
+                                <Text
+                                  style={[
+                                    styles.detailLabel,
+                                    { color: C.cardSubtext },
+                                  ]}
+                                >
+                                  Split with
+                                </Text>
+                                <View style={styles.peerNamesWrap}>
+                                  {getDisplayParticipants(split).map(({ displayName, sourceName }) => {
+                                    const paid = (split.paid_names ?? []).includes(sourceName);
+                                    return (
+                                      <Text
+                                        key={`${split.id}-${sourceName}`}
+                                        style={[
+                                          styles.detailValue,
+                                          { color: C.cardText },
+                                          paid && styles.paidNameCrossed,
+                                        ]}
+                                      >
+                                        {displayName}
+                                      </Text>
+                                    );
+                                  })}
+                                </View>
                               </View>
                             </View>
-                          </View>
-                        </Pressable>
+                          </Pressable>
+                        </View>
                       );
                     })}
                   </View>
@@ -927,570 +937,597 @@ export default function SplitScreen() {
         )}
       </ScrollView>
 
-      <Pressable
-        onPress={openNew}
-        style={[
-          styles.fab,
-          { backgroundColor: accentForeground },
-        ]}
-        hitSlop={12}
-      >
-        <Plus
-          color={onAccent}
-          size={26}
-          strokeWidth={2.6}
-        />
-      </Pressable>
+      {/* FAB */}
+      <View style={styles.fabContainer}>
+        <View style={styles.fabShadowBackdrop} />
+        <Pressable
+          onPress={openNew}
+          style={({ pressed }) => [
+            styles.fabBtn,
+            { backgroundColor: '#000000' },
+            pressed && styles.pressedBtn,
+          ]}
+          hitSlop={12}
+        >
+          <Plus
+            color="#FFFFFF"
+            size={28}
+            strokeWidth={3}
+          />
+        </Pressable>
+      </View>
 
+      {/* New/Edit Split Modal */}
       <Modal
         visible={modalOpen}
         transparent
-        animationType="slide"
+        animationType="fade"
         onRequestClose={() => setModalOpen(false)}
       >
-        <View style={styles.modalShade}>
+        <View style={styles.centeredModalShade}>
           <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
-            style={styles.keyboardModal}
+            style={styles.keyboardAvoidingViewCentered}
           >
-          <View
-            style={[
-              styles.modalCard,
-              isDark && styles.modalDark,
-            ]}
-          >
-            <View style={styles.modalTitleRow}>
-              <Text
+            <View style={styles.modalCardWrapper}>
+              <View style={styles.modalShadowBackdrop} />
+              <View
                 style={[
-                  styles.modalTitle,
-                  isDark && styles.darkText,
+                  styles.modalCardBody,
+                  { backgroundColor: C.modalBg, borderColor: '#000000' },
                 ]}
               >
-                {editingSplitId ? 'Edit split' : 'New split'}
-              </Text>
-
-              <Pressable
-                onPress={() => setModalOpen(false)}
-              >
-                <X
-                  color={
-                    isDark ? '#F4F2EE' : '#5A5751'
-                  }
-                  size={21}
-                />
-              </Pressable>
-            </View>
-
-            <ScrollView
-              showsVerticalScrollIndicator={false}
-              style={{ flex: 1 }}
-              contentContainerStyle={{
-                paddingBottom: 8,
-              }}
-              keyboardShouldPersistTaps="handled"
-              keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-            >
-              <Text
-                style={[
-                  styles.label,
-                  isDark && styles.darkMuted,
-                ]}
-              >
-                Bill title
-              </Text>
-
-              <TextInput
-                value={title}
-                onChangeText={setTitle}
-                placeholder="e.g. Dinner, Vacation"
-                placeholderTextColor="#9B978F"
-                style={[
-                  styles.input,
-                  isDark && styles.inputDark,
-                ]}
-                autoFocus
-              />
-
-              <Text
-                style={[
-                  styles.label,
-                  isDark && styles.darkMuted,
-                ]}
-              >
-                Bill amount ({currency_code})
-              </Text>
-
-              <TextInput
-                value={totalAmount}
-                onChangeText={setTotalAmount}
-                placeholder="3000"
-                placeholderTextColor="#9B978F"
-                style={[
-                  styles.input,
-                  isDark && styles.inputDark,
-                ]}
-                keyboardType="numeric"
-              />
-
-              <Text
-                style={[
-                  styles.label,
-                  isDark && styles.darkMuted,
-                ]}
-              >
-                Split method
-              </Text>
-
-              <View style={styles.chipRow}>
-                {(['equal', 'custom'] as const).map((method) => (
-                  <Pressable
-                    key={method}
-                    onPress={() => setSplitMethod(method)}
-                    style={[
-                      styles.chip,
-                      splitMethod === method && {
-                        backgroundColor: accentForeground,
-                        borderColor: accentForeground,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.chipText,
-                        isDark && styles.darkMuted,
-                        splitMethod === method && {
-                          color: onAccent,
-                          fontFamily: FONT_SEMI,
-                        },
-                      ]}
-                    >
-                      {method === 'equal' ? 'Equal' : 'Custom'}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-
-              {/* WHO OWES */}
-              <Text
-                style={[
-                  styles.label,
-                  isDark && styles.darkMuted,
-                ]}
-              >
-                Who owes?
-              </Text>
-
-              <TextInput
-                value={friendSearch}
-                onChangeText={setFriendSearch}
-                placeholder="Search friends by username"
-                placeholderTextColor="#9B978F"
-                style={[
-                  styles.input,
-                  isDark && styles.inputDark,
-                ]}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-
-              {/* Selected friends */}
-              {selectedFriends.length > 0 && (
-                <View style={styles.selectedSection}>
+                <View style={styles.modalTitleRow}>
                   <Text
                     style={[
-                      styles.selectedLabel,
-                      isDark && styles.darkMuted,
+                      styles.modalTitle,
+                      { color: C.cardText },
                     ]}
                   >
-                    Selected
+                    {editingSplitId ? 'Edit split' : 'New split'}
+                  </Text>
+
+                  <Pressable
+                    onPress={() => setModalOpen(false)}
+                    hitSlop={12}
+                  >
+                    <X
+                      color={C.cardText}
+                      size={22}
+                      strokeWidth={2.5}
+                    />
+                  </Pressable>
+                </View>
+
+                {error && (
+                  <View style={styles.errorBox}>
+                    <Text style={styles.errorText}>{error}</Text>
+                  </View>
+                )}
+
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  style={styles.modalScroll}
+                  contentContainerStyle={styles.modalScrollContent}
+                  keyboardShouldPersistTaps="handled"
+                >
+                  <Text
+                    style={[
+                      styles.label,
+                      { color: C.cardSubtext },
+                    ]}
+                  >
+                    BILL TITLE
+                  </Text>
+
+                  <TextInput
+                    value={title}
+                    onChangeText={setTitle}
+                    placeholder="e.g. Dinner, Vacation"
+                    placeholderTextColor={C.cardSubtext}
+                    style={[
+                      styles.modalTextInput,
+                      { backgroundColor: C.inputBg, color: C.cardText, borderColor: '#000000' },
+                    ]}
+                    autoFocus
+                  />
+
+                  <Text
+                    style={[
+                      styles.label,
+                      { color: C.cardSubtext },
+                    ]}
+                  >
+                    BILL AMOUNT ({currency_code})
+                  </Text>
+
+                  <TextInput
+                    value={totalAmount}
+                    onChangeText={setTotalAmount}
+                    placeholder="3000"
+                    placeholderTextColor={C.cardSubtext}
+                    style={[
+                      styles.modalTextInput,
+                      { backgroundColor: C.inputBg, color: C.cardText, borderColor: '#000000' },
+                    ]}
+                    keyboardType="numeric"
+                  />
+
+                  <Text
+                    style={[
+                      styles.label,
+                      { color: C.cardSubtext },
+                    ]}
+                  >
+                    SPLIT METHOD
                   </Text>
 
                   <View style={styles.chipRow}>
-                    {selectedFriends.map((friend) => (
-                      <Pressable
-                        key={friend.id}
-                        onPress={() =>
-                          toggleFriend(friend.id)
-                        }
-                        style={[
-                          styles.chip,
-                          {
-                            backgroundColor:
-                              accentForeground,
-                            borderColor:
-                              accentForeground,
-                          },
-                        ]}
-                      >
-                        <Text
+                    {(['equal', 'custom'] as const).map((method) => {
+                      const selected = splitMethod === method;
+                      return (
+                        <Pressable
+                          key={method}
+                          onPress={() => setSplitMethod(method)}
                           style={[
-                            styles.chipText,
+                            styles.chip,
                             {
-                              color: onAccent,
-                              fontFamily: FONT_SEMI,
+                              backgroundColor: selected ? pageBg : C.inputBg,
+                              borderColor: '#000000',
                             },
                           ]}
                         >
-                          @{friend.username}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                </View>
-              )}
-
-              {splitMethod === 'custom' && (
-                <View style={styles.customAmountsSection}>
-                  <Text
-                    style={[
-                      styles.selectedLabel,
-                      isDark && styles.darkMuted,
-                    ]}
-                  >
-                    Amount each person owes
-                  </Text>
-
-                  <View style={[styles.amountRow, isDark && styles.friendRowDark]}>
-                    <Text style={[styles.amountPerson, isDark && styles.darkText]}>Me</Text>
-                    <TextInput
-                      value={customAmounts[currentUserId ?? ''] ?? customAmounts.me ?? ''}
-                      onChangeText={(value) =>
-                        setCustomAmounts((current) => ({ ...current, [currentUserId ?? 'me']: value }))
-                      }
-                      placeholder="0"
-                      placeholderTextColor="#9B978F"
-                      keyboardType="decimal-pad"
-                      style={[styles.amountInput, isDark && styles.inputDark]}
-                    />
-                  </View>
-
-                  {selectedFriends.map((friend) => (
-                    <View
-                      key={friend.id}
-                      style={[styles.amountRow, isDark && styles.friendRowDark]}
-                    >
-                      <Text style={[styles.amountPerson, isDark && styles.darkText]}>
-                        {friend.display_name || friend.username}
-                      </Text>
-                      <TextInput
-                        value={customAmounts[friend.id] ?? ''}
-                        onChangeText={(value) =>
-                          setCustomAmounts((current) => ({ ...current, [friend.id]: value }))
-                        }
-                        placeholder="0"
-                        placeholderTextColor="#9B978F"
-                        keyboardType="decimal-pad"
-                        style={[styles.amountInput, isDark && styles.inputDark]}
-                      />
-                    </View>
-                  ))}
-
-                  <Text style={[styles.paymentHint, isDark && styles.darkMuted]}>
-                    The amounts must add up to {fmt(parseFloat(totalAmount) || 0)}.
-                  </Text>
-                </View>
-              )}
-
-              {/* Search results */}
-              <View style={styles.friendResults}>
-                {filteredFriends.length === 0 ? (
-                  <Text
-                    style={[
-                      styles.emptyFriendText,
-                      isDark && styles.darkMuted,
-                    ]}
-                  >
-                    {friendSearch.trim()
-                      ? 'No friends found.'
-                      : 'No friends yet. Add friends in chat first.'}
-                  </Text>
-                ) : (
-                  <ScrollView
-                    nestedScrollEnabled
-                    showsVerticalScrollIndicator={false}
-                    style={styles.friendResultsScroll}
-                    contentContainerStyle={styles.friendResultsContent}
-                    keyboardShouldPersistTaps="handled"
-                  >
-                    {filteredFriends.map((friend) => {
-                      const selected = whoOwes.includes(
-                        friend.id
+                          <Text
+                            style={[
+                              styles.chipText,
+                              { color: selected ? '#000000' : C.cardText },
+                            ]}
+                          >
+                            {method === 'equal' ? 'Equal' : 'Custom'}
+                          </Text>
+                        </Pressable>
                       );
+                    })}
+                  </View>
 
-                      return (
-                        <Pressable
-                          key={friend.id}
-                          onPress={() =>
-                            toggleFriend(friend.id)
-                          }
-                          style={[
-                            styles.friendRow,
-                            isDark &&
-                              styles.friendRowDark,
-                            selected &&
-                              styles.friendRowSelected,
-                          ]}
-                        >
-                          <View style={styles.friendAvatar}>
-                            <Text
-                              style={[
-                                styles.friendAvatarText,
-                                {
-                                  color: onAccent,
-                                },
-                              ]}
-                            >
-                              {(friend.display_name ||
-                                friend.username ||
-                                '?')
-                                .charAt(0)
-                                .toUpperCase()}
-                            </Text>
-                          </View>
+                  <Text
+                    style={[
+                      styles.label,
+                      { color: C.cardSubtext },
+                    ]}
+                  >
+                    WHO OWES?
+                  </Text>
 
-                          <View
-                            style={styles.friendCopy}
+                  <TextInput
+                    value={friendSearch}
+                    onChangeText={setFriendSearch}
+                    placeholder="Search friends by username"
+                    placeholderTextColor={C.cardSubtext}
+                    style={[
+                      styles.modalTextInput,
+                      { backgroundColor: C.inputBg, color: C.cardText, borderColor: '#000000' },
+                    ]}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+
+                  {selectedFriends.length > 0 && (
+                    <View style={styles.selectedSection}>
+                      <Text
+                        style={[
+                          styles.selectedLabel,
+                          { color: C.cardSubtext },
+                        ]}
+                      >
+                        SELECTED
+                      </Text>
+
+                      <View style={styles.chipRow}>
+                        {selectedFriends.map((friend) => (
+                          <Pressable
+                            key={friend.id}
+                            onPress={() => toggleFriend(friend.id)}
+                            style={[
+                              styles.chip,
+                              {
+                                backgroundColor: pageBg,
+                                borderColor: '#000000',
+                              },
+                            ]}
                           >
                             <Text
                               style={[
-                                styles.friendName,
-                                isDark &&
-                                  styles.darkText,
-                              ]}
-                            >
-                              {friend.display_name ||
-                                friend.username}
-                            </Text>
-
-                            <Text
-                              style={[
-                                styles.friendUsername,
-                                isDark &&
-                                  styles.darkMuted,
+                                styles.chipText,
+                                { color: '#000000' },
                               ]}
                             >
                               @{friend.username}
                             </Text>
-                          </View>
+                          </Pressable>
+                        ))}
+                      </View>
+                    </View>
+                  )}
 
-                          {selected && (
-                            <Text
+                  {splitMethod === 'custom' && (
+                    <View style={styles.customAmountsSection}>
+                      <Text
+                        style={[
+                          styles.selectedLabel,
+                          { color: C.cardSubtext },
+                        ]}
+                      >
+                        AMOUNT EACH PERSON OWES
+                      </Text>
+
+                      <View style={[styles.amountRow, { backgroundColor: C.inputBg, borderColor: '#000000' }]}>
+                        <Text style={[styles.amountPerson, { color: C.cardText }]}>Me</Text>
+                        <TextInput
+                          value={customAmounts[currentUserId ?? ''] ?? customAmounts.me ?? ''}
+                          onChangeText={(value) =>
+                            setCustomAmounts((current) => ({ ...current, [currentUserId ?? 'me']: value }))
+                          }
+                          placeholder="0"
+                          placeholderTextColor={C.cardSubtext}
+                          keyboardType="decimal-pad"
+                          style={[styles.amountInput, { backgroundColor: C.inputBg, color: C.cardText, borderColor: '#000000' }]}
+                        />
+                      </View>
+
+                      {selectedFriends.map((friend) => (
+                        <View
+                          key={friend.id}
+                          style={[styles.amountRow, { backgroundColor: C.inputBg, borderColor: '#000000' }]}
+                        >
+                          <Text style={[styles.amountPerson, { color: C.cardText }]} numberOfLines={1}>
+                            {friend.display_name || friend.username}
+                          </Text>
+                          <TextInput
+                            value={customAmounts[friend.id] ?? ''}
+                            onChangeText={(value) =>
+                              setCustomAmounts((current) => ({ ...current, [friend.id]: value }))
+                            }
+                            placeholder="0"
+                            placeholderTextColor={C.cardSubtext}
+                            keyboardType="decimal-pad"
+                            style={[styles.amountInput, { backgroundColor: C.inputBg, color: C.cardText, borderColor: '#000000' }]}
+                          />
+                        </View>
+                      ))}
+
+                      <Text style={[styles.paymentHint, { color: C.cardSubtext }]}>
+                        The amounts must add up to {fmt(parseFloat(totalAmount) || 0)}.
+                      </Text>
+                    </View>
+                  )}
+
+                  <View style={styles.friendResults}>
+                    {filteredFriends.length === 0 ? (
+                      <Text
+                        style={[
+                          styles.emptyFriendText,
+                          { color: C.cardSubtext },
+                        ]}
+                      >
+                        {friendSearch.trim()
+                          ? 'No friends found.'
+                          : 'No friends yet. Add friends in chat first.'}
+                      </Text>
+                    ) : (
+                      <ScrollView
+                        nestedScrollEnabled
+                        showsVerticalScrollIndicator={false}
+                        style={styles.friendResultsScroll}
+                        contentContainerStyle={styles.friendResultsContent}
+                        keyboardShouldPersistTaps="handled"
+                      >
+                        {filteredFriends.map((friend) => {
+                          const selected = whoOwes.includes(friend.id);
+
+                          return (
+                            <Pressable
+                              key={friend.id}
+                              onPress={() => toggleFriend(friend.id)}
                               style={[
-                                styles.selectedCheck,
-                                {
-                                  color:
-                                    accentForeground,
-                                },
+                                styles.friendRow,
+                                { backgroundColor: C.inputBg, borderColor: '#000000' },
+                                selected && { borderWidth: 2.5 },
                               ]}
                             >
-                              ✓
-                            </Text>
-                          )}
-                        </Pressable>
-                      );
-                    })}
-                  </ScrollView>
-                )}
-              </View>
-            </ScrollView>
+                              <View style={[styles.friendAvatar, { backgroundColor: pageBg, borderColor: '#000000' }]}>
+                                <Text
+                                  style={[
+                                    styles.friendAvatarText,
+                                    { color: '#000000' },
+                                  ]}
+                                >
+                                  {(friend.display_name ||
+                                    friend.username ||
+                                    '?')
+                                    .charAt(0)
+                                    .toUpperCase()}
+                                </Text>
+                              </View>
 
-            <Pressable
-              disabled={saving}
-              onPress={saveSplit}
-              style={[
-                styles.saveButton,
-                {
-                  backgroundColor:
-                    accentForeground,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.saveText,
-                  { color: onAccent },
-                ]}
-              >
-                {saving
-                  ? 'Saving...'
-                  : editingSplitId
-                    ? 'Save changes'
-                    : 'Save & ping peers'}
-              </Text>
-            </Pressable>
-          </View>
+                              <View style={styles.friendCopy}>
+                                <Text
+                                  style={[
+                                    styles.friendName,
+                                    { color: C.cardText },
+                                  ]}
+                                >
+                                  {friend.display_name ||
+                                    friend.username}
+                                </Text>
+
+                                <Text
+                                  style={[
+                                    styles.friendUsername,
+                                    { color: C.cardSubtext },
+                                  ]}
+                                >
+                                  @{friend.username}
+                                </Text>
+                              </View>
+
+                              {selected && (
+                                <Text style={styles.selectedCheck}>✓</Text>
+                              )}
+                            </Pressable>
+                          );
+                        })}
+                      </ScrollView>
+                    )}
+                  </View>
+                </ScrollView>
+
+                <Pressable
+                  disabled={saving}
+                  onPress={saveSplit}
+                  style={({ pressed }) => [
+                    styles.primaryBtn,
+                    { backgroundColor: '#000000' },
+                    saving && { opacity: 0.6 },
+                    pressed && styles.pressedBtn,
+                  ]}
+                >
+                  <Text style={[styles.primaryBtnText, { color: '#FFFFFF' }]}>
+                    {saving
+                      ? 'Saving...'
+                      : editingSplitId
+                        ? 'Save changes'
+                        : 'Save & ping peers'}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
           </KeyboardAvoidingView>
         </View>
       </Modal>
 
+      {/* Split Details Modal */}
       <Modal
         visible={!!selectedSplit}
         transparent
-        animationType="slide"
+        animationType="fade"
         onRequestClose={closeSplit}
       >
-        <View style={styles.modalShade}>
-          <View
-            style={[
-              styles.detailModalCard,
-              isDark && styles.modalDark,
-            ]}
-          >
-            {selectedSplit && (
-              <>
-                <View style={styles.modalTitleRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text
-                      style={[
-                        styles.modalTitle,
-                        isDark && styles.darkText,
-                      ]}
-                    >
-                      {selectedSplit.title}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.detailModalSubtitle,
-                        isDark && styles.darkMuted,
-                      ]}
-                    >
-                      {fmt(Number(selectedSplit.total_amount))} · {isIncoming(selectedSplit)
-                        ? `${getPayerName(selectedSplit)} paid`
-                        : 'You paid'}
-                    </Text>
+        <View style={styles.centeredModalShade}>
+          <View style={styles.modalCardWrapper}>
+            <View style={styles.modalShadowBackdrop} />
+            <View
+              style={[
+                styles.modalCardBody,
+                { backgroundColor: C.modalBg, borderColor: '#000000' },
+              ]}
+            >
+              {selectedSplit && (
+                <>
+                  <View style={styles.modalTitleRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={[
+                          styles.modalTitle,
+                          { color: C.cardText },
+                        ]}
+                      >
+                        {selectedSplit.title}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.detailModalSubtitle,
+                          { color: C.cardSubtext },
+                        ]}
+                      >
+                        {fmt(Number(selectedSplit.total_amount))} · {isIncoming(selectedSplit)
+                          ? `${getPayerName(selectedSplit)} paid`
+                          : 'You paid'}
+                      </Text>
+                    </View>
+
+                    <Pressable onPress={closeSplit} hitSlop={12}>
+                      <X
+                        color={C.cardText}
+                        size={22}
+                        strokeWidth={2.5}
+                      />
+                    </Pressable>
                   </View>
 
-                  <Pressable onPress={closeSplit} hitSlop={10}>
-                    <X
-                      color={isDark ? '#F4F2EE' : '#5A5751'}
-                      size={21}
-                    />
-                  </Pressable>
-                </View>
-
-                <Text
-                  style={[
-                    styles.detailModalLabel,
-                    isDark && styles.darkMuted,
-                  ]}
-                >
-                  Who has paid?
-                </Text>
-
-                <View style={styles.paidList}>
-                  {getDisplayParticipants(selectedSplit).map(({ displayName, sourceName }) => {
-                      const paid = paidNames.includes(sourceName);
-
-                      return (
-                        <Pressable
-                          key={`${selectedSplit.id}-${sourceName}`}
-                          onPress={() => {
-                            if (!selectedSplit || !isIncoming(selectedSplit)) {
-                              togglePaid(sourceName);
-                              return;
-                            }
-
-                            if (sourceName === (selectedSplit.custom_amounts?.find((item) => item.id === currentUserId)?.name || '')) {
-                              togglePaid(sourceName);
-                            }
-                          }}
-                          style={[
-                            styles.paidRow,
-                            isDark && styles.friendRowDark,
-                          ]}
-                        >
-                          <View
-                            style={[
-                              styles.checkbox,
-                              paid && {
-                                backgroundColor: accentForeground,
-                                borderColor: accentForeground,
-                              },
-                            ]}
-                          >
-                            {paid && (
-                              <Check color={onAccent} size={15} strokeWidth={3} />
-                            )}
-                          </View>
-
-                          <Text
-                            style={[
-                              styles.paidName,
-                              isDark && styles.darkText,
-                              paid && styles.paidNameCrossed,
-                            ]}
-                          >
-                            {displayName}
-                          </Text>
-
-                          <Text
-                            style={[
-                              styles.paidAmount,
-                              isDark && styles.darkMuted,
-                              paid && styles.paidNameCrossed,
-                            ]}
-                          >
-                            {fmt(
-                              getParticipantAmounts(selectedSplit)[sourceName] ??
-                                Number(selectedSplit.share_amount)
-                            )}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                </View>
-
-                <Text
-                  style={[
-                    styles.paymentHint,
-                    isDark && styles.darkMuted,
-                  ]}
-                >
-                  {isIncoming(selectedSplit) ? 'Tick your share when you have paid it.' : 'Tick someone when their share has been paid. Their name will be crossed out on the split dashboard.'}
-                </Text>
-
-                <View style={styles.detailActionRow}>
-                  {!isIncoming(selectedSplit) && (
-                    <Pressable
-                      onPress={() => editSplit(selectedSplit)}
+                  <Text
                     style={[
-                      styles.detailActionButton,
-                      styles.editActionButton,
-                      isDark && styles.editActionButtonDark,
+                      styles.label,
+                      { color: C.cardSubtext },
                     ]}
                   >
-                    <Pencil
-                      color={isDark ? '#F4F2EE' : '#5A5751'}
-                      size={16}
-                    />
+                    WHO HAS PAID?
+                  </Text>
+
+                  <ScrollView
+                    style={styles.modalScroll}
+                    contentContainerStyle={styles.modalScrollContent}
+                    showsVerticalScrollIndicator={false}
+                  >
+                    <View style={styles.paidList}>
+                      {getDisplayParticipants(selectedSplit).map(({ displayName, sourceName }) => {
+                        const paid = paidNames.includes(sourceName);
+
+                        return (
+                          <Pressable
+                            key={`${selectedSplit.id}-${sourceName}`}
+                            onPress={() => {
+                              if (!selectedSplit || !isIncoming(selectedSplit)) {
+                                togglePaid(sourceName);
+                                return;
+                              }
+
+                              if (sourceName === (selectedSplit.custom_amounts?.find((item) => item.id === currentUserId)?.name || '')) {
+                                togglePaid(sourceName);
+                              }
+                            }}
+                            style={[
+                              styles.paidRow,
+                              { backgroundColor: C.inputBg, borderColor: '#000000' },
+                            ]}
+                          >
+                            <View
+                              style={[
+                                styles.checkbox,
+                                { borderColor: '#000000' },
+                                paid && {
+                                  backgroundColor: pageBg,
+                                },
+                              ]}
+                            >
+                              {paid && (
+                                <Check color="#000000" size={14} strokeWidth={3} />
+                              )}
+                            </View>
+
+                            <Text
+                              style={[
+                                styles.paidName,
+                                { color: C.cardText },
+                                paid && styles.paidNameCrossed,
+                              ]}
+                            >
+                              {displayName}
+                            </Text>
+
+                            <Text
+                              style={[
+                                styles.paidAmount,
+                                { color: C.cardSubtext },
+                                paid && styles.paidNameCrossed,
+                              ]}
+                            >
+                              {fmt(
+                                getParticipantAmounts(selectedSplit)[sourceName] ??
+                                  Number(selectedSplit.share_amount)
+                              )}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+
                     <Text
                       style={[
-                        styles.saveText,
-                        { color: isDark ? '#F4F2EE' : '#5A5751' },
+                        styles.paymentHint,
+                        { color: C.cardSubtext },
                       ]}
                     >
-                      Edit
+                      {isIncoming(selectedSplit) ? 'Tick your share when you have paid it.' : 'Tick someone when their share has been paid. Their name will be crossed out on the split dashboard.'}
                     </Text>
-                    </Pressable>
-                  )}
+                  </ScrollView>
 
-                  <Pressable
-                    onPress={closeSplit}
-                    style={[
-                      styles.detailActionButton,
-                      { backgroundColor: accentForeground },
-                    ]}
-                  >
-                    <Text
-                      style={[styles.saveText, { color: onAccent }]}
+                  <View style={styles.detailActionRow}>
+                    {!isIncoming(selectedSplit) && (
+                      <Pressable
+                        onPress={() => editSplit(selectedSplit)}
+                        style={({ pressed }) => [
+                          styles.detailActionButton,
+                          { backgroundColor: C.inputBg, borderColor: '#000000' },
+                          pressed && styles.pressedBtn,
+                        ]}
+                      >
+                        <Pencil
+                          color={C.cardText}
+                          size={16}
+                          strokeWidth={2.5}
+                        />
+                        <Text style={[styles.detailActionText, { color: C.cardText }]}>
+                          Edit
+                        </Text>
+                      </Pressable>
+                    )}
+
+                    <Pressable
+                      onPress={closeSplit}
+                      style={({ pressed }) => [
+                        styles.detailActionButton,
+                        { backgroundColor: '#000000', borderColor: '#000000', flex: 1 },
+                        pressed && styles.pressedBtn,
+                      ]}
                     >
-                      Done
-                    </Text>
-                  </Pressable>
+                      <Text style={[styles.detailActionText, { color: '#FFFFFF' }]}>
+                        Done
+                      </Text>
+                    </Pressable>
+                  </View>
+                </>
+              )}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Neo-brutalist Delete Alert Modal */}
+      <Modal
+        visible={!!deleteSplitTarget}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDeleteSplitTarget(null)}
+      >
+        <View style={styles.alertShade}>
+          <View style={styles.alertCardWrapper}>
+            <View style={styles.alertShadowBackdrop} />
+            <View style={[styles.alertCardBody, { backgroundColor: C.modalBg }]}>
+              <View style={styles.alertHeaderRow}>
+                <View style={styles.alertIconBadge}>
+                  <AlertTriangle color="#000000" size={20} strokeWidth={2.5} />
                 </View>
-              </>
-            )}
+                <Text style={[styles.alertTitle, { color: C.cardText }]}>Delete Split?</Text>
+              </View>
+
+              <Text style={[styles.alertMessage, { color: C.cardSubtext }]}>
+                Are you sure you want to delete "{deleteSplitTarget?.title}"? This action cannot be undone.
+              </Text>
+
+              <View style={styles.alertActionsRow}>
+                <Pressable
+                  onPress={() => setDeleteSplitTarget(null)}
+                  style={({ pressed }) => [
+                    styles.alertCancelBtn,
+                    { backgroundColor: C.inputBg, borderColor: '#000000' },
+                    pressed && styles.pressedBtn,
+                  ]}
+                >
+                  <Text style={[styles.alertCancelText, { color: C.cardText }]}>Cancel</Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={confirmDelete}
+                  style={({ pressed }) => [
+                    styles.alertDeleteBtn,
+                    pressed && styles.pressedBtn,
+                  ]}
+                >
+                  <Text style={styles.alertDeleteText}>Delete</Text>
+                </Pressable>
+              </View>
+            </View>
           </View>
         </View>
       </Modal>
@@ -1502,7 +1539,7 @@ export default function SplitScreen() {
           updateSettings({ currency_code: code })
         }
         onClose={() => setCurrencyOpen(false)}
-        accent={accentForeground}
+        accent={pageBg}
         onAccent={onAccent}
         isDark={isDark}
       />
@@ -1513,101 +1550,177 @@ export default function SplitScreen() {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: '#FBFAF8',
-  },
-
-  safeDark: {
-    backgroundColor: '#090909',
   },
 
   content: {
-    padding: 16,
-    paddingBottom: 90,
+    padding: 18,
+    paddingBottom: 100,
   },
 
-  darkText: {
-    color: '#F4F2EE',
+  pressedBtn: {
+    transform: [{ translateX: 2 }, { translateY: 2 }],
   },
 
-  darkMuted: {
-    color: '#AAA59D',
-  },
-
-  error: {
-    fontFamily: FONT_MED,
-    color: '#C53A2F',
-    fontSize: 13,
-    marginBottom: 10,
-  },
-
-  summaryRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 16,
-  },
-
-  summaryCard: {
-    backgroundColor: '#FFF',
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: '#ECE9E4',
-    padding: 16,
-    gap: 6,
-  },
-
-  cardDark: {
-    backgroundColor: '#111',
-    borderColor: '#2A2A2A',
-  },
-
-  summaryIcon: {
-    width: 32,
-    height: 32,
+  errorBox: {
+    backgroundColor: '#FEE2E2',
     borderRadius: 10,
+    padding: 10,
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: '#000000',
+  },
+
+  errorText: {
+    fontFamily: FONT_BOLD,
+    color: '#DC2626',
+    fontSize: 13,
+    textAlign: 'center',
+  },
+
+  /* HEADER */
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 10,
+    zIndex: 100,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: '#000000',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#000000',
+  },
+  headerTitle: {
+    fontFamily: FONT_XB,
+    fontSize: 22,
+    letterSpacing: 1,
+    color: '#000000',
+  },
+  menuButton: {
+    width: 40,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
+  /* MENU DROPDOWN */
+  menuShadeOverlay: {
+    position: 'absolute',
+    top: 55,
+    right: 20,
+    zIndex: 1000,
+  },
+  menuCardWrapper: {
+    position: 'relative',
+    width: 170,
+  },
+  shadowBackdrop: {
+    position: 'absolute',
+    top: 4,
+    left: 4,
+    right: -4,
+    bottom: -4,
+    backgroundColor: '#000000',
+    borderRadius: 12,
+  },
+  menuCardBody: {
+    borderRadius: 12,
+    paddingVertical: 4,
+    borderWidth: 2.5,
+    borderColor: '#000000',
+  },
+  menuItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  menuItemText: {
+    fontFamily: FONT_BOLD,
+    fontSize: 13,
+  },
+
+  cardContainer: {
+    position: 'relative',
+    width: '100%',
+    marginBottom: 16,
+  },
+  cardShadowBackdrop: {
+    position: 'absolute',
+    top: 4,
+    left: 4,
+    right: -4,
+    bottom: -4,
+    backgroundColor: '#000000',
+    borderRadius: 16,
+  },
+
+  summaryRow: {
+    flexDirection: 'row',
+    gap: 16,
+    marginBottom: 0,
+  },
+
+  summaryCard: {
+    borderRadius: 16,
+    borderWidth: 3,
+    padding: 16,
+    gap: 6,
+  },
+
+  summaryIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+  },
+
   summaryLabel: {
-    fontFamily: FONT_SEMI,
+    fontFamily: FONT_XB,
     fontSize: 12,
-    color: '#77746E',
+    letterSpacing: 0.5,
+    color: '#52525B',
   },
 
   summaryValue: {
-    fontFamily: FONT_BOLD,
-    fontSize: 18,
+    fontFamily: FONT_XB,
+    fontSize: 22,
+    marginTop: 2,
   },
 
   splitSections: {
-    gap: 24,
+    gap: 20,
   },
 
   splitSection: {
-    gap: 10,
-  },
-
-  sectionTitle: {
-    fontFamily: FONT_SEMI,
-    fontSize: 14,
-    color: '#27241F',
-  },
-
-  emptySectionText: {
-    fontFamily: FONT,
-    fontSize: 12,
-    color: '#908B83',
-  },
-
-  splitList: {
     gap: 12,
   },
 
+  sectionTitle: {
+    fontFamily: FONT_XB,
+    fontSize: 16,
+    letterSpacing: 0.5,
+  },
+
+  emptySectionText: {
+    fontFamily: FONT_BOLD,
+    fontSize: 13,
+  },
+
+  splitList: {
+    gap: 16,
+  },
+
   splitCard: {
-    backgroundColor: '#FFF',
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: '#ECE9E4',
+    borderRadius: 16,
+    borderWidth: 3,
     padding: 16,
   },
 
@@ -1619,28 +1732,27 @@ const styles = StyleSheet.create({
   },
 
   splitIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
+    width: 40,
+    height: 40,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 2,
   },
 
   splitCopy: {
     flex: 1,
-    gap: 3,
+    gap: 2,
   },
 
   splitTitle: {
-    fontFamily: FONT_MED,
-    fontSize: 15,
-    color: '#27241F',
+    fontFamily: FONT_XB,
+    fontSize: 16,
   },
 
   splitMeta: {
-    fontFamily: FONT,
-    fontSize: 12,
-    color: '#908B83',
+    fontFamily: FONT_MED,
+    fontSize: 11,
   },
 
   splitDetails: {
@@ -1654,111 +1766,153 @@ const styles = StyleSheet.create({
   },
 
   detailLabel: {
-    fontFamily: FONT,
+    fontFamily: FONT_XB,
     fontSize: 10,
-    color: '#908B83',
+    letterSpacing: 0.5,
     marginBottom: 3,
   },
 
   detailValue: {
-    fontFamily: FONT_SEMI,
+    fontFamily: FONT_BOLD,
     fontSize: 13,
-    color: '#27241F',
   },
 
   empty: {
-    paddingVertical: 40,
+    paddingVertical: 50,
     alignItems: 'center',
+    paddingHorizontal: 25,
+  },
+
+  emptyIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+    borderWidth: 2.5,
+  },
+
+  emptyTitle: {
+    fontFamily: FONT_XB,
+    fontSize: 18,
+    marginBottom: 6,
   },
 
   emptyText: {
-    fontFamily: FONT,
+    fontFamily: FONT_BOLD,
     fontSize: 14,
-    color: '#908B83',
     textAlign: 'center',
   },
 
-  fab: {
+  fabContainer: {
     position: 'absolute',
-    bottom: 30,
+    bottom: 28,
     alignSelf: 'center',
+    width: 60,
+    height: 60,
+  },
+
+  fabShadowBackdrop: {
+    position: 'absolute',
+    top: 4,
+    left: 4,
+    width: 56,
+    height: 56,
+    backgroundColor: '#000000',
+    borderRadius: 28,
+  },
+
+  fabBtn: {
     width: 56,
     height: 56,
     borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
+    borderWidth: 2,
   },
 
-  modalShade: {
+  centeredModalShade: {
     flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.45)',
-  },
-
-  keyboardModal: {
-    flex: 1,
-    width: '100%',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
     alignItems: 'center',
-    justifyContent: 'flex-end',
+    paddingHorizontal: 16,
   },
 
-  modalCard: {
-    backgroundColor: '#FFF',
+  keyboardAvoidingViewCentered: {
     width: '100%',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 22,
-    paddingBottom: 18,
-    height: '88%',
-    maxHeight: '92%',
+    maxHeight: '85%',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 
-  modalDark: {
-    backgroundColor: '#161616',
+  modalCardWrapper: {
+    position: 'relative',
+    width: '100%',
+  },
+
+  modalShadowBackdrop: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    right: -6,
+    bottom: -6,
+    backgroundColor: '#000000',
+    borderRadius: 20,
+  },
+
+  modalCardBody: {
+    borderRadius: 20,
+    padding: 20,
+    maxHeight: 580,
+    alignItems: 'flex-start',
+    borderWidth: 3,
   },
 
   modalTitleRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    justifyContent: 'space-between',
+    width: '100%',
+    marginBottom: 12,
   },
 
   modalTitle: {
-    fontFamily: FONT_BOLD,
-    fontSize: 18,
-    color: '#27241F',
+    fontFamily: FONT_XB,
+    fontSize: 20,
+    flex: 1,
+    textAlign: 'left',
+  },
+
+  modalScroll: {
+    flexGrow: 0,
+    flexShrink: 1,
+    width: '100%',
+  },
+
+  modalScrollContent: {
+    paddingBottom: 16,
   },
 
   label: {
-    fontFamily: FONT_MED,
-    fontSize: 13,
-    color: '#77746E',
-    marginTop: 14,
+    fontFamily: FONT_XB,
+    fontSize: 11,
+    letterSpacing: 0.5,
     marginBottom: 6,
+    marginTop: 10,
+    textAlign: 'left',
   },
 
-  input: {
-    borderWidth: 1,
-    borderColor: '#E1DED8',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    fontFamily: FONT,
-    fontSize: 15,
-    color: '#282724',
-    backgroundColor: '#FFF',
-  },
-
-  inputDark: {
-    backgroundColor: '#1E1E1E',
-    borderColor: '#363636',
-    color: '#F4F2EE',
+  modalTextInput: {
+    fontFamily: FONT_MED,
+    fontSize: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    textAlign: 'left',
+    width: '100%',
+    borderWidth: 2,
   },
 
   chipRow: {
@@ -1770,83 +1924,65 @@ const styles = StyleSheet.create({
   chip: {
     paddingHorizontal: 14,
     paddingVertical: 8,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#E2DFD9',
-    backgroundColor: '#FFF',
+    borderRadius: 8,
+    borderWidth: 2,
   },
 
   chipText: {
-    fontFamily: FONT,
-    fontSize: 13,
-    color: '#77746E',
+    fontFamily: FONT_BOLD,
+    fontSize: 12,
   },
 
-  /*
-   * Selected friend section
-   */
   selectedSection: {
     marginTop: 12,
+    width: '100%',
   },
 
   selectedLabel: {
-    fontFamily: FONT_MED,
+    fontFamily: FONT_XB,
     fontSize: 11,
-    color: '#77746E',
+    letterSpacing: 0.5,
     marginBottom: 7,
   },
 
-  /*
-   * Friend search results
-   */
   friendResults: {
     marginTop: 10,
-    maxHeight: 308,
+    maxHeight: 220,
+    width: '100%',
   },
 
   friendResultsScroll: {
     flexGrow: 0,
-    maxHeight: 308,
+    maxHeight: 220,
   },
 
   friendResultsContent: {
-    gap: 6,
+    gap: 8,
   },
 
   friendRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 58,
+    minHeight: 52,
     paddingHorizontal: 10,
     paddingVertical: 8,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#ECE9E4',
-    backgroundColor: '#FFF',
-  },
-
-  friendRowDark: {
-    backgroundColor: '#1E1E1E',
-    borderColor: '#363636',
-  },
-
-  friendRowSelected: {
-    borderColor: '#D8D4CC',
+    borderRadius: 10,
+    borderWidth: 2,
   },
 
   friendAvatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 36,
+    height: 36,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#77746E',
     marginRight: 11,
+    borderWidth: 2,
   },
 
   friendAvatarText: {
-    fontFamily: FONT_SEMI,
-    fontSize: 15,
+    fontFamily: FONT_XB,
+    fontSize: 14,
   },
 
   friendCopy: {
@@ -1855,77 +1991,55 @@ const styles = StyleSheet.create({
   },
 
   friendName: {
-    fontFamily: FONT_MED,
+    fontFamily: FONT_BOLD,
     fontSize: 13,
-    color: '#27241F',
   },
 
   friendUsername: {
-    fontFamily: FONT,
+    fontFamily: FONT_MED,
     fontSize: 11,
-    color: '#908B83',
   },
 
   selectedCheck: {
-    fontFamily: FONT_BOLD,
-    fontSize: 19,
+    fontFamily: FONT_XB,
+    fontSize: 18,
     marginRight: 5,
+    color: '#000000',
   },
 
   emptyFriendText: {
-    fontFamily: FONT,
+    fontFamily: FONT_BOLD,
     fontSize: 13,
-    color: '#908B83',
     textAlign: 'center',
     paddingVertical: 12,
   },
 
-  detailModalCard: {
-    backgroundColor: '#FFF',
-    width: '100%',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    padding: 22,
-    paddingBottom: 18,
-    maxHeight: '78%',
-  },
-
   detailModalSubtitle: {
-    fontFamily: FONT,
+    fontFamily: FONT_MED,
     fontSize: 12,
     marginTop: 3,
-    color: '#908B83',
-  },
-
-  detailModalLabel: {
-    fontFamily: FONT_MED,
-    fontSize: 13,
-    color: '#77746E',
-    marginTop: 8,
-    marginBottom: 8,
   },
 
   paidList: {
     gap: 8,
+    width: '100%',
   },
 
   paidRow: {
-    minHeight: 54,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#ECE9E4',
-    backgroundColor: '#FFF',
+    minHeight: 50,
+    borderRadius: 10,
+    borderWidth: 2,
     paddingHorizontal: 12,
     flexDirection: 'row',
     alignItems: 'center',
+    width: '100%',
   },
 
   checkbox: {
     width: 22,
     height: 22,
     borderRadius: 6,
-    borderWidth: 1.5,
-    borderColor: '#C8C5BE',
+    borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 11,
@@ -1933,15 +2047,13 @@ const styles = StyleSheet.create({
 
   paidName: {
     flex: 1,
-    fontFamily: FONT_MED,
+    fontFamily: FONT_BOLD,
     fontSize: 14,
-    color: '#27241F',
   },
 
   paidAmount: {
-    fontFamily: FONT_SEMI,
+    fontFamily: FONT_BOLD,
     fontSize: 13,
-    color: '#77746E',
   },
 
   paidNameCrossed: {
@@ -1950,11 +2062,11 @@ const styles = StyleSheet.create({
   },
 
   paymentHint: {
-    fontFamily: FONT,
+    fontFamily: FONT_MED,
     fontSize: 11,
     lineHeight: 16,
-    color: '#908B83',
     marginTop: 12,
+    textAlign: 'left',
   },
 
   peerNamesWrap: {
@@ -1964,77 +2076,159 @@ const styles = StyleSheet.create({
   customAmountsSection: {
     marginTop: 12,
     gap: 8,
+    width: '100%',
   },
 
   amountRow: {
-    minHeight: 52,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#ECE9E4',
-    backgroundColor: '#FFF',
+    minHeight: 48,
+    borderRadius: 10,
+    borderWidth: 2,
     paddingHorizontal: 12,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    width: '100%',
   },
 
   amountPerson: {
     flex: 1,
-    fontFamily: FONT_MED,
+    fontFamily: FONT_BOLD,
     fontSize: 13,
-    color: '#27241F',
   },
 
   amountInput: {
-    width: 105,
-    borderWidth: 1,
-    borderColor: '#E1DED8',
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    fontFamily: FONT,
-    fontSize: 14,
-    color: '#282724',
-    backgroundColor: '#FFF',
+    width: 100,
+    borderWidth: 2,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    fontFamily: FONT_BOLD,
+    fontSize: 13,
     textAlign: 'right',
   },
 
   detailActionRow: {
     flexDirection: 'row',
     gap: 10,
-    marginTop: 22,
+    marginTop: 16,
+    width: '100%',
   },
 
   detailActionButton: {
     flex: 1,
-    minHeight: 48,
-    borderRadius: 14,
+    minHeight: 46,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
-    gap: 7,
+    gap: 6,
+    borderWidth: 2,
   },
 
-  editActionButton: {
-    backgroundColor: '#F3F1ED',
-    borderWidth: 1,
-    borderColor: '#E1DED8',
+  detailActionText: {
+    fontFamily: FONT_BOLD,
+    fontSize: 14,
   },
 
-  editActionButtonDark: {
-    backgroundColor: '#222',
-    borderColor: '#363636',
-  },
-
-  saveButton: {
-    borderRadius: 14,
+  primaryBtn: {
+    borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
-    marginTop: 22,
+    width: '100%',
+    marginTop: 14,
+    borderWidth: 2,
+    borderColor: '#000000',
   },
 
-  saveText: {
-    fontFamily: FONT_SEMI,
+  primaryBtnText: {
+    fontFamily: FONT_BOLD,
     fontSize: 15,
+  },
+
+  /* DELETE ALERT MODAL */
+  alertShade: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  alertCardWrapper: {
+    position: 'relative',
+    width: '100%',
+  },
+  alertShadowBackdrop: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    right: -6,
+    bottom: -6,
+    backgroundColor: '#000000',
+    borderRadius: 18,
+  },
+  alertCardBody: {
+    borderRadius: 18,
+    padding: 20,
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: '#000000',
+  },
+  alertHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    marginBottom: 10,
+  },
+  alertIconBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#FDE047',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#000000',
+  },
+  alertTitle: {
+    fontFamily: FONT_XB,
+    fontSize: 18,
+  },
+  alertMessage: {
+    fontFamily: FONT_MED,
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: 'center',
+    marginBottom: 18,
+  },
+  alertActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    width: '100%',
+  },
+  alertCancelBtn: {
+    flex: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderWidth: 2,
+  },
+  alertCancelText: {
+    fontFamily: FONT_BOLD,
+    fontSize: 13,
+  },
+  alertDeleteBtn: {
+    flex: 1,
+    backgroundColor: '#EF4444',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#000000',
+  },
+  alertDeleteText: {
+    fontFamily: FONT_BOLD,
+    color: '#FFFFFF',
+    fontSize: 13,
   },
 });

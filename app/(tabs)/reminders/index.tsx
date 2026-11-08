@@ -1,40 +1,35 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-
 import {
-  Modal,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
-
-import { SafeAreaView } from 'react-native-safe-area-context';
-
-import {
+  AlertTriangle,
   Bell,
-  MoreVertical,
   CalendarDays,
   Check,
   ChevronLeft,
   ChevronRight,
+  MoreVertical,
   Plus,
   Repeat,
   Trash2,
   X,
 } from 'lucide-react-native';
-
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 
 import { useApp } from '@/components/AppProvider';
-
 import { DatePickerInput } from '@/components/DatePickerInput';
-
 import { TimePickerInput } from '@/components/TimePickerInput';
-
 import { supabase } from '@/lib/supabase';
 
 type Reminder = {
@@ -43,6 +38,8 @@ type Reminder = {
   notes: string | null;
   due_date: string;
   time: string | null;
+  repeat_end_date: string | null;
+  repeat_end_time: string | null;
   category: string;
   repeat: string;
   repeat_interval: number;
@@ -52,18 +49,19 @@ type Reminder = {
 
 type RepeatType =
   | 'none'
+  | 'hourly'
   | 'daily'
   | 'weekly'
   | 'monthly'
   | 'annually'
   | 'custom';
 
-type RepeatUnit = 'day' | 'week' | 'month' | 'year';
-
+type RepeatUnit = 'minute' | 'hour' | 'day' | 'week' | 'month' | 'year';
 type FilterTag = 'all' | 'completed' | 'incomplete';
 
 const REPEAT_OPTIONS: { key: RepeatType; label: string }[] = [
   { key: 'none', label: 'Does not repeat' },
+  { key: 'hourly', label: 'Hourly' },
   { key: 'daily', label: 'Daily' },
   { key: 'weekly', label: 'Weekly' },
   { key: 'monthly', label: 'Monthly' },
@@ -72,6 +70,8 @@ const REPEAT_OPTIONS: { key: RepeatType; label: string }[] = [
 ];
 
 const REPEAT_UNITS: { key: RepeatUnit; label: string }[] = [
+  { key: 'minute', label: 'minutes' },
+  { key: 'hour', label: 'hours' },
   { key: 'day', label: 'days' },
   { key: 'week', label: 'weeks' },
   { key: 'month', label: 'months' },
@@ -82,13 +82,11 @@ const CATEGORIES = ['General', 'Work', 'Personal'];
 
 const FONT = 'Poppins-Regular';
 const FONT_MED = 'Poppins-Medium';
-const FONT_SEMI = 'Poppins-SemiBold';
 const FONT_BOLD = 'Poppins-Bold';
 const FONT_XB = 'Poppins-ExtraBold';
 
 const todayStr = () => {
   const d = new Date();
-
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
     2,
     '0',
@@ -121,44 +119,57 @@ const addInterval = (
   return formatDate(d);
 };
 
-const advanceReminder = (r: Reminder): string => {
+const advanceReminder = (r: Reminder): { due_date: string; time: string } => {
+  const currentTime = r.time || '00:00';
+
+  // Minute/hour repeats must advance the actual date-time, not just the date.
+  if (r.repeat === 'hourly' || (r.repeat === 'custom' && (r.repeat_unit === 'minute' || r.repeat_unit === 'hour'))) {
+    const next = new Date(`${r.due_date}T${currentTime}:00`);
+    if (r.repeat === 'hourly') {
+      next.setHours(next.getHours() + 1);
+    } else if (r.repeat_unit === 'minute') {
+      next.setMinutes(next.getMinutes() + Math.max(1, r.repeat_interval));
+    } else {
+      next.setHours(next.getHours() + Math.max(1, r.repeat_interval));
+    }
+    return {
+      due_date: formatDate(next),
+      time: `${String(next.getHours()).padStart(2, '0')}:${String(next.getMinutes()).padStart(2, '0')}`,
+    };
+  }
+
   switch (r.repeat) {
     case 'daily':
-      return addInterval(r.due_date, 'day', 1);
-
+      return { due_date: addInterval(r.due_date, 'day', 1), time: currentTime };
     case 'weekly':
-      return addInterval(r.due_date, 'week', 1);
-
+      return { due_date: addInterval(r.due_date, 'week', 1), time: currentTime };
     case 'monthly':
-      return addInterval(r.due_date, 'month', 1);
-
+      return { due_date: addInterval(r.due_date, 'month', 1), time: currentTime };
     case 'annually':
-      return addInterval(r.due_date, 'year', 1);
-
+      return { due_date: addInterval(r.due_date, 'year', 1), time: currentTime };
     case 'custom':
-      return addInterval(
-        r.due_date,
-        (r.repeat_unit ?? 'day') as RepeatUnit,
-        Math.max(1, r.repeat_interval),
-      );
-
+      return {
+        due_date: addInterval(
+          r.due_date,
+          (r.repeat_unit ?? 'day') as RepeatUnit,
+          Math.max(1, r.repeat_interval),
+        ),
+        time: currentTime,
+      };
     default:
-      return r.due_date;
+      return { due_date: r.due_date, time: currentTime };
   }
 };
 
 const prettyDate = (dateStr: string) => {
   const d = new Date(`${dateStr}T12:00:00`);
-
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
   const cmp = new Date(d);
   cmp.setHours(0, 0, 0, 0);
 
-  const diff = Math.round(
-    (cmp.getTime() - today.getTime()) / 86400000,
-  );
+  const diff = Math.round((cmp.getTime() - today.getTime()) / 86400000);
 
   if (diff === 0) return 'Today';
   if (diff === 1) return 'Tomorrow';
@@ -174,12 +185,9 @@ const prettyDate = (dateStr: string) => {
 
 const prettyTime = (time: string | null) => {
   if (!time) return '';
-
   const [h, m] = time.split(':').map(Number);
-
   const period = h >= 12 ? 'PM' : 'AM';
   const hour12 = h % 12 === 0 ? 12 : h % 12;
-
   return `${hour12}:${String(m).padStart(2, '0')} ${period}`;
 };
 
@@ -187,20 +195,16 @@ const repeatLabel = (r: Reminder): string => {
   switch (r.repeat) {
     case 'none':
       return '';
-
+    case 'hourly':
+      return 'Hourly';
     case 'custom': {
       const unit = r.repeat_unit ?? 'day';
-
       const unitLabel =
         REPEAT_UNITS.find((u) => u.key === unit)?.label ?? 'days';
-
       return `Every ${r.repeat_interval} ${unitLabel}`;
     }
-
     default:
-      return (
-        REPEAT_OPTIONS.find((o) => o.key === r.repeat)?.label ?? ''
-      );
+      return REPEAT_OPTIONS.find((o) => o.key === r.repeat)?.label ?? '';
   }
 };
 
@@ -212,10 +216,10 @@ type Group = {
 
 const groupReminders = (reminders: Reminder[]): Group[] => {
   const today = todayStr();
-
   const upcoming: Reminder[] = [];
   const overdue: Reminder[] = [];
   const later: Reminder[] = [];
+
   for (const r of reminders) {
     if (r.completed) {
       continue;
@@ -230,9 +234,7 @@ const groupReminders = (reminders: Reminder[]): Group[] => {
 
   const byDate = (a: Reminder, b: Reminder) => {
     const d = a.due_date.localeCompare(b.due_date);
-
     if (d !== 0) return d;
-
     return (a.time ?? '99:99').localeCompare(b.time ?? '99:99');
   };
 
@@ -255,10 +257,24 @@ const groupReminders = (reminders: Reminder[]): Group[] => {
   ].filter((g) => g.items.length > 0);
 };
 
-export default function RemindersScreen() {
-  const { accentForeground, isDark, onAccent } = useApp();
+function isAccentBlack(color?: string): boolean {
+  if (!color) return false;
+  const normalized = color.trim().toLowerCase();
+  return (
+    normalized === '#000000' ||
+    normalized === '#000' ||
+    normalized === 'black' ||
+    normalized === 'rgb(0,0,0)' ||
+    normalized === 'rgba(0,0,0,1)'
+  );
+}
 
-  const accent = accentForeground;
+export default function RemindersScreen() {
+  const { accentForeground, accentColor: rawAccent, isDark, onAccent } = useApp() as any;
+
+  const pageBg = rawAccent || accentForeground || '#FDE047';
+  const isAccentPureBlack = isAccentBlack(pageBg);
+  const headerTextColor = isAccentPureBlack ? '#FFFFFF' : '#000000';
 
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -267,6 +283,7 @@ export default function RemindersScreen() {
   const [modalOpen, setModalOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState<Reminder | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<Reminder | null>(null);
 
   const [filter, setFilter] = useState<FilterTag>('all');
 
@@ -274,12 +291,13 @@ export default function RemindersScreen() {
   const [notes, setNotes] = useState('');
   const [dueDate, setDueDate] = useState(todayStr());
   const [time, setTime] = useState('');
+  const [endDate, setEndDate] = useState(todayStr());
+  const [endTime, setEndTime] = useState('');
   const [category, setCategory] = useState('General');
 
   const [repeat, setRepeat] = useState<RepeatType>('none');
   const [repeatInterval, setRepeatInterval] = useState('1');
-  const [repeatUnit, setRepeatUnit] =
-    useState<RepeatUnit>('day');
+  const [repeatUnit, setRepeatUnit] = useState<RepeatUnit>('day');
 
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -290,7 +308,7 @@ export default function RemindersScreen() {
     const { data, error: loadErr } = await supabase
       .from('reminders')
       .select(
-        'id, title, notes, due_date, time, category, repeat, repeat_interval, repeat_unit, completed',
+        'id, title, notes, due_date, time, repeat_end_date, repeat_end_time, category, repeat, repeat_interval, repeat_unit, completed',
       )
       .order('due_date', { ascending: true });
 
@@ -312,6 +330,8 @@ export default function RemindersScreen() {
     setNotes('');
     setDueDate(todayStr());
     setTime('');
+    setEndDate(todayStr());
+    setEndTime('');
     setCategory('General');
     setRepeat('none');
     setRepeatInterval('1');
@@ -332,19 +352,13 @@ export default function RemindersScreen() {
     setNotes(r.notes ?? '');
     setDueDate(r.due_date);
     setTime(r.time ?? '');
+    setEndDate(r.repeat_end_date ?? r.due_date);
+    setEndTime(r.repeat_end_time ?? r.time ?? '');
     setCategory(r.category);
 
-    setRepeat(
-      (r.repeat as RepeatType) || 'none',
-    );
-
-    setRepeatInterval(
-      String(r.repeat_interval ?? 1),
-    );
-
-    setRepeatUnit(
-      (r.repeat_unit as RepeatUnit) || 'day',
-    );
+    setRepeat((r.repeat as RepeatType) || 'none');
+    setRepeatInterval(String(r.repeat_interval ?? 1));
+    setRepeatUnit((r.repeat_unit as RepeatUnit) || 'day');
 
     setEditingId(r.id);
     setError(null);
@@ -362,6 +376,24 @@ export default function RemindersScreen() {
       return;
     }
 
+    if (!time.trim()) {
+      setError('Pick a time for this reminder.');
+      return;
+    }
+
+    if (repeat !== 'none') {
+      if (!endDate) { setError('Pick an end date for this repeating reminder.'); return; }
+      if (!endTime.trim()) { setError('Pick an end time for this repeating reminder.'); return; }
+      if (endDate < dueDate) { setError('End date cannot be before start date.'); return; }
+      if (endDate === dueDate && endTime <= time) { setError('End time must be later than start time.'); return; }
+    }
+
+    const parsedInterval = parseInt(repeatInterval, 10) || 1;
+    if (repeat === 'custom' && repeatUnit === 'minute' && parsedInterval < 10) {
+      setError('The minimum repeat interval is 10 minutes.');
+      return;
+    }
+
     setSaving(true);
     setError(null);
 
@@ -369,18 +401,16 @@ export default function RemindersScreen() {
       title: title.trim(),
       notes: notes.trim() || null,
       due_date: dueDate,
-      time: time.trim() || null,
+      time: time.trim(),
+      repeat_end_date: repeat === 'none' ? null : endDate,
+      repeat_end_time: repeat === 'none' ? null : endTime.trim(),
       category,
       repeat,
       repeat_interval:
         repeat === 'custom'
-          ? Math.max(
-              1,
-              parseInt(repeatInterval, 10) || 1,
-            )
+          ? Math.max(repeatUnit === 'minute' ? 10 : 1, parsedInterval)
           : 1,
-      repeat_unit:
-        repeat === 'custom' ? repeatUnit : null,
+      repeat_unit: repeat === 'custom' ? repeatUnit : null,
     };
 
     if (editingId) {
@@ -389,7 +419,7 @@ export default function RemindersScreen() {
         .update(payload)
         .eq('id', editingId)
         .select(
-          'id, title, notes, due_date, time, category, repeat, repeat_interval, repeat_unit, completed',
+          'id, title, notes, due_date, time, repeat_end_date, repeat_end_time, category, repeat, repeat_interval, repeat_unit, completed',
         )
         .maybeSingle();
 
@@ -398,21 +428,11 @@ export default function RemindersScreen() {
       } else {
         setReminders((current) =>
           current
-            .map((item) =>
-              item.id === editingId
-                ? (data as Reminder)
-                : item,
-            )
+            .map((item) => (item.id === editingId ? (data as Reminder) : item))
             .sort((a, b) => {
-              const d = a.due_date.localeCompare(
-                b.due_date,
-              );
-
+              const d = a.due_date.localeCompare(b.due_date);
               if (d !== 0) return d;
-
-              return (a.time ?? '99:99').localeCompare(
-                b.time ?? '99:99',
-              );
+              return (a.time ?? '99:99').localeCompare(b.time ?? '99:99');
             }),
         );
 
@@ -428,7 +448,7 @@ export default function RemindersScreen() {
       .from('reminders')
       .insert(payload)
       .select(
-        'id, title, notes, due_date, time, category, repeat, repeat_interval, repeat_unit, completed',
+        'id, title, notes, due_date, time, repeat_end_date, repeat_end_time, category, repeat, repeat_interval, repeat_unit, completed',
       )
       .maybeSingle();
 
@@ -437,15 +457,9 @@ export default function RemindersScreen() {
     } else {
       setReminders((current) =>
         [...current, data as Reminder].sort((a, b) => {
-          const d = a.due_date.localeCompare(
-            b.due_date,
-          );
-
+          const d = a.due_date.localeCompare(b.due_date);
           if (d !== 0) return d;
-
-          return (a.time ?? '99:99').localeCompare(
-            b.time ?? '99:99',
-          );
+          return (a.time ?? '99:99').localeCompare(b.time ?? '99:99');
         }),
       );
 
@@ -458,10 +472,6 @@ export default function RemindersScreen() {
   const toggleComplete = async (r: Reminder) => {
     const next = !r.completed;
 
-    /*
-     * Non-repeating reminder:
-     * simply toggle its completed status.
-     */
     if (r.repeat === 'none') {
       const { error: updErr } = await supabase
         .from('reminders')
@@ -475,69 +485,58 @@ export default function RemindersScreen() {
 
       setReminders((current) =>
         current
-          .map((item) =>
-            item.id === r.id
-              ? { ...item, completed: next }
-              : item,
-          )
+          .map((item) => (item.id === r.id ? { ...item, completed: next } : item))
           .sort((a, b) => {
-            const d = a.due_date.localeCompare(
-              b.due_date,
-            );
-
+            const d = a.due_date.localeCompare(b.due_date);
             if (d !== 0) return d;
-
-            return (a.time ?? '99:99').localeCompare(
-              b.time ?? '99:99',
-            );
+            return (a.time ?? '99:99').localeCompare(b.time ?? '99:99');
           }),
       );
 
       return;
     }
 
-    /*
-     * Repeating reminder:
-     *
-     * When completing today's occurrence:
-     *
-     *   Today    -> completed
-     *   Tomorrow -> new incomplete occurrence
-     *
-     * We do NOT move the existing row to tomorrow.
-     */
     if (next) {
-      const newDate = advanceReminder(r);
+      const nextOccurrence = advanceReminder(r);
+      const startClock = r.time ?? '00:00';
+      const endClock = r.repeat_end_time ?? startClock;
+      const endDay = r.repeat_end_date ?? r.due_date;
+      const isIntradayRepeat = r.repeat === 'hourly' || (r.repeat === 'custom' && (r.repeat_unit === 'minute' || r.repeat_unit === 'hour'));
+      if (isIntradayRepeat && nextOccurrence.time > endClock) {
+        const nextDay = new Date(`${nextOccurrence.due_date}T12:00:00`);
+        nextDay.setDate(nextDay.getDate() + 1);
+        nextOccurrence.due_date = formatDate(nextDay);
+        nextOccurrence.time = startClock;
+      }
+      const nextIsWithinWindow = nextOccurrence.due_date < endDay || (nextOccurrence.due_date === endDay && nextOccurrence.time <= endClock);
+      const shouldCreateNext = nextIsWithinWindow;
 
-      const {
-        data: completedData,
-        error: completeErr,
-      } = await supabase
+      const { data: completedData, error: completeErr } = await supabase
         .from('reminders')
         .update({ completed: true })
         .eq('id', r.id)
         .select(
-          'id, title, notes, due_date, time, category, repeat, repeat_interval, repeat_unit, completed',
+          'id, title, notes, due_date, time, repeat_end_date, repeat_end_time, category, repeat, repeat_interval, repeat_unit, completed',
         )
         .maybeSingle();
 
       if (completeErr || !completedData) {
-        setError(
-          'Could not complete the repeating reminder.',
-        );
+        setError('Could not complete the repeating reminder.');
         return;
       }
 
-      const {
-        data: nextData,
-        error: nextErr,
-      } = await supabase
+      let nextData: any = null;
+      let nextErr: any = null;
+      if (shouldCreateNext) {
+        const result = await supabase
         .from('reminders')
         .insert({
           title: r.title,
           notes: r.notes,
-          due_date: newDate,
-          time: r.time,
+          due_date: nextOccurrence.due_date,
+          time: nextOccurrence.time,
+          repeat_end_date: r.repeat_end_date,
+          repeat_end_time: r.repeat_end_time,
           category: r.category,
           repeat: r.repeat,
           repeat_interval: r.repeat_interval,
@@ -545,55 +544,38 @@ export default function RemindersScreen() {
           completed: false,
         })
         .select(
-          'id, title, notes, due_date, time, category, repeat, repeat_interval, repeat_unit, completed',
+          'id, title, notes, due_date, time, repeat_end_date, repeat_end_time, category, repeat, repeat_interval, repeat_unit, completed',
         )
         .maybeSingle();
+        nextData = result.data;
+        nextErr = result.error;
+      }
 
-      if (nextErr || !nextData) {
-        /*
-         * If creation of the next occurrence failed,
-         * restore today's occurrence to incomplete.
-         */
+      if (shouldCreateNext && (nextErr || !nextData)) {
         await supabase
           .from('reminders')
           .update({ completed: false })
           .eq('id', r.id);
 
-        setError(
-          'Could not create the next repeating reminder.',
-        );
-
+        setError('Could not create the next repeating reminder.');
         return;
       }
 
       setReminders((current) =>
         [
-          ...current.filter(
-            (item) => item.id !== r.id,
-          ),
+          ...current.filter((item) => item.id !== r.id),
           completedData as Reminder,
-          nextData as Reminder,
+          ...(nextData ? [nextData as Reminder] : []),
         ].sort((a, b) => {
-          const d = a.due_date.localeCompare(
-            b.due_date,
-          );
-
+          const d = a.due_date.localeCompare(b.due_date);
           if (d !== 0) return d;
-
-          return (a.time ?? '99:99').localeCompare(
-            b.time ?? '99:99',
-          );
+          return (a.time ?? '99:99').localeCompare(b.time ?? '99:99');
         }),
       );
 
       return;
     }
 
-    /*
-     * If a completed repeating occurrence is
-     * unchecked, only that occurrence is made
-     * incomplete again.
-     */
     const { error: undoErr } = await supabase
       .from('reminders')
       .update({ completed: false })
@@ -606,32 +588,26 @@ export default function RemindersScreen() {
 
     setReminders((current) =>
       current
-        .map((item) =>
-          item.id === r.id
-            ? { ...item, completed: false }
-            : item,
-        )
+        .map((item) => (item.id === r.id ? { ...item, completed: false } : item))
         .sort((a, b) => {
-          const d = a.due_date.localeCompare(
-            b.due_date,
-          );
-
+          const d = a.due_date.localeCompare(b.due_date);
           if (d !== 0) return d;
-
-          return (a.time ?? '99:99').localeCompare(
-            b.time ?? '99:99',
-          );
+          return (a.time ?? '99:99').localeCompare(b.time ?? '99:99');
         }),
     );
   };
 
-  const deleteReminder = async (r: Reminder) => {
+  const confirmDeleteReminder = (r: Reminder) => {
+    setDeleteConfirmTarget(r);
+  };
+
+  const handleExecuteDelete = async () => {
+    if (!deleteConfirmTarget) return;
+    const r = deleteConfirmTarget;
+    setDeleteConfirmTarget(null);
+
     const previous = reminders;
-
-    setReminders((current) =>
-      current.filter((item) => item.id !== r.id),
-    );
-
+    setReminders((current) => current.filter((item) => item.id !== r.id));
     setDetailOpen(null);
 
     const { error: delErr } = await supabase
@@ -649,10 +625,8 @@ export default function RemindersScreen() {
     switch (filter) {
       case 'completed':
         return reminders.filter((r) => r.completed);
-
       case 'incomplete':
         return reminders.filter((r) => !r.completed);
-
       default:
         return reminders;
     }
@@ -664,11 +638,13 @@ export default function RemindersScreen() {
         {
           key: 'completed',
           label: 'Complete',
-          items: [...filteredReminders].sort((a, b) => {
-            const d = a.due_date.localeCompare(b.due_date);
-            if (d !== 0) return d;
-            return (a.time ?? '99:99').localeCompare(b.time ?? '99:99');
-          }).reverse(),
+          items: [...filteredReminders]
+            .sort((a, b) => {
+              const d = a.due_date.localeCompare(b.due_date);
+              if (d !== 0) return d;
+              return (a.time ?? '99:99').localeCompare(b.time ?? '99:99');
+            })
+            .reverse(),
         },
       ].filter((g) => g.items.length > 0);
     }
@@ -687,284 +663,204 @@ export default function RemindersScreen() {
 
   const C = isDark
     ? {
-        bg: '#090909',
-        card: '#151515',
-        border: '#2A2A2A',
-        text: '#F4F2EE',
-        muted: '#AAA59D',
-        divider: '#262626',
+        cardBg: '#121212',
+        cardText: '#FFFFFF',
+        cardSubtext: '#A1A1AA',
+        cardBorder: '#000000',
         inputBg: '#1E1E1E',
-        inputBorder: '#363636',
+        inputBorder: '#333333',
       }
     : {
-        bg: '#FBFAF8',
-        card: '#FFFFFF',
-        border: '#ECE9E4',
-        text: '#27241F',
-        muted: '#8F8A82',
-        divider: '#F0EEEA',
-        inputBg: '#FCFBF9',
-        inputBorder: '#E0DDD7',
+        cardBg: '#FFFFFF',
+        cardText: '#000000',
+        cardSubtext: '#52525B',
+        cardBorder: '#000000',
+        inputBg: '#F4F4F5',
+        inputBorder: '#E4E4E7',
       };
 
-  const styles = makeStyles(C);
-
   return (
-    <SafeAreaView
-      style={[
-        styles.safe,
-        isDark && styles.safeDark,
-      ]}
-    >
+    <SafeAreaView style={[styles.safe, { backgroundColor: pageBg }]}>
+      <StatusBar
+        barStyle={isAccentPureBlack ? 'light-content' : 'dark-content'}
+        backgroundColor={pageBg}
+      />
+
+      {/* FIXED HEADER */}
       <View style={styles.header}>
         <Pressable
           onPress={() => router.push('/modules')}
-          style={[
-            styles.backBtn,
-            { backgroundColor: accent },
-          ]}
+          style={({ pressed }) => [styles.backBtn, pressed && styles.pressedBtn]}
           hitSlop={12}
         >
-          <ChevronLeft
-            color="#FFFFFF"
-            size={22}
-            strokeWidth={2.4}
-          />
+          <ChevronLeft color="#FFFFFF" size={22} strokeWidth={2.8} />
         </Pressable>
 
-        <Text
-          style={[
-            styles.headerTitle,
-            {
-              color:
-                isDark ? '#FFFFFF' : accentForeground,
-            },
-          ]}
-        >
+        <Text style={[styles.headerTitle, { color: headerTextColor }]}>
           REMINDERS
         </Text>
 
         <Pressable
           onPress={() => setMenuOpen(true)}
-          style={styles.bellBtn}
+          style={({ pressed }) => [styles.bellBtn, pressed && styles.pressedBtn]}
           hitSlop={12}
         >
-          <MoreVertical
-            color={C.text}
-            size={20}
-          />
+          <MoreVertical color={headerTextColor} size={24} strokeWidth={2.5} />
         </Pressable>
       </View>
 
+      {/* HEADER MENU MODAL */}
       <Modal
         visible={menuOpen}
         transparent
         animationType="fade"
         onRequestClose={() => setMenuOpen(false)}
       >
-        <Pressable
-          style={styles.menuShade}
-          onPress={() => setMenuOpen(false)}
-        >
-          <Pressable
-            style={[
-              styles.menuCard,
-              {
-                backgroundColor: C.card,
-                borderColor: C.border,
-              },
-            ]}
-            onPress={(event) => event.stopPropagation()}
-          >
-            <Pressable
-  onPress={() => {
-    setMenuOpen(false);
-    router.push('/(tabs)/profile');
-  }}
-  style={styles.menuItem}
->
-              <Text
-                style={[
-                  styles.menuItemText,
-                  { color: C.text },
-                ]}
+        <Pressable style={styles.menuShade} onPress={() => setMenuOpen(false)}>
+          <View style={styles.menuCardWrapper}>
+            <View style={styles.shadowBackdrop} />
+            <View style={[styles.menuCardBody, { backgroundColor: C.cardBg }]}>
+              <Pressable
+                onPress={() => {
+                  setMenuOpen(false);
+                  router.push('/(tabs)/profile');
+                }}
+                style={styles.menuItem}
               >
-                Settings
-              </Text>
-            </Pressable>
-          </Pressable>
+                <Text style={[styles.menuItemText, { color: C.cardText }]}>
+                  Settings
+                </Text>
+              </Pressable>
+            </View>
+          </View>
         </Pressable>
       </Modal>
 
+      {/* PINNED / STICKY FILTER BAR */}
+      <View style={[styles.stickyFilterContainer, { backgroundColor: pageBg }]}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterRow}
+        >
+          {FILTER_TAGS.map((tag) => {
+            const active = filter === tag.key;
+            return (
+              <View key={tag.key} style={styles.filterTagWrapper}>
+                <View style={styles.filterShadowBackdrop} />
+                <Pressable
+                  onPress={() => setFilter(tag.key)}
+                  style={({ pressed }) => [
+                    styles.filterTagBtn,
+                    {
+                      backgroundColor: active ? '#000000' : '#FFFFFF',
+                      borderColor: '#000000',
+                    },
+                    pressed && styles.pressedBtn,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.filterTagText,
+                      { color: active ? '#FFFFFF' : '#000000' },
+                    ]}
+                  >
+                    {tag.label}
+                  </Text>
+                </Pressable>
+              </View>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+      {/* SCROLLING REMINDERS LIST */}
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
         {error && (
-          <Text style={styles.error}>
-            {error}
-          </Text>
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
         )}
 
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.filterScroll}
-          contentContainerStyle={styles.filterRow}
-        >
-          {FILTER_TAGS.map((tag) => (
-            <Pressable
-              key={tag.key}
-              onPress={() =>
-                setFilter(tag.key)
-              }
-              style={[
-                styles.filterTag,
-                filter === tag.key && {
-                  backgroundColor: accent,
-                  borderColor: accent,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.filterTagText,
-                  filter === tag.key && {
-                    color: onAccent,
-                    fontFamily: FONT_SEMI,
-                  },
-                ]}
-              >
-                {tag.label}
-              </Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-
         {loading ? (
-          <Text style={styles.emptyText}>
+          <Text style={[styles.emptyText, { color: headerTextColor }]}>
             Loading your reminders...
           </Text>
         ) : filteredReminders.length === 0 ? (
           <View style={styles.empty}>
-            <Text style={styles.emptyText}>
-              No reminders match this filter.
-              Tap + to create one.
+            <Text style={[styles.emptyText, { color: headerTextColor }]}>
+              No reminders match this filter. Tap + to create one.
             </Text>
           </View>
         ) : (
           groups.map((group) => (
-            <View
-              key={group.key}
-              style={styles.group}
-            >
-              <Text style={styles.groupLabel}>
+            <View key={group.key} style={styles.group}>
+              <Text style={[styles.groupLabel, { color: headerTextColor }]}>
                 {group.label.toUpperCase()}
               </Text>
 
-              <View style={styles.list}>
-                {group.items.map((r, i) => (
-                  <Pressable
-                    key={r.id}
-                    onPress={() =>
-                      setDetailOpen(r)
-                    }
-                    style={[
-                      styles.row,
-                      i <
-                        group.items.length - 1 &&
-                        styles.rowBorder,
-                    ]}
-                  >
+              <View style={styles.listStack}>
+                {group.items.map((r) => (
+                  <View key={r.id} style={styles.cardContainer}>
+                    <View style={styles.cardShadowBackdrop} />
                     <Pressable
-                      onPress={() =>
-                        toggleComplete(r)
-                      }
+                      onPress={() => setDetailOpen(r)}
                       style={[
-                        styles.check,
-                        r.completed && {
-                          backgroundColor:
-                            accent,
-                          borderColor: accent,
+                        styles.cardBody,
+                        {
+                          backgroundColor: C.cardBg,
+                          borderColor: C.cardBorder,
                         },
                       ]}
-                      hitSlop={8}
                     >
-                      {r.completed && (
-                        <Check
-                          color={onAccent}
-                          size={15}
-                        />
-                      )}
-                    </Pressable>
-
-                    <View style={styles.rowCopy}>
-                      <Text
+                      <Pressable
+                        onPress={() => toggleComplete(r)}
                         style={[
-                          styles.reminderTitle,
-                          r.completed &&
-                            styles.doneTitle,
+                          styles.check,
+                          r.completed && styles.checkDone,
                         ]}
-                        numberOfLines={1}
+                        hitSlop={8}
                       >
-                        {r.title}
-                      </Text>
-
-                      <Text
-                        style={styles.metaText}
-                      >
-                        {prettyDate(
-                          r.due_date,
+                        {r.completed && (
+                          <Check color="#000000" size={14} strokeWidth={3} />
                         )}
-                        {r.time
-                          ? `  ·  ${prettyTime(
-                              r.time,
-                            )}`
-                          : ''}
-                        {'  ·  '}
-                        {r.category}
-                      </Text>
+                      </Pressable>
 
-                      {r.repeat !== 'none' && (
-                        <View
+                      <View style={styles.rowCopy}>
+                        <Text
                           style={[
-                            styles.repeatPill,
-                            {
-                              backgroundColor:
-                                accent,
-                            },
+                            styles.reminderTitle,
+                            { color: C.cardText },
+                            r.completed && styles.doneTitle,
                           ]}
+                          numberOfLines={1}
                         >
-                          <Repeat
-                            color={onAccent}
-                            size={10}
-                            strokeWidth={2.4}
-                          />
+                          {r.title}
+                        </Text>
 
-                          <Text
-                            style={[
-                              styles.repeatPillText,
-                              {
-                                color:
-                                  onAccent,
-                              },
-                            ]}
-                          >
-                            {repeatLabel(r)}
-                          </Text>
-                        </View>
-                      )}
-                    </View>
+                        <Text style={[styles.metaText, { color: C.cardSubtext }]}>
+                          {prettyDate(r.due_date)}
+                          {r.time ? `  ·  ${prettyTime(r.time)}` : ''}
+                          {'  ·  '}
+                          {r.category}
+                        </Text>
 
-                    <ChevronRight
-                      color={
-                        isDark
-                          ? '#555'
-                          : '#C8C5BE'
-                      }
-                      size={18}
-                    />
-                  </Pressable>
+                        {r.repeat !== 'none' && (
+                          <View style={styles.repeatBadge}>
+                            <Repeat color="#000000" size={10} strokeWidth={2.5} />
+                            <Text style={styles.repeatBadgeText}>
+                              {repeatLabel(r)}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+
+                      <ChevronRight color={C.cardText} size={20} strokeWidth={2.5} />
+                    </Pressable>
+                  </View>
                 ))}
               </View>
             </View>
@@ -972,498 +868,396 @@ export default function RemindersScreen() {
         )}
       </ScrollView>
 
-      <Pressable
-        onPress={openNew}
-        style={[
-          styles.fab,
-          { backgroundColor: accent },
-        ]}
-        hitSlop={12}
-      >
-        <Plus
-          color={onAccent}
-          size={26}
-          strokeWidth={2.6}
-        />
-      </Pressable>
+      {/* FAB */}
+      <View style={styles.fabContainer}>
+        <View style={styles.fabShadowBackdrop} />
+        <Pressable
+          onPress={openNew}
+          style={({ pressed }) => [styles.fabBtn, pressed && styles.pressedBtn]}
+          hitSlop={12}
+        >
+          <Plus color="#FFFFFF" size={28} strokeWidth={3} />
+        </Pressable>
+      </View>
 
+      {/* CENTERED FORM MODAL */}
       <Modal
         visible={modalOpen}
         transparent
-        animationType="slide"
-        onRequestClose={() =>
-          setModalOpen(false)
-        }
+        animationType="fade"
+        onRequestClose={() => setModalOpen(false)}
       >
-        <View style={styles.modalShade}>
+        <View style={styles.centeredModalShade}>
           <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            style={styles.keyboardAvoidingView}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.keyboardAvoidingViewCentered}
           >
-            <View style={styles.modalCard}>
-              <View
-                style={styles.modalTitleRow}
-              >
-              <Text style={styles.modalTitle}>
-                {editingId
-                  ? 'Edit reminder'
-                  : 'New reminder'}
-              </Text>
-
-              <Pressable
-                onPress={() =>
-                  setModalOpen(false)
-                }
-              >
-                <X
-                  color={
-                    isDark
-                      ? '#F4F2EE'
-                      : '#5A5751'
-                  }
-                  size={21}
-                />
-              </Pressable>
-            </View>
-
-            <ScrollView
-              showsVerticalScrollIndicator={false}
-              style={styles.modalScroll}
-              keyboardShouldPersistTaps="handled"
-              contentContainerStyle={styles.modalScrollContent}
-            >
-              <Text style={styles.label}>
-                Title
-              </Text>
-
-              <TextInput
-                value={title}
-                onChangeText={setTitle}
-                placeholder="What do you need to remember?"
-                placeholderTextColor="#9B978F"
-                style={styles.input}
-                autoFocus
-              />
-
-              <Text style={styles.label}>
-                Notes (optional)
-              </Text>
-
-              <TextInput
-                value={notes}
-                onChangeText={setNotes}
-                placeholder="Add details"
-                placeholderTextColor="#9B978F"
-                style={[
-                  styles.input,
-                  styles.inputMulti,
-                ]}
-                multiline
-              />
-
-              <Text style={styles.label}>
-                Date
-              </Text>
-
-              <DatePickerInput
-                value={dueDate}
-                onChange={setDueDate}
-                accent={accent}
-                onAccent={onAccent}
-                isDark={isDark}
-              />
-
-              <Text style={styles.label}>
-                Time (optional)
-              </Text>
-
-              <TimePickerInput
-                value={time}
-                onChange={setTime}
-                accent={accent}
-                onAccent={onAccent}
-                isDark={isDark}
-              />
-
-              <Text style={styles.label}>
-                Category
-              </Text>
-
-              <View style={styles.chipRow}>
-                {CATEGORIES.map((c) => (
-                  <Pressable
-                    key={c}
-                    onPress={() =>
-                      setCategory(c)
-                    }
-                    style={[
-                      styles.chip,
-                      category === c && {
-                        backgroundColor:
-                          accent,
-                        borderColor:
-                          accent,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.chipText,
-                        category === c && {
-                          color: onAccent,
-                          fontFamily:
-                            FONT_SEMI,
-                        },
-                      ]}
-                    >
-                      {c}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-
-              <Text style={styles.label}>
-                Repeat
-              </Text>
-
-              <View style={styles.repeatRow}>
-                {REPEAT_OPTIONS.map(
-                  (opt) => (
-                    <Pressable
-                      key={opt.key}
-                      onPress={() =>
-                        setRepeat(
-                          opt.key,
-                        )
-                      }
-                      style={[
-                        styles.chip,
-                        repeat ===
-                          opt.key && {
-                          backgroundColor:
-                            accent,
-                          borderColor:
-                            accent,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.chipText,
-                          repeat ===
-                            opt.key && {
-                            color:
-                              onAccent,
-                            fontFamily:
-                              FONT_SEMI,
-                          },
-                        ]}
-                      >
-                        {opt.label}
-                      </Text>
-                    </Pressable>
-                  ),
-                )}
-              </View>
-
-              {repeat === 'custom' && (
-                <View
-                  style={styles.customRow}
-                >
-                  <Text
-                    style={
-                      styles.customPrefix
-                    }
-                  >
-                    Every
+            <View style={styles.modalCardWrapper}>
+              <View style={styles.modalShadowBackdrop} />
+              <View style={[styles.modalCardBody, { backgroundColor: C.cardBg }]}>
+                <View style={styles.modalTitleRow}>
+                  <Text style={[styles.modalTitle, { color: C.cardText }]}>
+                    {editingId ? 'Edit reminder' : 'New reminder'}
                   </Text>
 
+                  <Pressable onPress={() => setModalOpen(false)} hitSlop={12}>
+                    <X color={C.cardText} size={22} strokeWidth={2.5} />
+                  </Pressable>
+                </View>
+
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                  style={styles.modalScroll}
+                  contentContainerStyle={styles.modalScrollContent}
+                >
+                  {error && <Text style={styles.modalError}>{error}</Text>}
+
+                  <Text style={[styles.inputLabel, { color: C.cardSubtext }]}>
+                    TITLE
+                  </Text>
                   <TextInput
-                    value={repeatInterval}
-                    onChangeText={
-                      setRepeatInterval
-                    }
-                    placeholder="1"
-                    placeholderTextColor="#9B978F"
-                    style={
-                      styles.customInput
-                    }
-                    keyboardType="numeric"
+                    value={title}
+                    onChangeText={setTitle}
+                    placeholder="What do you need to remember?"
+                    placeholderTextColor={C.cardSubtext}
+                    style={[
+                      styles.modalTextInput,
+                      {
+                        backgroundColor: C.inputBg,
+                        borderColor: C.inputBorder,
+                        color: C.cardText,
+                      },
+                    ]}
+                    autoFocus
                   />
 
-                  <View
-                    style={
-                      styles.customUnitRow
-                    }
-                  >
-                    {REPEAT_UNITS.map(
-                      (u) => (
+                  <Text style={[styles.inputLabel, { color: C.cardSubtext }]}>
+                    NOTES (OPTIONAL)
+                  </Text>
+                  <TextInput
+                    value={notes}
+                    onChangeText={setNotes}
+                    placeholder="Add details..."
+                    placeholderTextColor={C.cardSubtext}
+                    style={[
+                      styles.modalTextInput,
+                      styles.inputMulti,
+                      {
+                        backgroundColor: C.inputBg,
+                        borderColor: C.inputBorder,
+                        color: C.cardText,
+                      },
+                    ]}
+                    multiline
+                  />
+
+                  <Text style={[styles.inputLabel, { color: C.cardSubtext }]}>
+                    START DATE
+                  </Text>
+                  <DatePickerInput
+                    value={dueDate}
+                    onChange={(value) => {
+                      setDueDate(value);
+                      if (endDate < value) setEndDate(value);
+                    }}
+                    accent={pageBg}
+                    onAccent={onAccent}
+                    isDark={isDark}
+                  />
+
+                  <Text style={[styles.inputLabel, { color: C.cardSubtext }]}>
+                    START TIME (REQUIRED)
+                  </Text>
+                  <TimePickerInput
+                    value={time}
+                    onChange={setTime}
+                    accent={pageBg}
+                    onAccent={onAccent}
+                    isDark={isDark}
+                  />
+
+                  {repeat !== 'none' && (
+                    <>
+                      <Text style={[styles.inputLabel, { color: C.cardSubtext }]}>END DATE</Text>
+                      <DatePickerInput value={endDate} onChange={setEndDate} accent={pageBg} onAccent={onAccent} isDark={isDark} />
+                      <Text style={[styles.inputLabel, { color: C.cardSubtext }]}>END TIME</Text>
+                      <TimePickerInput value={endTime} onChange={setEndTime} accent={pageBg} onAccent={onAccent} isDark={isDark} />
+                    </>
+                  )}
+
+                  <Text style={[styles.inputLabel, { color: C.cardSubtext }]}>
+                    CATEGORY
+                  </Text>
+                  <View style={styles.chipRow}>
+                    {CATEGORIES.map((c) => {
+                      const selected = category === c;
+                      return (
                         <Pressable
-                          key={u.key}
-                          onPress={() =>
-                            setRepeatUnit(
-                              u.key,
-                            )
-                          }
-                          style={[
+                          key={c}
+                          onPress={() => setCategory(c)}
+                          style={({ pressed }) => [
                             styles.chip,
-                            repeatUnit ===
-                              u.key && {
-                              backgroundColor:
-                                accent,
-                              borderColor:
-                                accent,
-                            },
+                            selected ? styles.chipActive : { backgroundColor: C.inputBg },
+                            pressed && styles.pressedBtn,
                           ]}
                         >
                           <Text
                             style={[
                               styles.chipText,
-                              repeatUnit ===
-                                u.key && {
-                                color:
-                                  onAccent,
-                                fontFamily:
-                                  FONT_SEMI,
-                              },
+                              { color: selected ? '#FFFFFF' : C.cardText },
                             ]}
                           >
-                            {u.label}
+                            {c}
                           </Text>
                         </Pressable>
-                      ),
-                    )}
+                      );
+                    })}
                   </View>
-                </View>
-              )}
-            </ScrollView>
 
-            <Pressable
-              disabled={saving}
-              onPress={saveReminder}
-              style={[
-                styles.saveButton,
-                {
-                  backgroundColor:
-                    accent,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.saveText,
-                  {
-                    color: onAccent,
-                  },
-                ]}
-              >
-                {saving
-                  ? 'Saving...'
-                  : editingId
-                  ? 'Save changes'
-                  : 'Add reminder'}
-              </Text>
-            </Pressable>
+                  <Text style={[styles.inputLabel, { color: C.cardSubtext }]}>
+                    REPEAT
+                  </Text>
+                  <View style={styles.chipRow}>
+                    {REPEAT_OPTIONS.map((opt) => {
+                      const selected = repeat === opt.key;
+                      return (
+                        <Pressable
+                          key={opt.key}
+                          onPress={() => setRepeat(opt.key)}
+                          style={({ pressed }) => [
+                            styles.chip,
+                            selected ? styles.chipActive : { backgroundColor: C.inputBg },
+                            pressed && styles.pressedBtn,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.chipText,
+                              { color: selected ? '#FFFFFF' : C.cardText },
+                            ]}
+                          >
+                            {opt.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+
+                  {repeat === 'custom' && (
+                    <View style={styles.customRow}>
+                      <Text style={[styles.customPrefix, { color: C.cardText }]}>
+                        Every
+                      </Text>
+
+                      <TextInput
+                        value={repeatInterval}
+                        onChangeText={(value) => {
+                          const digits = value.replace(/[^0-9]/g, '');
+                          setRepeatInterval(digits);
+                        }}
+                        placeholder="1"
+                        placeholderTextColor={C.cardSubtext}
+                        style={[
+                          styles.customInput,
+                          {
+                            backgroundColor: C.inputBg,
+                            borderColor: C.inputBorder,
+                            color: C.cardText,
+                          },
+                        ]}
+                        keyboardType="numeric"
+                        onBlur={() => { if (repeatUnit === 'minute' && repeatInterval && Number(repeatInterval) < 10) setRepeatInterval('10'); }}
+                      />
+
+                      <View style={styles.chipRow}>
+                        {REPEAT_UNITS.map((u) => {
+                          const selected = repeatUnit === u.key;
+                          return (
+                            <Pressable
+                              key={u.key}
+                              onPress={() => { setRepeatUnit(u.key); if (u.key === 'minute' && Number(repeatInterval) < 10) setRepeatInterval('10'); }}
+                              style={({ pressed }) => [
+                                styles.chip,
+                                selected ? styles.chipActive : { backgroundColor: C.inputBg },
+                                pressed && styles.pressedBtn,
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.chipText,
+                                  { color: selected ? '#FFFFFF' : C.cardText },
+                                ]}
+                              >
+                                {u.label}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  )}
+                </ScrollView>
+
+                <Pressable
+                  disabled={saving}
+                  onPress={saveReminder}
+                  style={({ pressed }) => [
+                    styles.primaryBtn,
+                    pressed && styles.pressedBtn,
+                    saving && { opacity: 0.6 },
+                  ]}
+                >
+                  <Text style={styles.primaryBtnText}>
+                    {saving
+                      ? 'Saving...'
+                      : editingId
+                      ? 'Save changes'
+                      : 'Add reminder'}
+                  </Text>
+                </Pressable>
+              </View>
             </View>
           </KeyboardAvoidingView>
         </View>
       </Modal>
 
+      {/* CENTERED DETAIL MODAL */}
       <Modal
         visible={!!detailOpen}
         transparent
-        animationType="slide"
-        onRequestClose={() =>
-          setDetailOpen(null)
-        }
+        animationType="fade"
+        onRequestClose={() => setDetailOpen(null)}
       >
-        <View style={styles.modalShade}>
-          <View style={styles.modalCard}>
-            {detailOpen &&
-              (() => {
+        <View style={styles.centeredModalShade}>
+          <View style={styles.modalCardWrapper}>
+            <View style={styles.modalShadowBackdrop} />
+            <View style={[styles.modalCardBody, { backgroundColor: C.cardBg }]}>
+              {detailOpen && (() => {
                 const r = detailOpen;
-
                 return (
                   <>
-                    <View
-                      style={
-                        styles.modalTitleRow
-                      }
-                    >
+                    <View style={styles.modalTitleRow}>
                       <Text
-                        style={
-                          styles.modalTitle
-                        }
+                        style={[styles.modalTitle, { color: C.cardText }]}
                         numberOfLines={2}
                       >
                         {r.title}
                       </Text>
 
-                      <Pressable
-                        onPress={() =>
-                          setDetailOpen(
-                            null,
-                          )
-                        }
-                      >
-                        <X
-                          color={
-                            isDark
-                              ? '#F4F2EE'
-                              : '#5A5751'
-                          }
-                          size={21}
-                        />
+                      <Pressable onPress={() => setDetailOpen(null)} hitSlop={12}>
+                        <X color={C.cardText} size={22} strokeWidth={2.5} />
                       </Pressable>
                     </View>
 
-                    <View
-                      style={
-                        styles.detailSection
-                      }
-                    >
-                      <View
-                        style={
-                          styles.detailLine
-                        }
-                      >
-                        <CalendarDays
-                          color={C.muted}
-                          size={16}
-                        />
-
-                        <Text
-                          style={
-                            styles.detailText
-                          }
-                        >
-                          {prettyDate(
-                            r.due_date,
-                          )}
-                          {r.time
-                            ? ` at ${prettyTime(
-                                r.time,
-                              )}`
-                            : ''}
+                    <View style={styles.detailSection}>
+                      <View style={styles.detailLine}>
+                        <CalendarDays color={C.cardSubtext} size={18} strokeWidth={2.2} />
+                        <Text style={[styles.detailText, { color: C.cardText }]}>
+                          {prettyDate(r.due_date)}
+                          {r.time ? ` at ${prettyTime(r.time)}` : ''}
                         </Text>
                       </View>
 
-                      <View
-                        style={
-                          styles.detailLine
-                        }
-                      >
-                        <Bell
-                          color={C.muted}
-                          size={16}
-                        />
-
-                        <Text
-                          style={
-                            styles.detailText
-                          }
-                        >
+                      <View style={styles.detailLine}>
+                        <Bell color={C.cardSubtext} size={18} strokeWidth={2.2} />
+                        <Text style={[styles.detailText, { color: C.cardText }]}>
                           {r.category}
                         </Text>
                       </View>
 
-                      {r.repeat !==
-                        'none' && (
-                        <View
-                          style={
-                            styles.detailLine
-                          }
-                        >
-                          <Repeat
-                            color={
-                              C.muted
-                            }
-                            size={16}
-                          />
-
-                          <Text
-                            style={
-                              styles.detailText
-                            }
-                          >
-                            {repeatLabel(
-                              r,
-                            )}
+                      {r.repeat !== 'none' && (
+                        <View style={styles.detailLine}>
+                          <Repeat color={C.cardSubtext} size={18} strokeWidth={2.2} />
+                          <Text style={[styles.detailText, { color: C.cardText }]}>
+                            {repeatLabel(r)}
                           </Text>
                         </View>
                       )}
 
                       {r.notes && (
-                        <Text
-                          style={
-                            styles.detailNotes
-                          }
-                        >
+                        <Text style={[styles.detailNotes, { color: C.cardSubtext }]}>
                           {r.notes}
                         </Text>
                       )}
                     </View>
 
-                    <View
-                      style={
-                        styles.detailActions
-                      }
-                    >
+                    <View style={styles.detailActions}>
                       <Pressable
-                        onPress={() =>
-                          openEdit(r)
-                        }
-                        style={[
-                          styles.detailAction,
-                          {
-                            backgroundColor:
-                              accent,
-                          },
+                        onPress={() => openEdit(r)}
+                        style={({ pressed }) => [
+                          styles.primaryBtn,
+                          { flex: 1 },
+                          pressed && styles.pressedBtn,
                         ]}
                       >
-                        <Text
-                          style={[
-                            styles.detailActionText,
-                            {
-                              color:
-                                onAccent,
-                            },
-                          ]}
-                        >
-                          Edit
-                        </Text>
+                        <Text style={styles.primaryBtnText}>Edit</Text>
                       </Pressable>
 
                       <Pressable
-                        onPress={() =>
-                          deleteReminder(r)
-                        }
-                        style={[
-                          styles.detailAction,
-                          styles.deleteAction,
+                        onPress={() => confirmDeleteReminder(r)}
+                        style={({ pressed }) => [
+                          styles.dangerBtn,
+                          { flex: 1 },
+                          pressed && styles.pressedBtn,
                         ]}
                       >
-                        <Trash2
-                          color={
-                            isDark
-                              ? '#E5A39C'
-                              : '#C53A2F'
-                          }
-                          size={16}
-                        />
-
-                        <Text
-                          style={
-                            styles.deleteText
-                          }
-                        >
-                          Delete
-                        </Text>
+                        <Trash2 color="#FFFFFF" size={16} strokeWidth={2.5} />
+                        <Text style={styles.dangerBtnText}>Delete</Text>
                       </Pressable>
                     </View>
                   </>
                 );
               })()}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* CENTERED DELETE ALERT MODAL */}
+      <Modal
+        visible={Boolean(deleteConfirmTarget)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDeleteConfirmTarget(null)}
+      >
+        <View style={styles.alertShade}>
+          <View style={styles.alertCardWrapper}>
+            <View style={styles.alertShadowBackdrop} />
+            <View style={styles.alertCardBody}>
+              <View style={styles.alertHeaderRow}>
+                <View style={styles.alertIconBadge}>
+                  <AlertTriangle color="#000000" size={20} strokeWidth={2.5} />
+                </View>
+                <Text style={styles.alertTitle}>Delete Reminder?</Text>
+              </View>
+
+              <Text style={styles.alertMessage}>
+                Are you sure you want to delete this reminder? This action cannot be undone.
+              </Text>
+
+              <View style={styles.alertActionsRow}>
+                <Pressable
+                  onPress={() => setDeleteConfirmTarget(null)}
+                  style={({ pressed }) => [
+                    styles.alertCancelBtn,
+                    pressed && styles.pressedBtn,
+                  ]}
+                >
+                  <Text style={styles.alertCancelText}>Cancel</Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={handleExecuteDelete}
+                  style={({ pressed }) => [
+                    styles.alertDeleteBtn,
+                    pressed && styles.pressedBtn,
+                  ]}
+                >
+                  <Text style={styles.alertDeleteText}>Delete</Text>
+                </Pressable>
+              </View>
+            </View>
           </View>
         </View>
       </Modal>
@@ -1471,448 +1265,519 @@ export default function RemindersScreen() {
   );
 }
 
-type Palette = {
-  bg: string;
-  card: string;
-  border: string;
-  text: string;
-  muted: string;
-  divider: string;
-  inputBg: string;
-  inputBorder: string;
-};
+const styles = StyleSheet.create({
+  safe: {
+    flex: 1,
+  },
+  pressedBtn: {
+    transform: [{ translateX: 2 }, { translateY: 2 }],
+  },
 
-function makeStyles(C: Palette) {
-  return StyleSheet.create({
-    safe: {
-      flex: 1,
-      backgroundColor: C.bg,
-    },
+  /* HEADER */
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 10,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: '#000000',
+    borderWidth: 2,
+    borderColor: '#000000',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontFamily: FONT_XB,
+    fontSize: 22,
+    letterSpacing: 1,
+  },
+  bellBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
-    safeDark: {
-      backgroundColor: '#090909',
-    },
+  /* HEADER MENU */
+  menuShade: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    alignItems: 'flex-end',
+    paddingTop: 60,
+    paddingRight: 20,
+  },
+  menuCardWrapper: {
+    position: 'relative',
+    width: 160,
+  },
+  shadowBackdrop: {
+    position: 'absolute',
+    top: 4,
+    left: 4,
+    right: -4,
+    bottom: -4,
+    backgroundColor: '#000000',
+    borderRadius: 12,
+  },
+  menuCardBody: {
+    borderRadius: 12,
+    borderWidth: 2.5,
+    borderColor: '#000000',
+    paddingVertical: 4,
+  },
+  menuItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  menuItemText: {
+    fontFamily: FONT_BOLD,
+    fontSize: 14,
+  },
 
-    header: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingHorizontal: 14,
-      paddingTop: 28,
-      paddingVertical: 12,
-      borderBottomWidth: 1,
-      borderBottomColor: C.divider,
-    },
+  /* PINNED / STICKY FILTER CONTAINER */
+  stickyFilterContainer: {
+    paddingHorizontal: 18,
+    paddingVertical: 6,
+    zIndex: 10,
+  },
+  filterRow: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingRight: 18,
+    paddingBottom: 4,
+  },
+  filterTagWrapper: {
+    position: 'relative',
+  },
+  filterShadowBackdrop: {
+    position: 'absolute',
+    top: 3,
+    left: 3,
+    right: -3,
+    bottom: -3,
+    backgroundColor: '#000000',
+    borderRadius: 10,
+  },
+  filterTagBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 10,
+    borderWidth: 2.5,
+  },
+  filterTagText: {
+    fontFamily: FONT_BOLD,
+    fontSize: 12.5,
+  },
 
-    backBtn: {
-      width: 38,
-      height: 38,
-      borderRadius: 19,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
+  /* SCROLLING CONTENT */
+  content: {
+    paddingHorizontal: 18,
+    paddingTop: 8,
+    paddingBottom: 120,
+  },
+  errorBox: {
+    backgroundColor: '#FEE2E2',
+    borderWidth: 2.5,
+    borderColor: '#000000',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 12,
+  },
+  errorText: {
+    fontFamily: FONT_BOLD,
+    color: '#DC2626',
+    fontSize: 13,
+  },
 
-    headerTitle: {
-      fontFamily: FONT_XB,
-      fontSize: 16,
-      letterSpacing: 1.4,
-      color: C.text,
-    },
+  empty: {
+    paddingVertical: 50,
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontFamily: FONT_BOLD,
+    fontSize: 15,
+    textAlign: 'center',
+  },
 
-    menuShade: {
-      flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.25)',
-      alignItems: 'flex-end',
-      paddingTop: 64,
-      paddingRight: 12,
-    },
-    menuCard: {
-      borderRadius: 14,
-      borderWidth: 1,
-      paddingVertical: 6,
-      minWidth: 150,
-      shadowColor: '#000',
-      shadowOpacity: 0.12,
-      shadowRadius: 8,
-      shadowOffset: { width: 0, height: 4 },
-      elevation: 4,
-    },
-    menuItem: {
-      paddingVertical: 12,
-      paddingHorizontal: 16,
-    },
-    menuItemText: {
-      fontFamily: FONT_MED,
-      fontSize: 14,
-    },
+  group: {
+    marginBottom: 18,
+  },
+  groupLabel: {
+    fontFamily: FONT_BOLD,
+    fontSize: 12,
+    letterSpacing: 1,
+    marginBottom: 8,
+    marginLeft: 2,
+  },
+  listStack: {
+    gap: 12,
+  },
 
-    bellBtn: {
-      width: 38,
-      height: 38,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
+  /* CARD NEO-BRUTALIST */
+  cardContainer: {
+    position: 'relative',
+  },
+  cardShadowBackdrop: {
+    position: 'absolute',
+    top: 4,
+    left: 4,
+    right: -4,
+    bottom: -4,
+    backgroundColor: '#000000',
+    borderRadius: 14,
+  },
+  cardBody: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderRadius: 14,
+    borderWidth: 2.5,
+    padding: 12,
+  },
+  check: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#000000',
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkDone: {
+    backgroundColor: '#FFFFFF',
+  },
+  rowCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  reminderTitle: {
+    fontFamily: FONT_BOLD,
+    fontSize: 15,
+  },
+  doneTitle: {
+    textDecorationLine: 'line-through',
+    opacity: 0.5,
+  },
+  metaText: {
+    fontFamily: FONT_MED,
+    fontSize: 11,
+  },
+  repeatBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: '#000000',
+    backgroundColor: '#FDE047',
+    alignSelf: 'flex-start',
+    marginTop: 4,
+  },
+  repeatBadgeText: {
+    fontFamily: FONT_BOLD,
+    fontSize: 10,
+    color: '#000000',
+  },
 
-    content: {
-      padding: 16,
-      paddingBottom: 90,
-    },
+  /* FAB NEO-BRUTALIST */
+  fabContainer: {
+    position: 'absolute',
+    bottom: 28,
+    alignSelf: 'center',
+    width: 60,
+    height: 60,
+  },
+  fabShadowBackdrop: {
+    position: 'absolute',
+    top: 4,
+    left: 4,
+    width: 56,
+    height: 56,
+    backgroundColor: '#000000',
+    borderRadius: 28,
+  },
+  fabBtn: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#000000',
+    borderWidth: 2.5,
+    borderColor: '#000000',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
-    error: {
-      fontFamily: FONT_MED,
-      color: '#C53A2F',
-      fontSize: 13,
-      marginBottom: 10,
-    },
+  /* CENTERED MODALS */
+  centeredModalShade: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+  },
+  keyboardAvoidingViewCentered: {
+    width: '100%',
+    maxHeight: '85%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalCardWrapper: {
+    position: 'relative',
+    width: '100%',
+  },
+  modalShadowBackdrop: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    right: -6,
+    bottom: -6,
+    backgroundColor: '#000000',
+    borderRadius: 20,
+  },
+  modalCardBody: {
+    borderRadius: 20,
+    borderWidth: 3,
+    borderColor: '#000000',
+    padding: 20,
+    maxHeight: 520,
+  },
+  modalTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  modalTitle: {
+    fontFamily: FONT_BOLD,
+    fontSize: 20,
+    flex: 1,
+    marginRight: 10,
+  },
+  modalError: {
+    fontFamily: FONT_BOLD,
+    color: '#EF4444',
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  modalScroll: {
+    flexGrow: 0,
+    flexShrink: 1,
+  },
+  modalScrollContent: {
+    paddingBottom: 16,
+  },
+  inputLabel: {
+    fontFamily: FONT_BOLD,
+    fontSize: 11,
+    letterSpacing: 0.5,
+    marginBottom: 6,
+    marginTop: 10,
+  },
+  modalTextInput: {
+    fontFamily: FONT_MED,
+    fontSize: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 2,
+  },
+  inputMulti: {
+    minHeight: 64,
+    textAlignVertical: 'top',
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  chip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#000000',
+  },
+  chipActive: {
+    backgroundColor: '#000000',
+  },
+  chipText: {
+    fontFamily: FONT_BOLD,
+    fontSize: 12,
+  },
+  customRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 10,
+    flexWrap: 'wrap',
+  },
+  customPrefix: {
+    fontFamily: FONT_BOLD,
+    fontSize: 13,
+  },
+  customInput: {
+    width: 60,
+    fontFamily: FONT_BOLD,
+    fontSize: 14,
+    textAlign: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    borderWidth: 2,
+  },
 
-    filterScroll: {
-      marginBottom: 18,
-    },
+  primaryBtn: {
+    backgroundColor: '#000000',
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 2.5,
+    borderColor: '#000000',
+    alignItems: 'center',
+    marginTop: 14,
+  },
+  primaryBtnText: {
+    fontFamily: FONT_BOLD,
+    color: '#FFFFFF',
+    fontSize: 15,
+  },
+  dangerBtn: {
+    backgroundColor: '#EF4444',
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 2.5,
+    borderColor: '#000000',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 14,
+  },
+  dangerBtnText: {
+    fontFamily: FONT_BOLD,
+    color: '#FFFFFF',
+    fontSize: 15,
+  },
 
-    filterRow: {
-      flexDirection: 'row',
-      gap: 8,
-    },
+  /* DETAIL MODAL SECTION */
+  detailSection: {
+    gap: 10,
+    marginVertical: 10,
+  },
+  detailLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  detailText: {
+    fontFamily: FONT_BOLD,
+    fontSize: 14,
+  },
+  detailNotes: {
+    fontFamily: FONT_MED,
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 4,
+  },
+  detailActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
 
-    filterTag: {
-      paddingHorizontal: 14,
-      paddingVertical: 8,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: C.border,
-      backgroundColor: C.card,
-    },
-
-    filterTagText: {
-      fontFamily: FONT,
-      fontSize: 12,
-      color: C.muted,
-    },
-
-    group: {
-      marginBottom: 18,
-    },
-
-    groupLabel: {
-      fontFamily: FONT_BOLD,
-      fontSize: 11,
-      letterSpacing: 1,
-      color: C.muted,
-      marginBottom: 8,
-      marginLeft: 4,
-    },
-
-    list: {
-      backgroundColor: C.card,
-      borderRadius: 18,
-      borderWidth: 1,
-      borderColor: C.border,
-      paddingHorizontal: 14,
-    },
-
-    row: {
-      minHeight: 72,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
-      paddingVertical: 12,
-    },
-
-    rowBorder: {
-      borderBottomWidth: 1,
-      borderBottomColor: C.divider,
-    },
-
-    check: {
-      width: 26,
-      height: 26,
-      borderRadius: 9,
-      borderWidth: 1.5,
-      borderColor: '#D8D5CE',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-
-    rowCopy: {
-      flex: 1,
-      gap: 4,
-    },
-
-    reminderTitle: {
-      fontFamily: FONT_MED,
-      fontSize: 15,
-      color: C.text,
-    },
-
-    doneTitle: {
-      textDecorationLine: 'line-through',
-      opacity: 0.5,
-    },
-
-    metaText: {
-      fontFamily: FONT,
-      fontSize: 12,
-      color: C.muted,
-    },
-
-    repeatPill: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      paddingHorizontal: 8,
-      paddingVertical: 4,
-      borderRadius: 8,
-      alignSelf: 'flex-start',
-      marginTop: 2,
-    },
-
-    repeatPillText: {
-      fontFamily: FONT_SEMI,
-      fontSize: 10,
-    },
-
-    empty: {
-      paddingVertical: 40,
-      alignItems: 'center',
-    },
-
-    emptyText: {
-      fontFamily: FONT,
-      fontSize: 14,
-      color: C.muted,
-      textAlign: 'center',
-    },
-
-    fab: {
-      position: 'absolute',
-      bottom: 30,
-      alignSelf: 'center',
-      width: 56,
-      height: 56,
-      borderRadius: 28,
-      alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: '#000',
-      shadowOpacity: 0.25,
-      shadowRadius: 8,
-      shadowOffset: { width: 0, height: 4 },
-      elevation: 6,
-    },
-
-    keyboardAvoidingView: {
-      flex: 1,
-    },
-
-    modalShade: {
-      flex: 1,
-      justifyContent:
-        'flex-end',
-      backgroundColor:
-        'rgba(0,0,0,0.45)',
-    },
-
-    modalCard: {
-      borderTopLeftRadius:
-        24,
-      borderTopRightRadius:
-        24,
-      padding: 22,
-      paddingBottom: 24,
-      maxHeight:
-        '92%',
-      flexShrink: 1,
-    },
-
-    modalTitleRow: {
-      flexDirection:
-        'row',
-      justifyContent:
-        'space-between',
-      alignItems:
-        'center',
-      marginBottom: 16,
-    },
-
-    modalTitle: {
-      fontFamily:
-        FONT_BOLD,
-      fontSize: 18,
-      flex: 1,
-      marginRight: 12,
-    },
-
-    modalScroll: {
-      flexGrow: 0,
-      flexShrink: 1,
-    },
-
-    modalScrollContent: {
-      paddingBottom: 24,
-    },
-
-    label: {
-      fontFamily: FONT_MED,
-      fontSize: 13,
-      color: C.muted,
-      marginTop: 14,
-      marginBottom: 6,
-    },
-
-    input: {
-      borderWidth: 1,
-      borderColor: C.inputBorder,
-      borderRadius: 12,
-      paddingHorizontal: 14,
-      paddingVertical: 11,
-      fontFamily: FONT,
-      fontSize: 15,
-      color: C.text,
-      backgroundColor: C.inputBg,
-    },
-
-    inputMulti: {
-      minHeight: 70,
-      textAlignVertical: 'top',
-    },
-
-    chipRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 8,
-    },
-
-    repeatRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 8,
-    },
-
-    chip: {
-      paddingHorizontal: 14,
-      paddingVertical: 8,
-      borderRadius: 10,
-      borderWidth: 1,
-      borderColor: C.border,
-      backgroundColor: C.card,
-    },
-
-    chipText: {
-      fontFamily: FONT,
-      fontSize: 13,
-      color: C.muted,
-    },
-
-    customRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-      marginTop: 12,
-      flexWrap: 'wrap',
-    },
-
-    customPrefix: {
-      fontFamily: FONT_MED,
-      fontSize: 14,
-      color: C.text,
-    },
-
-    customInput: {
-      width: 64,
-      borderWidth: 1,
-      borderColor: C.inputBorder,
-      borderRadius: 12,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      fontFamily: FONT,
-      fontSize: 15,
-      color: C.text,
-      textAlign: 'center',
-      backgroundColor: C.inputBg,
-    },
-
-    customUnitRow: {
-      flexDirection: 'row',
-      gap: 8,
-      flexWrap: 'wrap',
-    },
-
-    saveButton: {
-      borderRadius: 14,
-      paddingVertical: 14,
-      alignItems: 'center',
-      marginTop: 22,
-    },
-
-    saveText: {
-      fontFamily: FONT_SEMI,
-      fontSize: 15,
-    },
-
-    detailSection: {
-      marginTop: 8,
-      gap: 12,
-      paddingVertical: 8,
-    },
-
-    detailLine: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-    },
-
-    detailText: {
-      fontFamily: FONT_MED,
-      fontSize: 14,
-      color: C.text,
-    },
-
-    detailNotes: {
-      fontFamily: FONT,
-      fontSize: 14,
-      color: C.muted,
-      lineHeight: 20,
-      marginTop: 4,
-    },
-
-    detailActions: {
-      flexDirection: 'row',
-      gap: 12,
-      marginTop: 20,
-    },
-
-    detailAction: {
-      flex: 1,
-      borderRadius: 14,
-      paddingVertical: 14,
-      alignItems: 'center',
-      justifyContent: 'center',
-      flexDirection: 'row',
-      gap: 8,
-    },
-
-    deleteAction: {
-      backgroundColor: isDarkColor(C)
-        ? '#241815'
-        : '#FBEAE8',
-      borderWidth: 1,
-      borderColor: isDarkColor(C)
-        ? '#3A2422'
-        : '#F2C8C2',
-    },
-
-    deleteText: {
-      fontFamily: FONT_SEMI,
-      fontSize: 14,
-      color: '#C53A2F',
-    },
-
-    detailActionText: {
-      fontFamily: FONT_SEMI,
-      fontSize: 14,
-    },
-  });
-}
-
-function isDarkColor(C: Palette): boolean {
-  return C.bg === '#090909';
-}
+  /* ALERT MODAL */
+  alertShade: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  alertCardWrapper: {
+    position: 'relative',
+    width: '100%',
+  },
+  alertShadowBackdrop: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    right: -6,
+    bottom: -6,
+    backgroundColor: '#000000',
+    borderRadius: 18,
+  },
+  alertCardBody: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    borderWidth: 3,
+    borderColor: '#000000',
+    padding: 20,
+  },
+  alertHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 10,
+  },
+  alertIconBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#FDE047',
+    borderWidth: 2,
+    borderColor: '#000000',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  alertTitle: {
+    fontFamily: FONT_BOLD,
+    fontSize: 18,
+    color: '#000000',
+  },
+  alertMessage: {
+    fontFamily: FONT_MED,
+    fontSize: 13,
+    color: '#3F3F46',
+    lineHeight: 18,
+    marginBottom: 18,
+  },
+  alertActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  alertCancelBtn: {
+    flex: 1,
+    backgroundColor: '#F4F4F5',
+    borderWidth: 2,
+    borderColor: '#000000',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  alertCancelText: {
+    fontFamily: FONT_BOLD,
+    color: '#000000',
+    fontSize: 13,
+  },
+  alertDeleteBtn: {
+    flex: 1,
+    backgroundColor: '#EF4444',
+    borderWidth: 2,
+    borderColor: '#000000',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  alertDeleteText: {
+    fontFamily: FONT_BOLD,
+    color: '#FFFFFF',
+    fontSize: 13,
+  },
+});

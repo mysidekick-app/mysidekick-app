@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   View,
@@ -32,24 +33,24 @@ import {
 
 const DARK_PALETTE = {
   bg: '#090909',
-  card: '#151515',
-  cardBorder: '#2A2A2A',
-  text: '#F4F2EE',
-  muted: '#AAA59D',
+  card: '#121212',
+  cardBorder: '#000000',
+  text: '#FFFFFF',
+  muted: '#A1A1AA',
   divider: '#262626',
-  danger: '#E05252',
-  inputBg: '#1C1C1C',
+  danger: '#EF4444',
+  inputBg: '#1E1E1E',
 };
 
 const LIGHT_PALETTE = {
   bg: '#FBFAF8',
   card: '#FFFFFF',
-  cardBorder: '#ECE9E4',
-  text: '#27241F',
-  muted: '#8F8A82',
-  divider: '#F0EEEA',
-  danger: '#E05252',
-  inputBg: '#F5F3EF',
+  cardBorder: '#000000',
+  text: '#000000',
+  muted: '#52525B',
+  divider: '#E4E4E7',
+  danger: '#EF4444',
+  inputBg: '#F4F4F5',
 };
 
 const FONT = 'Poppins-Regular';
@@ -131,13 +132,13 @@ export default function MoodTrackerScreen() {
   const {
     isDark,
     accentForeground,
-    accentWash,
     onAccent,
-  } = useApp();
+  } = useApp() as any;
 
   const { user } = useAuth();
 
-  const accent = accentForeground;
+  const accent = accentForeground || '#FDE047';
+  const pageBg = accent;
 
   const COLORS = isDark
     ? DARK_PALETTE
@@ -507,38 +508,35 @@ export default function MoodTrackerScreen() {
 
   return (
     <SafeAreaView
-      style={styles.safe}
+      style={[styles.safe, { backgroundColor: pageBg }]}
       edges={['top', 'bottom']}
     >
+      <StatusBar barStyle="dark-content" backgroundColor={pageBg} />
+
       {/* Header */}
       <View
         style={[
           styles.header,
-          { paddingTop: 28 },
+          { paddingTop: 12 },
         ]}
       >
         <Pressable
           onPress={() =>
             router.push('/(tabs)/modules/wellbeing')
           }
-          style={[
-            styles.backBtn,
-            {
-              backgroundColor: accent,
-            },
-          ]}
+          style={({ pressed }) => [styles.backBtn, pressed && styles.pressedBtn]}
           hitSlop={12}
           accessibilityLabel="Go back"
         >
           <ChevronLeft
             color="#FFFFFF"
             size={22}
-            strokeWidth={2.4}
+            strokeWidth={2.8}
           />
         </Pressable>
 
         <Text
-          style={styles.headerTitle}
+          style={[styles.headerTitle, { color: '#000000' }]}
         >
           MOOD TRACKER
         </Text>
@@ -547,41 +545,34 @@ export default function MoodTrackerScreen() {
           onPress={() =>
             setMenuOpen(prev => !prev)
           }
-          style={styles.menuBtn}
+          style={({ pressed }) => [styles.menuBtn, pressed && styles.pressedBtn]}
           hitSlop={12}
           accessibilityLabel="Open settings menu"
         >
           <MoreVertical
-            color={COLORS.text}
-            size={22}
-            strokeWidth={2.3}
+            color="#000000"
+            size={24}
+            strokeWidth={2.5}
           />
         </Pressable>
       </View>
 
       {menuOpen ? (
-        <View
-          style={[
-            styles.menu,
-            {
-              backgroundColor: COLORS.card,
-              borderColor: COLORS.cardBorder,
-            },
-          ]}
-        >
-          <Pressable
-            onPress={openSettings}
-            style={({ pressed }) => [
-              styles.menuItem,
-              pressed &&
-                styles.menuItemPressed,
-            ]}
-          >
-            <Text
-              style={styles.menuItemText}
-            >
-              Settings
-            </Text>
+        <View style={styles.menuShadeOverlay}>
+          <Pressable style={{ flex: 1 }} onPress={() => setMenuOpen(false)}>
+            <View style={styles.menuCardWrapper}>
+              <View style={styles.shadowBackdrop} />
+              <View style={[styles.menuCardBody, { backgroundColor: COLORS.card }]}>
+                <Pressable
+                  onPress={openSettings}
+                  style={styles.menuItem}
+                >
+                  <Text style={[styles.menuItemText, { color: COLORS.text }]}>
+                    Settings
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
           </Pressable>
         </View>
       ) : null}
@@ -598,42 +589,51 @@ export default function MoodTrackerScreen() {
         <Text
           style={[
             styles.dateLabel,
-            { color: isDark ? '#FFFFFF' : accent },
+            { color: '#000000' },
           ]}
         >
           {prettyDateLabel(selectedDate)}
         </Text>
 
-        {/* Calendar */}
-        <WellbeingCalendar
-          selectedDate={selectedDate}
-          onSelectDate={
-            onSelectDate
-          }
-          accent={accent}
-          isDark={isDark}
-          entryDates={
-            allEntryDates
-          }
-        />
+        {/* Calendar with forced white background wrapper for calendar component */}
+        <View style={styles.cardContainer}>
+          <View style={styles.cardShadowBackdrop} />
+          <View style={[styles.calendarCardWrapper, { backgroundColor: '#FFFFFF', borderColor: '#000000' }]}>
+            <WellbeingCalendar
+              selectedDate={selectedDate}
+              onSelectDate={
+                onSelectDate
+              }
+              accent={accent}
+              isDark={false}
+              entryDates={
+                allEntryDates
+              }
+            />
+          </View>
+        </View>
 
         {/* Future notice */}
         {isFuture ? (
-          <View
-            style={
-              styles.futureNotice
-            }
-          >
-            <Text
-              style={
-                styles.futureText
-              }
+          <View style={styles.cardContainer}>
+            <View style={styles.cardShadowBackdrop} />
+            <View
+              style={[
+                styles.futureNotice,
+                { backgroundColor: '#FEE2E2', borderColor: '#000000' },
+              ]}
             >
-              You can only log a mood
-              for today or earlier.
-              Pick a past date to
-              continue.
-            </Text>
+              <Text
+                style={
+                  styles.futureText
+                }
+              >
+                You can only log a mood
+                for today or earlier.
+                Pick a past date to
+                continue.
+              </Text>
+            </View>
           </View>
         ) : null}
 
@@ -644,174 +644,176 @@ export default function MoodTrackerScreen() {
           >
             <ActivityIndicator
               size="large"
-              color={accent}
+              color="#000000"
             />
 
             <Text
-              style={styles.stateText}
+              style={[styles.stateText, { color: '#000000' }]}
             >
               Loading your entry…
             </Text>
           </View>
         ) : error ? (
-          <View
-            style={styles.centerState}
-          >
-            <Text
-              style={styles.errorText}
-            >
-              {error}
-            </Text>
-
-            <Pressable
-              onPress={() =>
-                loadEntry(
-                  selectedDate,
-                )
-              }
+          <View style={styles.cardContainer}>
+            <View style={styles.cardShadowBackdrop} />
+            <View
               style={[
-                styles.retryBtn,
-                {
-                  backgroundColor:
-                    accent,
-                },
+                styles.centerStateCard,
+                { backgroundColor: '#FEE2E2', borderColor: '#000000' },
               ]}
             >
               <Text
-                style={[
-                  styles.retryText,
-                  {
-                    color:
-                      onAccent,
-                  },
+                style={styles.errorText}
+              >
+                {error}
+              </Text>
+
+              <Pressable
+                onPress={() =>
+                  loadEntry(
+                    selectedDate,
+                  )
+                }
+                style={({ pressed }) => [
+                  styles.retryBtn,
+                  { backgroundColor: '#000000', borderColor: '#000000' },
+                  pressed && styles.pressedBtn,
                 ]}
               >
-                Retry
-              </Text>
-            </Pressable>
+                <Text
+                  style={[
+                    styles.retryText,
+                    {
+                      color: '#FFFFFF',
+                    },
+                  ]}
+                >
+                  Retry
+                </Text>
+              </Pressable>
+            </View>
           </View>
         ) : (
           <>
             {/* Selector card */}
-            <View
-              style={
-                styles.selectorCard
-              }
-            >
-              <Text
-                style={
-                  styles.selectorEyebrow
-                }
-              >
-                HOW ARE YOU FEELING?
-              </Text>
-
-              <Text
-                style={
-                  styles.selectorHint
-                }
-              >
-                Tap the mood that best
-                matches your day.
-              </Text>
-
+            <View style={styles.cardContainer}>
+              <View style={styles.cardShadowBackdrop} />
               <View
-                style={styles.moodRow}
+                style={[
+                  styles.selectorCard,
+                  { backgroundColor: COLORS.card, borderColor: '#000000' },
+                ]}
               >
-                {MOOD_OPTIONS.map(
-                  opt => {
-                    const isSelected =
-                      moodValue ===
-                      opt.value;
-
-                    return (
-                      <Pressable
-                        key={
-                          opt.value
-                        }
-                        onPress={() =>
-                          !isFuture &&
-                          setMoodValue(
-                            opt.value,
-                          )
-                        }
-                        disabled={
-                          isFuture
-                        }
-                        style={({
-                          pressed,
-                        }) => [
-                          styles.moodBtn,
-                          isSelected && {
-                            backgroundColor:
-                              accent,
-                            borderColor:
-                              accent,
-                          },
-                          isFuture &&
-                            styles.moodBtnDisabled,
-                          pressed &&
-                            styles.moodBtnPressed,
-                        ]}
-                        accessibilityLabel={`Mood: ${opt.label}`}
-                      >
-                        <Text
-                          style={
-                            styles.moodEmoji
-                          }
-                        >
-                          {
-                            opt.emoji
-                          }
-                        </Text>
-
-                        <Text
-                          style={[
-                            styles.moodLabel,
-                            isSelected && [
-                              styles.moodLabelSelected,
-                              {
-                                color:
-                                  onAccent,
-                              },
-                            ],
-                          ]}
-                        >
-                          {opt.label.toUpperCase()}
-                        </Text>
-                      </Pressable>
-                    );
-                  },
-                )}
-              </View>
-
-              {selectedMood ? (
-                <View
+                <Text
                   style={
-                    styles.selectedSummary
+                    styles.selectorEyebrow
                   }
                 >
-                  <Text
-                    style={
-                      styles.selectedEmoji
-                    }
-                  >
-                    {
-                      selectedMood.emoji
-                    }
-                  </Text>
+                  HOW ARE YOU FEELING?
+                </Text>
 
-                  <Text
-                    style={
-                      styles.selectedText
-                    }
-                  >
-                    Feeling{' '}
-                    {selectedMood.label.toLowerCase()}{' '}
-                    today.
-                  </Text>
+                <Text
+                  style={[
+                    styles.selectorHint,
+                    { color: COLORS.muted },
+                  ]}
+                >
+                  Tap the mood that best
+                  matches your day.
+                </Text>
+
+                <View
+                  style={styles.moodRow}
+                >
+                  {MOOD_OPTIONS.map(
+                    opt => {
+                      const isSelected =
+                        moodValue ===
+                        opt.value;
+
+                      return (
+                        <Pressable
+                          key={
+                            opt.value
+                          }
+                          onPress={() =>
+                            !isFuture &&
+                            setMoodValue(
+                              opt.value,
+                            )
+                          }
+                          disabled={
+                            isFuture
+                          }
+                          style={({
+                            pressed,
+                          }) => [
+                            styles.moodBtn,
+                            {
+                              backgroundColor: isSelected ? accent : COLORS.inputBg,
+                              borderColor: '#000000',
+                            },
+                            isFuture &&
+                              styles.moodBtnDisabled,
+                            pressed &&
+                              styles.pressedBtn,
+                          ]}
+                          accessibilityLabel={`Mood: ${opt.label}`}
+                        >
+                          <Text
+                            style={
+                              styles.moodEmoji
+                            }
+                          >
+                            {
+                              opt.emoji
+                            }
+                          </Text>
+
+                          <Text
+                            style={[
+                              styles.moodLabel,
+                              { color: isSelected ? '#000000' : COLORS.muted },
+                            ]}
+                          >
+                            {opt.label.toUpperCase()}
+                          </Text>
+                        </Pressable>
+                      );
+                    },
+                  )}
                 </View>
-              ) : null}
+
+                {selectedMood ? (
+                  <View
+                    style={[
+                      styles.selectedSummary,
+                      { borderTopColor: COLORS.divider },
+                    ]}
+                  >
+                    <Text
+                      style={
+                        styles.selectedEmoji
+                      }
+                    >
+                      {
+                        selectedMood.emoji
+                      }
+                    </Text>
+
+                    <Text
+                      style={[
+                        styles.selectedText,
+                        { color: COLORS.text },
+                      ]}
+                    >
+                      Feeling{' '}
+                      {selectedMood.label.toLowerCase()}{' '}
+                      today.
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
             </View>
 
             {/* Save feedback */}
@@ -819,267 +821,278 @@ export default function MoodTrackerScreen() {
               <Text
                 style={[
                   styles.saveMsg,
-                  {
-                    color: accent,
-                  },
+                  { color: '#000000' },
                 ]}
               >
                 {saveMsg}
               </Text>
             ) : null}
 
-            {/* Save button */}
-            <Pressable
-              onPress={onSave}
-              disabled={
-                saving ||
-                isFuture ||
-                moodValue === null
-              }
-              style={({ pressed }) => [
-                styles.saveBtn,
-                {
-                  backgroundColor:
-                    accent,
-                },
-                (saving ||
+            {/* Save button container with full shadow */}
+            <View style={styles.cardContainer}>
+              <View style={styles.cardShadowBackdrop} />
+              <Pressable
+                onPress={onSave}
+                disabled={
+                  saving ||
                   isFuture ||
-                  moodValue === null) &&
-                  styles.saveBtnDisabled,
-                pressed &&
-                  styles.saveBtnPressed,
-              ]}
-            >
-              {saving ? (
-                <ActivityIndicator
-                  size="small"
-                  color={onAccent}
-                />
-              ) : (
-                <Text
-                  style={[
-                    styles.saveBtnText,
-                    {
-                      color:
-                        onAccent,
-                    },
-                  ]}
-                >
-                  SAVE MOOD
-                </Text>
-              )}
-            </Pressable>
-
-            {/* History card */}
-            <View
-              style={
-                styles.historyCard
-              }
-            >
-              <View
-                style={
-                  styles.historyHeader
+                  moodValue === null
                 }
+                style={({ pressed }) => [
+                  styles.saveBtn,
+                  {
+                    backgroundColor: '#000000',
+                    borderColor: '#000000',
+                  },
+                  (saving ||
+                    isFuture ||
+                    moodValue === null) &&
+                    styles.saveBtnDisabled,
+                  pressed &&
+                    styles.pressedBtn,
+                ]}
               >
-                <Text
-                  style={
-                    styles.historyTitle
-                  }
-                >
-                  RECENT MOODS
-                </Text>
-
-                <Text
-                  style={
-                    styles.historyCount
-                  }
-                >
-                  Last 7
-                </Text>
-              </View>
-
-              {historyLoading ? (
-                <View
-                  style={
-                    styles.historyState
-                  }
-                >
+                {saving ? (
                   <ActivityIndicator
                     size="small"
-                    color={
-                      COLORS.muted
-                    }
+                    color="#FFFFFF"
                   />
-
+                ) : (
                   <Text
-                    style={
-                      styles.historyStateText
-                    }
-                  >
-                    Loading history…
-                  </Text>
-                </View>
-              ) : historyError ? (
-                <View
-                  style={
-                    styles.historyState
-                  }
-                >
-                  <Text
-                    style={
-                      styles.errorText
-                    }
-                  >
-                    {historyError}
-                  </Text>
-
-                  <Pressable
-                    onPress={
-                      loadHistory
-                    }
                     style={[
-                      styles.retryBtnSmall,
+                      styles.saveBtnText,
                       {
-                        backgroundColor:
-                          accent,
+                        color: '#FFFFFF',
                       },
                     ]}
                   >
-                    <Text
-                      style={[
-                        styles.retryText,
-                        {
-                          color:
-                            onAccent,
-                        },
-                      ]}
-                    >
-                      Retry
-                    </Text>
-                  </Pressable>
-                </View>
-              ) : history.length === 0 ? (
+                    SAVE MOOD
+                  </Text>
+                )}
+              </Pressable>
+            </View>
+
+            {/* History card */}
+            <View style={styles.cardContainer}>
+              <View style={styles.cardShadowBackdrop} />
+              <View
+                style={[
+                  styles.historyCard,
+                  { backgroundColor: COLORS.card, borderColor: '#000000' },
+                ]}
+              >
                 <View
                   style={
-                    styles.historyState
+                    styles.historyHeader
                   }
                 >
                   <Text
                     style={
-                      styles.historyStateText
+                      styles.historyTitle
                     }
                   >
-                    No moods logged yet.
-                    Save your first
-                    entry above.
+                    RECENT MOODS
+                  </Text>
+
+                  <Text
+                    style={[
+                      styles.historyCount,
+                      { color: COLORS.muted },
+                    ]}
+                  >
+                    Last 7
                   </Text>
                 </View>
-              ) : (
-                <View
-                  style={
-                    styles.historyList
-                  }
-                >
-                  {history.map(
-                    row => {
-                      const mv =
-                        row.mood_value;
 
-                      const mood =
-                        mv !== null &&
-                        mv !== undefined &&
-                        mv >= 1 &&
-                        mv <= 5
-                          ? MOOD_BY_VALUE.get(
-                              mv as MoodLevel,
-                            )
-                          : null;
+                {historyLoading ? (
+                  <View
+                    style={
+                      styles.historyState
+                    }
+                  >
+                    <ActivityIndicator
+                      size="small"
+                      color={
+                        COLORS.muted
+                      }
+                    />
 
-                      const isCurrent =
-                        row.entry_date ===
-                        selectedDate;
+                    <Text
+                      style={[
+                        styles.historyStateText,
+                        { color: COLORS.muted },
+                      ]}
+                    >
+                      Loading history…
+                    </Text>
+                  </View>
+                ) : historyError ? (
+                  <View
+                    style={
+                      styles.historyState
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.errorText
+                      }
+                    >
+                      {historyError}
+                    </Text>
 
-                      return (
-                        <View
-                          key={row.id}
-                          style={[
-                            styles.historyRow,
-                            isCurrent && [
-                              styles.historyRowCurrent,
-                              {
-                                backgroundColor:
-                                  accent,
-                              },
-                            ],
-                          ]}
-                        >
-                          <Text
+                    <Pressable
+                      onPress={
+                        loadHistory
+                      }
+                      style={({ pressed }) => [
+                        styles.retryBtnSmall,
+                        {
+                          backgroundColor: '#000000',
+                          borderColor: '#000000',
+                        },
+                        pressed && styles.pressedBtn,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.retryText,
+                          {
+                            color: '#FFFFFF',
+                          },
+                        ]}
+                      >
+                        Retry
+                      </Text>
+                    </Pressable>
+                  </View>
+                ) : history.length === 0 ? (
+                  <View
+                    style={
+                      styles.historyState
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.historyStateText,
+                        { color: COLORS.muted },
+                      ]}
+                    >
+                      No moods logged yet.
+                      Save your first
+                      entry above.
+                    </Text>
+                  </View>
+                ) : (
+                  <View
+                    style={
+                      styles.historyList
+                    }
+                  >
+                    {history.map(
+                      row => {
+                        const mv =
+                          row.mood_value;
+
+                        const mood =
+                          mv !== null &&
+                          mv !== undefined &&
+                          mv >= 1 &&
+                          mv <= 5
+                            ? MOOD_BY_VALUE.get(
+                                mv as MoodLevel,
+                              )
+                            : null;
+
+                        const isCurrent =
+                          row.entry_date ===
+                          selectedDate;
+
+                        return (
+                          <View
+                            key={row.id}
                             style={[
-                              styles.historyEmoji,
-                              isCurrent && {
-                                color:
-                                  '#FFFFFF',
-                              },
+                              styles.historyRow,
+                              { borderBottomColor: COLORS.divider },
+                              isCurrent && [
+                                styles.historyRowCurrent,
+                                {
+                                  backgroundColor: accent,
+                                  borderColor: '#000000',
+                                  borderWidth: 2,
+                                },
+                              ],
                             ]}
                           >
-                            {mood
-                              ? mood.emoji
-                              : '—'}
-                          </Text>
-
-                          <View
-                            style={{
-                              flex: 1,
-                            }}
-                          >
                             <Text
                               style={[
-                                styles.historyDate,
+                                styles.historyEmoji,
                                 isCurrent && {
                                   color:
-                                    '#FFFFFF',
-                                },
-                              ]}
-                            >
-                              {shortDateLabel(
-                                row.entry_date,
-                              )}
-                            </Text>
-
-                            <Text
-                              style={[
-                                styles.historyMoodLabel,
-                                isCurrent && {
-                                  color:
-                                    'rgba(255,255,255,0.82)',
+                                    '#000000',
                                 },
                               ]}
                             >
                               {mood
-                                ? mood.label
-                                : 'Unknown'}
+                                ? mood.emoji
+                                : '—'}
                             </Text>
-                          </View>
 
-                          {isCurrent ? (
-                            <Text
-                              style={[
-                                styles.historyCurrentTag,
-                                {
-                                  color:
-                                    '#FFFFFF',
-                                },
-                              ]}
+                            <View
+                              style={{
+                                flex: 1,
+                              }}
                             >
-                              NOW
-                            </Text>
-                          ) : null}
-                        </View>
-                      );
-                    },
-                  )}
-                </View>
-              )}
+                              <Text
+                                style={[
+                                  styles.historyDate,
+                                  { color: COLORS.text },
+                                  isCurrent && {
+                                    color:
+                                      '#000000',
+                                  },
+                                ]}
+                              >
+                                {shortDateLabel(
+                                  row.entry_date,
+                                )}
+                              </Text>
+
+                              <Text
+                                style={[
+                                  styles.historyMoodLabel,
+                                  { color: COLORS.muted },
+                                  isCurrent && {
+                                    color:
+                                      '#000000',
+                                  },
+                                ]}
+                              >
+                                {mood
+                                  ? mood.label
+                                  : 'Unknown'}
+                              </Text>
+                            </View>
+
+                            {isCurrent ? (
+                              <Text
+                                style={[
+                                  styles.historyCurrentTag,
+                                  {
+                                    color:
+                                      '#000000',
+                                  },
+                                ]}
+                              >
+                                NOW
+                              </Text>
+                            ) : null}
+                          </View>
+                        );
+                      },
+                    )}
+                  </View>
+                )}
+              </View>
             </View>
           </>
         )}
@@ -1098,63 +1111,78 @@ function makeStyles(C: Palette) {
   return StyleSheet.create({
     safe: {
       flex: 1,
-      backgroundColor: C.bg,
+    },
+
+    pressedBtn: {
+      transform: [{ translateX: 2 }, { translateY: 2 }],
     },
 
     header: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      paddingHorizontal: 16,
-      paddingTop: 28,
-      paddingVertical: 12,
-      borderBottomWidth: 1,
-      borderBottomColor: C.divider,
+      paddingHorizontal: 20,
+      paddingTop: 12,
+      paddingBottom: 10,
+      zIndex: 100,
     },
 
     backBtn: {
-      width: 38,
-      height: 38,
-      borderRadius: 19,
+      width: 40,
+      height: 40,
+      borderRadius: 8,
+      backgroundColor: '#000000',
       alignItems: 'center',
       justifyContent: 'center',
+      borderWidth: 2,
+      borderColor: '#000000',
     },
 
     headerTitle: {
       fontFamily: FONT_XB,
-      fontSize: 16,
-      letterSpacing: 1.4,
-      color: C.text,
+      fontSize: 22,
+      letterSpacing: 1,
     },
 
     menuBtn: {
-      width: 38,
-      height: 38,
+      width: 40,
+      height: 40,
       alignItems: 'center',
       justifyContent: 'center',
     },
 
-    menu: {
+    menuShadeOverlay: {
       position: 'absolute',
-      top: 76,
-      right: 14,
-      minWidth: 150,
-      borderWidth: 1,
-      borderRadius: 14,
-      paddingVertical: 6,
+      top: 55,
+      right: 20,
       zIndex: 1000,
-      elevation: 8,
-      shadowOffset: {
-        width: 0,
-        height: 4,
-      },
-      shadowOpacity: 0.18,
-      shadowRadius: 10,
+    },
+
+    menuCardWrapper: {
+      position: 'relative',
+      width: 170,
+    },
+
+    shadowBackdrop: {
+      position: 'absolute',
+      top: 4,
+      left: 4,
+      right: -4,
+      bottom: -4,
+      backgroundColor: '#000000',
+      borderRadius: 12,
+    },
+
+    menuCardBody: {
+      borderRadius: 12,
+      paddingVertical: 4,
+      borderWidth: 2.5,
+      borderColor: '#000000',
     },
 
     menuItem: {
-      paddingHorizontal: 16,
       paddingVertical: 12,
+      paddingHorizontal: 16,
     },
 
     menuItemPressed: {
@@ -1162,54 +1190,68 @@ function makeStyles(C: Palette) {
     },
 
     menuItemText: {
-      fontFamily: FONT_MEDIUM,
-      fontSize: 13.5,
-      color: C.text,
+      fontFamily: FONT_BOLD,
+      fontSize: 13,
     },
 
     scroll: {
-      padding: 16,
-      paddingBottom: 48,
+      padding: 18,
+      paddingBottom: 100,
     },
 
     dateLabel: {
-      fontFamily: FONT_SEMI,
-      fontSize: 13,
-      letterSpacing: 0.4,
+      fontFamily: FONT_XB,
+      fontSize: 14,
+      letterSpacing: 0.5,
       marginBottom: 14,
       textTransform: 'uppercase',
     },
 
-    futureNotice: {
-      backgroundColor:
-        'rgba(224,82,82,0.08)',
-      borderWidth: 1,
-      borderColor:
-        'rgba(224,82,82,0.35)',
-      borderRadius: 14,
-      paddingHorizontal: 14,
-      paddingVertical: 12,
+    cardContainer: {
+      position: 'relative',
+      width: '100%',
       marginBottom: 16,
     },
 
+    cardShadowBackdrop: {
+      position: 'absolute',
+      top: 4,
+      left: 4,
+      right: -4,
+      bottom: -4,
+      backgroundColor: '#000000',
+      borderRadius: 16,
+    },
+
+    calendarCardWrapper: {
+      borderRadius: 16,
+      borderWidth: 3,
+      padding: 12,
+      overflow: 'hidden',
+    },
+
+    futureNotice: {
+      borderWidth: 3,
+      borderRadius: 16,
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+    },
+
     futureText: {
-      fontFamily: FONT_MEDIUM,
-      fontSize: 12.5,
+      fontFamily: FONT_BOLD,
+      fontSize: 13,
       lineHeight: 18,
-      color: C.danger,
+      color: '#DC2626',
     },
 
     selectorCard: {
-      backgroundColor: C.card,
-      borderWidth: 1,
-      borderColor: C.cardBorder,
+      borderWidth: 3,
       borderRadius: 16,
       padding: 16,
-      marginBottom: 4,
     },
 
     selectorEyebrow: {
-      fontFamily: FONT_BOLD,
+      fontFamily: FONT_XB,
       fontSize: 11,
       letterSpacing: 1.3,
       color: C.muted,
@@ -1219,7 +1261,6 @@ function makeStyles(C: Palette) {
     selectorHint: {
       fontFamily: FONT,
       fontSize: 12.5,
-      color: C.muted,
       marginBottom: 16,
       lineHeight: 17,
     },
@@ -1234,16 +1275,10 @@ function makeStyles(C: Palette) {
       flex: 1,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: C.inputBg,
-      borderWidth: 1,
-      borderColor: C.cardBorder,
-      borderRadius: 14,
+      borderWidth: 2,
+      borderRadius: 12,
       paddingVertical: 14,
       gap: 6,
-    },
-
-    moodBtnPressed: {
-      opacity: 0.85,
     },
 
     moodBtnDisabled: {
@@ -1256,13 +1291,10 @@ function makeStyles(C: Palette) {
     },
 
     moodLabel: {
-      fontFamily: FONT_BOLD,
+      fontFamily: FONT_XB,
       fontSize: 9.5,
       letterSpacing: 0.8,
-      color: C.muted,
     },
-
-    moodLabelSelected: {},
 
     selectedSummary: {
       flexDirection: 'row',
@@ -1270,8 +1302,7 @@ function makeStyles(C: Palette) {
       gap: 10,
       marginTop: 16,
       paddingTop: 14,
-      borderTopWidth: 1,
-      borderTopColor: C.divider,
+      borderTopWidth: 2,
     },
 
     selectedEmoji: {
@@ -1282,12 +1313,11 @@ function makeStyles(C: Palette) {
     selectedText: {
       fontFamily: FONT_MEDIUM,
       fontSize: 13,
-      color: C.text,
     },
 
     saveMsg: {
-      fontFamily: FONT_SEMI,
-      fontSize: 12.5,
+      fontFamily: FONT_XB,
+      fontSize: 13,
       marginTop: 12,
       textAlign: 'center',
     },
@@ -1295,32 +1325,25 @@ function makeStyles(C: Palette) {
     saveBtn: {
       alignItems: 'center',
       justifyContent: 'center',
-      paddingVertical: 15,
-      borderRadius: 14,
-      marginTop: 18,
+      paddingVertical: 16,
+      borderRadius: 16,
+      borderWidth: 3,
     },
 
     saveBtnDisabled: {
       opacity: 0.45,
     },
 
-    saveBtnPressed: {
-      opacity: 0.82,
-    },
-
     saveBtnText: {
-      fontFamily: FONT_BOLD,
-      fontSize: 13,
+      fontFamily: FONT_XB,
+      fontSize: 15,
       letterSpacing: 1.2,
     },
 
     historyCard: {
-      backgroundColor: C.card,
-      borderWidth: 1,
-      borderColor: C.cardBorder,
+      borderWidth: 3,
       borderRadius: 16,
       padding: 16,
-      marginTop: 22,
     },
 
     historyHeader: {
@@ -1331,17 +1354,16 @@ function makeStyles(C: Palette) {
     },
 
     historyTitle: {
-      fontFamily: FONT_BOLD,
+      fontFamily: FONT_XB,
       fontSize: 11,
       letterSpacing: 1.3,
       color: C.muted,
     },
 
     historyCount: {
-      fontFamily: FONT_MEDIUM,
+      fontFamily: FONT_BOLD,
       fontSize: 10.5,
       letterSpacing: 0.6,
-      color: C.muted,
     },
 
     historyList: {
@@ -1354,14 +1376,13 @@ function makeStyles(C: Palette) {
       gap: 12,
       paddingVertical: 10,
       borderBottomWidth: 1,
-      borderBottomColor: C.divider,
     },
 
     historyRowCurrent: {
       borderRadius: 10,
       paddingHorizontal: 8,
       marginHorizontal: -8,
-      borderBottomColor: 'transparent',
+      borderBottomWidth: 2,
     },
 
     historyEmoji: {
@@ -1372,20 +1393,18 @@ function makeStyles(C: Palette) {
     },
 
     historyDate: {
-      fontFamily: FONT_SEMI,
+      fontFamily: FONT_BOLD,
       fontSize: 12.5,
-      color: C.text,
     },
 
     historyMoodLabel: {
-      fontFamily: FONT,
+      fontFamily: FONT_MEDIUM,
       fontSize: 11,
-      color: C.muted,
       marginTop: 2,
     },
 
     historyCurrentTag: {
-      fontFamily: FONT_BOLD,
+      fontFamily: FONT_XB,
       fontSize: 9.5,
       letterSpacing: 1,
     },
@@ -1397,25 +1416,33 @@ function makeStyles(C: Palette) {
       gap: 14,
     },
 
+    centerStateCard: {
+      borderWidth: 3,
+      borderRadius: 16,
+      padding: 24,
+      alignItems: 'center',
+      gap: 14,
+    },
+
     stateText: {
-      fontFamily: FONT,
-      fontSize: 13.5,
-      color: C.muted,
+      fontFamily: FONT_BOLD,
+      fontSize: 14,
       textAlign: 'center',
     },
 
     errorText: {
-      fontFamily: FONT_MEDIUM,
+      fontFamily: FONT_BOLD,
       fontSize: 13.5,
-      color: C.danger,
+      color: '#DC2626',
       textAlign: 'center',
       lineHeight: 19,
     },
 
     retryBtn: {
       paddingHorizontal: 22,
-      paddingVertical: 10,
+      paddingVertical: 12,
       borderRadius: 12,
+      borderWidth: 2,
     },
 
     retryBtnSmall: {
@@ -1423,11 +1450,12 @@ function makeStyles(C: Palette) {
       paddingVertical: 8,
       borderRadius: 10,
       marginTop: 4,
+      borderWidth: 2,
     },
 
     retryText: {
-      fontFamily: FONT_BOLD,
-      fontSize: 12.5,
+      fontFamily: FONT_XB,
+      fontSize: 13,
     },
 
     historyState: {
@@ -1438,9 +1466,8 @@ function makeStyles(C: Palette) {
     },
 
     historyStateText: {
-      fontFamily: FONT,
+      fontFamily: FONT_BOLD,
       fontSize: 12.5,
-      color: C.muted,
       textAlign: 'center',
       lineHeight: 18,
     },
