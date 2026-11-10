@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StatusBar, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Check, CheckCheck, ChevronLeft, MoreVertical, Plus, Search, Send, UserPlus, X } from 'lucide-react-native';
-import { router, useLocalSearchParams, useFocusEffect, useNavigation } from 'expo-router';
+import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useApp } from '@/components/AppProvider';
 import SidekickAvatar from '@/components/SidekickAvatar';
 import { supabase } from '@/lib/supabase';
@@ -93,21 +93,6 @@ export default function ChatScreen() {
     params.shareStreak === 'true' ||
     params.flex === '1' ||
     params.flex === 'true';
-
-  // Hide the parent Tabs navbar while Share Streak is active.
-  // The query params are owned by this screen, so handle the tab bar here
-  // rather than relying on the Tabs layout to read child route params.
-  const navigation = useNavigation();
-
-  useEffect(() => {
-    navigation.setOptions({
-      tabBarStyle: flexMode ? { display: 'none' } : undefined,
-    } as never);
-
-    return () => {
-      navigation.setOptions({ tabBarStyle: undefined } as never);
-    };
-  }, [flexMode, navigation]);
 
   const streakCount = Number(params.streak ?? 0);
   const habitTitle =
@@ -852,9 +837,6 @@ export default function ChatScreen() {
     setFlexSearch('');
     setFlexError(null);
 
-    // Clear Share Streak route params before leaving this screen.
-    // Expo Router can retain tab route params when the user returns to Chat;
-    // without clearing them, the normal Chat tab can reopen in Share Streak mode.
     router.setParams({
       shareStreak: 'false',
       flex: 'false',
@@ -1719,8 +1701,6 @@ const styles = StyleSheet.create({
   search: { height: 48, borderRadius: 12, borderWidth: 2, borderColor: '#000000', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, gap: 10, zIndex: 2 },
   searchInput: { flex: 1, fontFamily: 'Poppins-Medium', fontSize: 14 },
 
-  addFriendWrapper: { position: 'relative', width: 48, height: 48 },
-  addFriendShadowBackdrop: { position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 },
   addFriendBtn: {
     width: 48,
     height: 48,
@@ -1733,8 +1713,6 @@ const styles = StyleSheet.create({
   },
 
   filters: { gap: 12, paddingVertical: 12, paddingLeft: 4 },
-  filterWrapper: { position: 'relative', height: 36 },
-  filterShadowBackdrop: { position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 10 },
   filter: { paddingHorizontal: 16, height: 36, borderRadius: 10, borderWidth: 2, justifyContent: 'center', alignItems: 'center', zIndex: 2 },
   filterText: { fontFamily: 'Poppins-Bold', fontSize: 12 },
   addTagFilter: { flexDirection: 'row', gap: 5, paddingHorizontal: 12 },
