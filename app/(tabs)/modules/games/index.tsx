@@ -133,13 +133,43 @@ export default function GamesScreen() {
   async function loadRankings() {
     setRankingsLoading(true);
     try {
-      const { data, error } = await (supabase as any).rpc('get_my_game_rankings');
-
-      if (error) {
-        console.error('LOAD GAME RANKINGS ERROR:', error);
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      if (userError) throw userError;
+      const myUid = user?.id;
+      if (!myUid) {
         setPositions({});
         return;
       }
+
+      // Use the same friend scope and score aggregation as LeaderboardScreen.
+      const { data: friendRows, error: friendError } = await supabase
+        .from('friendships')
+        .select('user_id, friend_user_id')
+        .or(`user_id.eq.${myUid},friend_user_id.eq.${myUid}`);
+      if (friendError) throw friendError;
+
+      const friendIds = [...new Set((friendRows ?? []).map((friendship) =>
+        friendship.user_id === myUid ? friendship.friend_user_id : friendship.user_id
+      ).filter(Boolean))];
+      const scopedIds = [myUid, ...friendIds.filter((id) => id !== myUid)];
+
+      const { data: scoreRows, error: scoreError } = await supabase
+        .from('game_scores')
+        .select('player_id, game, result, points')
+        .in('player_id', scopedIds)
+        .in('game', ['tictactoe', 'sudoku', 'wordsearch', 'sequence']);
+      if (scoreError) throw scoreError;
+
+      const { data: profileRows, error: profileError } = await supabase
+        .from('profiles')
+        .select('user_id, display_name')
+        .in('user_id', scopedIds);
+      if (profileError) throw profileError;
+
+      const nameById = new Map<string, string>();
+      (profileRows ?? []).forEach((profile) => {
+        nameById.set(profile.user_id, profile.display_name ?? 'Player');
+      });
 
       const nextPositions: Partial<Record<GameKey, {
         global_position: number | null;
@@ -148,22 +178,72 @@ export default function GamesScreen() {
         completed_games: number;
       }>> = {};
 
-      (data ?? []).forEach((row: any) => {
-        if (!['tictactoe', 'sudoku', 'wordsearch', 'sequence'].includes(row.game)) {
-          return;
-        }
+      (['tictactoe', 'sudoku', 'wordsearch', 'sequence'] as GameKey[]).forEach((game) => {
+        const totals = new Map<string, {
+          player_id: string;
+          display_name: string;
+          total_points: number;
+          wins: number;
+          draws: number;
+          games_played: number;
+        }>();
 
-        nextPositions[row.game as GameKey] = {
-          global_position: row.global_position == null ? null : Number(row.global_position),
-          friends_position: row.friends_position == null ? null : Number(row.friends_position),
-          total_points: Number(row.total_points ?? 0),
-          completed_games: Number(row.completed_games ?? 0),
+        (scoreRows ?? []).filter((score) => score.game === game).forEach((score) => {
+          if (!score.player_id || score.result === 'abandoned') return;
+          const points = Number(score.points ?? 0);
+          const isWin = ['win', 'x_wins', 'o_wins'].includes(score.result ?? '');
+          const isDraw = score.result === 'draw';
+          const existing = totals.get(score.player_id);
+          if (existing) {
+            existing.total_points += points;
+            existing.games_played += 1;
+            if (isWin) existing.wins += 1;
+            if (isDraw) existing.draws += 1;
+          } else {
+            totals.set(score.player_id, {
+              player_id: score.player_id,
+              display_name: nameById.get(score.player_id) ?? 'Player',
+              total_points: points,
+              wins: isWin ? 1 : 0,
+              draws: isDraw ? 1 : 0,
+              games_played: 1,
+            });
+          }
+        });
+
+        // Match the leaderboard's zero-score rows for friends who have not played this game.
+        scopedIds.forEach((playerId) => {
+          if (!totals.has(playerId)) {
+            totals.set(playerId, {
+              player_id: playerId,
+              display_name: nameById.get(playerId) ?? 'Player',
+              total_points: 0,
+              wins: 0,
+              draws: 0,
+              games_played: 0,
+            });
+          }
+        });
+
+        const sorted = [...totals.values()].sort((a, b) => {
+          if (b.total_points !== a.total_points) return b.total_points - a.total_points;
+          if (b.wins !== a.wins) return b.wins - a.wins;
+          if (b.games_played !== a.games_played) return b.games_played - a.games_played;
+          return a.display_name.localeCompare(b.display_name);
+        });
+        const myRankIndex = sorted.findIndex((entry) => entry.player_id === myUid);
+        const myEntry = sorted[myRankIndex];
+        nextPositions[game] = {
+          global_position: null,
+          friends_position: myRankIndex >= 0 ? myRankIndex + 1 : null,
+          total_points: myEntry?.total_points ?? 0,
+          completed_games: myEntry?.games_played ?? 0,
         };
       });
 
       setPositions(nextPositions);
     } catch (error) {
-      console.error('LOAD GAME RANKINGS ERROR:', error);
+      console.error('LOAD GAME FRIEND RANKINGS ERROR:', error);
       setPositions({});
     } finally {
       setRankingsLoading(false);
