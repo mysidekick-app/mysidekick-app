@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ArrowRight,
   ChevronLeft,
@@ -10,6 +10,7 @@ import {
   X,
 } from 'lucide-react-native';
 import {
+  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -49,6 +50,15 @@ interface ActiveGame {
   isMyTurn: boolean;
   createdAt: string;
   expiresAt: number;
+}
+
+interface IncomingChallenge {
+  id: string;
+  game: GameKey;
+  inviterId: string;
+  inviterName: string;
+  difficulty: Difficulty;
+  createdAt: string;
 }
 
 const ALL_GAMES: GameDef[] = [
@@ -102,6 +112,11 @@ export default function GamesScreen() {
   const [friendsLoading, setFriendsLoading] = useState(false);
   const [friendSearch, setFriendSearch] = useState('');
   const [activeGames, setActiveGames] = useState<ActiveGame[]>([]);
+  const [incomingChallenges, setIncomingChallenges] = useState<IncomingChallenge[]>([]);
+  const [myUserId, setMyUserId] = useState<string | null>(null);
+  const [challengeActionId, setChallengeActionId] = useState<string | null>(null);
+  const handledChallengeEvents = useRef<Set<string>>(new Set());
+  const notificationFetchInProgress = useRef(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   // Rankings are calculated in Supabase from completed game sessions.
@@ -116,6 +131,11 @@ export default function GamesScreen() {
   const [rankingsLoading, setRankingsLoading] = useState(true);
 
   useEffect(() => {
+    let mounted = true;
+    supabase.auth.getUser().then(({ data }) => {
+      if (mounted) setMyUserId(data.user?.id ?? null);
+    });
+
     loadFriends();
     loadActiveGames();
     loadRankings();
@@ -127,8 +147,207 @@ export default function GamesScreen() {
       loadRankings();
     }, 30000);
 
-    return () => clearInterval(refreshTimer);
+    return () => {
+      mounted = false;
+      clearInterval(refreshTimer);
+    };
   }, []);
+
+  useEffect(() => {
+    if (!myUserId) return;
+
+    loadIncomingChallenges();
+
+    const channel = supabase
+      .channel(`game-challenges-${myUserId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'game_sessions',
+          filter: `opponent_id=eq.${myUserId}`,
+        },
+        (payload) => {
+          if ((payload.new as any)?.status === 'pending') {
+            loadIncomingChallenges();
+          }
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'game_sessions',
+          filter: `created_by=eq.${myUserId}`,
+        },
+        async (payload) => {
+          const row = payload.new as any;
+          if (!row?.id || handledChallengeEvents.current.has(row.id)) return;
+
+          if (row.status === 'active' && row.mode === 'multiplayer' && row.opponent_type === 'friend') {
+            handledChallengeEvents.current.add(row.id);
+            loadActiveGames();
+            router.push({
+              pathname: `/modules/games/${row.game}`,
+              params: {
+                sessionId: row.id,
+                opponent: 'friend',
+                difficulty: row.difficulty ?? 'easy',
+              },
+            });
+          } else if (row.status === 'declined') {
+            handledChallengeEvents.current.add(row.id);
+            loadActiveGames();
+          }
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'game_notifications',
+          filter: `recipient_id=eq.${myUserId}`,
+        },
+        () => {
+          loadUnreadGameNotifications();
+        },
+      )
+      .subscribe();
+
+    loadUnreadGameNotifications();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [myUserId]);
+
+  useEffect(() => {
+    if (!myUserId) return;
+
+    const invitationRefresh = setInterval(() => {
+      loadIncomingChallenges();
+      loadUnreadGameNotifications();
+    }, 30000);
+
+    return () => clearInterval(invitationRefresh);
+  }, [myUserId]);
+
+  async function loadUnreadGameNotifications() {
+    if (!myUserId || notificationFetchInProgress.current) return;
+    notificationFetchInProgress.current = true;
+
+    try {
+      const { data: notifications, error } = await supabase
+        .from('game_notifications')
+        .select('id, message')
+        .eq('recipient_id', myUserId)
+        .eq('is_read', false)
+        .order('created_at', { ascending: true });
+
+      if (error || !notifications?.length) return;
+
+      const notificationIds = notifications.map((item) => item.id);
+      Alert.alert(
+        'Game update',
+        notifications.map((item) => item.message).join('\n'),
+      );
+
+      await supabase
+        .from('game_notifications')
+        .update({ is_read: true })
+        .in('id', notificationIds);
+    } finally {
+      notificationFetchInProgress.current = false;
+    }
+  }
+
+  async function loadIncomingChallenges() {
+    if (!myUserId) return;
+
+    const { data: rows, error } = await supabase
+      .from('game_sessions')
+      .select('id, game, created_by, difficulty, created_at')
+      .eq('opponent_id', myUserId)
+      .eq('mode', 'multiplayer')
+      .eq('opponent_type', 'friend')
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false });
+
+    if (error || !rows?.length) {
+      setIncomingChallenges([]);
+      return;
+    }
+
+    const inviterIds = [...new Set(rows.map((row) => row.created_by).filter(Boolean))];
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('user_id, display_name')
+      .in('user_id', inviterIds);
+
+    const nameById = new Map(
+      (profiles ?? []).map((profile) => [profile.user_id, profile.display_name ?? 'Friend'])
+    );
+
+    setIncomingChallenges(rows.map((row) => ({
+      id: row.id,
+      game: row.game as GameKey,
+      inviterId: row.created_by,
+      inviterName: nameById.get(row.created_by) ?? 'Friend',
+      difficulty: (row.difficulty ?? 'easy') as Difficulty,
+      createdAt: row.created_at,
+    })));
+  }
+
+  async function acceptChallenge(challenge: IncomingChallenge) {
+    if (!myUserId || challengeActionId) return;
+    setChallengeActionId(challenge.id);
+
+    const { data, error } = await (supabase as any).rpc('respond_to_game_challenge', {
+      p_session_id: challenge.id,
+      p_accept: true,
+    });
+
+    setChallengeActionId(null);
+
+    if (error || !data?.id) {
+      Alert.alert('Could not accept challenge', error?.message ?? 'This invitation is no longer available.');
+      loadIncomingChallenges();
+      return;
+    }
+
+    setIncomingChallenges((current) => current.filter((item) => item.id !== challenge.id));
+    router.push({
+      pathname: `/modules/games/${challenge.game}`,
+      params: {
+        sessionId: challenge.id,
+        opponent: 'friend',
+        difficulty: challenge.difficulty,
+      },
+    });
+  }
+
+  async function declineChallenge(challenge: IncomingChallenge) {
+    if (!myUserId || challengeActionId) return;
+    setChallengeActionId(challenge.id);
+
+    const { data, error } = await (supabase as any).rpc('respond_to_game_challenge', {
+      p_session_id: challenge.id,
+      p_accept: false,
+    });
+
+    setChallengeActionId(null);
+
+    if (error || !data?.id) {
+      Alert.alert('Could not decline challenge', error?.message ?? 'This invitation is no longer available.');
+      loadIncomingChallenges();
+      return;
+    }
+
+    setIncomingChallenges((current) => current.filter((item) => item.id !== challenge.id));
+  }
 
   async function loadRankings() {
     setRankingsLoading(true);
@@ -420,38 +639,60 @@ export default function GamesScreen() {
     if (selectedGame.multiplayer && mode === 'friend' && !invitedFriend) return;
     if (loading) return;
 
+    const gameToStart = selectedGame;
+    const selectedMode = mode;
+    const selectedDifficulty = difficulty;
+    const friendToInvite = invitedFriend;
+    const isFriendChallenge = gameToStart.multiplayer && selectedMode === 'friend';
+
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       const createdBy = user?.id;
-      if (!createdBy) return;
+      if (!createdBy) {
+        Alert.alert('Sign in required', 'Please sign in before starting a game.');
+        return;
+      }
 
       const { data: session, error: sessionError } = await supabase
         .from('game_sessions')
         .insert({
-          game: selectedGame.key,
-          mode: selectedGame.multiplayer ? 'multiplayer' : 'solo',
-          opponent_type: selectedGame.multiplayer ? mode : null,
-          opponent_id: selectedGame.multiplayer && mode === 'friend' ? invitedFriend?.id ?? null : null,
-          difficulty,
+          game: gameToStart.key,
+          mode: gameToStart.multiplayer ? 'multiplayer' : 'solo',
+          opponent_type: gameToStart.multiplayer ? selectedMode : null,
+          opponent_id: isFriendChallenge ? friendToInvite?.id ?? null : null,
+          difficulty: selectedDifficulty,
           created_by: createdBy,
-          status: 'active',
+          status: isFriendChallenge ? 'pending' : 'active',
         })
         .select('id')
         .single();
 
-      if (sessionError || !session?.id) return;
+      if (sessionError || !session?.id) {
+        console.error('CREATE GAME SESSION ERROR:', sessionError);
+        Alert.alert('Could not start game', sessionError?.message ?? 'Please try again.');
+        return;
+      }
 
-      const sessionId = session.id;
       setSheetVisible(false);
       setSelectedGame(null);
 
+      if (isFriendChallenge) {
+        Alert.alert(
+          'Invitation sent',
+          `${friendToInvite?.display_name ?? 'Your friend'} has been challenged to a ${selectedDifficulty} ${gameToStart.name} game.`,
+        );
+        loadIncomingChallenges();
+        return;
+      }
+
       router.push({
-        pathname: `/modules/games/${selectedGame.key}`,
-        params: { sessionId, opponent: mode, difficulty },
+        pathname: `/modules/games/${gameToStart.key}`,
+        params: { sessionId: session.id, opponent: selectedMode, difficulty: selectedDifficulty },
       });
     } catch (error) {
       console.error('START GAME ERROR:', error);
+      Alert.alert('Could not start game', 'Please check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -521,6 +762,40 @@ export default function GamesScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {incomingChallenges.length > 0 && (
+          <View style={{ marginBottom: 20 }}>
+            <Text style={styles.activeSectionTitle}>GAME INVITATIONS</Text>
+            {incomingChallenges.map((challenge) => (
+              <View
+                key={challenge.id}
+                style={[styles.challengeCard, { backgroundColor: isDark ? '#121212' : '#FFFFFF' }]}
+              >
+                <Text style={[styles.challengeMessage, { color: isDark ? '#FFFFFF' : '#000000' }]}>
+                  {challenge.inviterName} has challenged you to a {challenge.difficulty} {challenge.game === 'tictactoe' ? 'Tic-Tac-Toe' : challenge.game} game
+                </Text>
+                <View style={styles.challengeActions}>
+                  <Pressable
+                    disabled={challengeActionId === challenge.id}
+                    onPress={() => acceptChallenge(challenge)}
+                    style={[styles.challengeButton, { backgroundColor: pageBg }]}
+                  >
+                    <Text style={styles.challengeButtonText}>
+                      {challengeActionId === challenge.id ? 'Please wait…' : 'Accept'}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    disabled={challengeActionId === challenge.id}
+                    onPress={() => declineChallenge(challenge)}
+                    style={[styles.challengeButton, styles.declineButton]}
+                  >
+                    <Text style={[styles.challengeButtonText, { color: '#FFFFFF' }]}>Decline</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+
         {activeGames.length > 0 && (
           <View style={{ marginBottom: 20 }}>
             <Text style={styles.activeSectionTitle}>ACTIVE MULTIPLAYER GAMES</Text>
@@ -900,6 +1175,42 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#000000',
     marginTop: 2,
+  },
+
+  challengeCard: {
+    borderWidth: 2,
+    borderColor: '#000000',
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 10,
+  },
+  challengeMessage: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  challengeActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+  },
+  challengeButton: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#000000',
+    borderRadius: 9,
+    paddingVertical: 10,
+  },
+  declineButton: {
+    backgroundColor: '#000000',
+  },
+  challengeButtonText: {
+    fontFamily: 'Poppins-ExtraBold',
+    fontSize: 12,
+    color: '#000000',
+    textTransform: 'uppercase',
   },
 
   activeSectionTitle: {
