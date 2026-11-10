@@ -470,6 +470,8 @@ export default function ChatDetailScreen() {
 
   const [toast, setToast] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [gameInviteStates, setGameInviteStates] = useState<Record<string, string>>({});
+  const [gameInviteActionId, setGameInviteActionId] = useState<string | null>(null);
   const [messageAction, setMessageAction] = useState<Message | null>(null);
   const [messageActionLoading, setMessageActionLoading] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -685,6 +687,28 @@ export default function ChatDetailScreen() {
         }
       }
 
+      const inviteSessionIds = loadedMessages
+        .filter(message => message.attachment_type === 'game_invite')
+        .map(message => message.attachment_url?.match(/[?&]sessionId=([^&]+)/i)?.[1])
+        .filter(Boolean)
+        .map(value => decodeURIComponent(value as string));
+      if (inviteSessionIds.length > 0) {
+        const { data: inviteSessions } = await supabase
+          .from('game_sessions')
+          .select('id, status')
+          .in('id', inviteSessionIds);
+        if (inviteSessions?.length) {
+          const statusByMessage: Record<string, string> = {};
+          loadedMessages.forEach(message => {
+            const rawId = message.attachment_url?.match(/[?&]sessionId=([^&]+)/i)?.[1];
+            const sessionId = rawId ? decodeURIComponent(rawId) : null;
+            const session = inviteSessions.find((row: any) => row.id === sessionId);
+            if (session?.status) statusByMessage[message.id] = session.status;
+          });
+          setGameInviteStates(previous => ({ ...previous, ...statusByMessage }));
+        }
+      }
+
       setMessages(previous => {
         const byId = new Map<string, Message>();
         for (const message of previous) byId.set(message.id, message);
@@ -801,6 +825,34 @@ export default function ChatDetailScreen() {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!myId || !conversationId || isSidekick) return;
+    const channel = supabase
+      .channel(`game-invite-status:${conversationId}:${myId}`)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'game_sessions',
+        filter: `created_by=eq.${myId}`,
+      }, payload => {
+        const row = payload.new as any;
+        if (!row?.id || !row?.status) return;
+        const matching = messages.filter(message =>
+          message.attachment_type === 'game_invite' &&
+          getGameInviteSessionId(message) === row.id
+        );
+        if (matching.length) {
+          setGameInviteStates(previous => {
+            const next = { ...previous };
+            matching.forEach(message => { next[message.id] = row.status; });
+            return next;
+          });
+        }
+      })
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [myId, conversationId, isSidekick, messages]);
 
   useEffect(() => {
     if (!myId || !id || isSidekick) {
@@ -1512,6 +1564,42 @@ export default function ChatDetailScreen() {
     showToast('Chat cleared.');
   };
 
+  const getGameInviteSessionId = (message: Message) => {
+    const match = message.attachment_url?.match(/[?&]sessionId=([^&]+)/i);
+    return match?.[1] ? decodeURIComponent(match[1]) : null;
+  };
+
+  const handleGameInviteResponse = async (message: Message, accept: boolean) => {
+    const sessionId = getGameInviteSessionId(message);
+    if (!myId || !sessionId || gameInviteActionId) {
+      showToast('This game invitation is missing its session details.');
+      return;
+    }
+    setGameInviteActionId(message.id);
+    const { data, error } = await (supabase as any).rpc('respond_to_game_challenge', {
+      p_session_id: sessionId,
+      p_accept: accept,
+    });
+    setGameInviteActionId(null);
+    if (error || !data?.id) {
+      showToast(error?.message ?? 'This challenge is no longer available.');
+      const { data: session } = await supabase.from('game_sessions')
+        .select('status').eq('id', sessionId).maybeSingle();
+      if (session?.status) setGameInviteStates(previous => ({ ...previous, [message.id]: session.status }));
+      return;
+    }
+    setGameInviteStates(previous => ({ ...previous, [message.id]: accept ? 'active' : 'declined' }));
+    if (accept) {
+      const difficulty = message.attachment_url?.match(/[?&]difficulty=([^&]+)/i)?.[1] ?? 'easy';
+      router.push({
+        pathname: `/modules/games/${message.attachment_name || 'tictactoe'}`,
+        params: { sessionId, opponent: 'friend', difficulty: decodeURIComponent(difficulty) },
+      });
+    } else {
+      showToast('Challenge declined.');
+    }
+  };
+
   const handleCopyMessage = async () => {
     if (!messageAction) return;
     try {
@@ -1718,21 +1806,44 @@ export default function ChatDetailScreen() {
               {item.attachment_type === 'game_invite' ? (
                 <View style={styles.gameInviteCard}>
                   <Text style={[styles.bubbleText, { color: contentColor, fontFamily: 'Poppins-Bold' }]}>
-                    🎮 {(item.attachment_name ?? 'game').toUpperCase()} CHALLENGE
+                    🎮 {(item.attachment_name ?? 'GAME').replace(/[_-]/g, ' ').toUpperCase()} CHALLENGE
                   </Text>
                   <Text style={[styles.bubbleText, { color: contentColor, fontSize: 13, marginVertical: 4 }]}>
                     {item.content}
                   </Text>
-                  <Pressable
-                    onPress={() => {
-                      if (item.attachment_url) {
-                        router.push(item.attachment_url as never);
-                      }
-                    }}
-                    style={styles.joinGameBtn}
-                  >
-                    <Text style={styles.joinGameBtnText}>Play Now</Text>
-                  </Pressable>
+                  {(() => {
+                    const status = gameInviteStates[item.id] ?? 'pending';
+                    const busy = gameInviteActionId === item.id;
+                    if (['declined', 'cancelled', 'expired', 'completed'].includes(status)) {
+                      return <Text style={[styles.bubbleText, { color: contentColor, fontFamily: 'Poppins-Bold' }]}>Challenge {status}.</Text>;
+                    }
+                    if (status === 'active' || status === 'accepted') {
+                      return (
+                        <Pressable onPress={() => {
+                          const sessionId = getGameInviteSessionId(item);
+                          if (!sessionId) return;
+                          const difficulty = item.attachment_url?.match(/[?&]difficulty=([^&]+)/i)?.[1] ?? 'easy';
+                          router.push({ pathname: `/modules/games/${item.attachment_name || 'tictactoe'}`, params: { sessionId, opponent: 'friend', difficulty: decodeURIComponent(difficulty) } });
+                        }} style={styles.joinGameBtn}>
+                          <Text style={styles.joinGameBtnText}>Open Match</Text>
+                        </Pressable>
+                      );
+                    }
+                    if (status !== 'pending') {
+                      return <Text style={[styles.bubbleText, { color: contentColor, fontSize: 12 }]}>Challenge status: {status}.</Text>;
+                    }
+                    if (isMine) return <Text style={[styles.bubbleText, { color: contentColor, fontSize: 12 }]}>Waiting for their response…</Text>;
+                    return (
+                      <View style={styles.gameInviteActions}>
+                        <Pressable disabled={busy} onPress={() => void handleGameInviteResponse(item, true)} style={[styles.joinGameBtn, busy && { opacity: 0.55 }]}>
+                          <Text style={styles.joinGameBtnText}>{busy ? 'Please wait…' : 'Accept'}</Text>
+                        </Pressable>
+                        <Pressable disabled={busy} onPress={() => void handleGameInviteResponse(item, false)} style={[styles.declineGameBtn, busy && { opacity: 0.55 }]}>
+                          <Text style={styles.declineGameBtnText}>Decline</Text>
+                        </Pressable>
+                      </View>
+                    );
+                  })()}
                 </View>
               ) : null}
 
@@ -2780,7 +2891,28 @@ const styles = StyleSheet.create({
     padding: 4,
     gap: 4,
   },
+  gameInviteActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 6,
+  },
+  declineGameBtn: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: '#000000',
+  },
+  declineGameBtnText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 12,
+    color: '#000000',
+  },
   joinGameBtn: {
+    flex: 1,
     backgroundColor: '#000000',
     borderRadius: 8,
     paddingVertical: 8,
