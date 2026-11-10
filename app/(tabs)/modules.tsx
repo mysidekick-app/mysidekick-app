@@ -830,6 +830,7 @@ const styles = StyleSheet.create({
     paddingBottom: 5,
     gap: 12,
     zIndex: 10,
+    borderBottomWidth: 1,
   },
   headerLeftTextGroup: {
     flex: 1,
