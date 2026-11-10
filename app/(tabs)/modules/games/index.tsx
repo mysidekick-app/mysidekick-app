@@ -25,6 +25,7 @@ import { router } from 'expo-router';
 
 import { useApp } from '@/components/AppProvider';
 import { supabase } from '@/lib/supabase';
+import { ensureDirectConversation, sendChatMessage } from '@/app/chat/chatHelpers';
 
 type GameKey = 'tictactoe' | 'sudoku' | 'wordsearch' | 'sequence';
 type Mode = 'computer' | 'friend';
@@ -140,8 +141,6 @@ export default function GamesScreen() {
     loadActiveGames();
     loadRankings();
 
-    // Refresh rankings periodically so changes made by other players appear
-    // without requiring the user to leave and reopen the Games screen.
     const refreshTimer = setInterval(() => {
       loadActiveGames();
       loadRankings();
@@ -360,7 +359,6 @@ export default function GamesScreen() {
         return;
       }
 
-      // Use the same friend scope and score aggregation as LeaderboardScreen.
       const { data: friendRows, error: friendError } = await supabase
         .from('friendships')
         .select('user_id, friend_user_id')
@@ -430,7 +428,6 @@ export default function GamesScreen() {
           }
         });
 
-        // Match the leaderboard's zero-score rows for friends who have not played this game.
         scopedIds.forEach((playerId) => {
           if (!totals.has(playerId)) {
             totals.set(playerId, {
@@ -677,10 +674,23 @@ export default function GamesScreen() {
       setSheetVisible(false);
       setSelectedGame(null);
 
-      if (isFriendChallenge) {
+      if (isFriendChallenge && friendToInvite) {
+        // Send chat invitation card automatically
+        const conversationResult = await ensureDirectConversation(createdBy, friendToInvite.id);
+        if (conversationResult.id) {
+          const inviteText = `I challenged you to a game of ${gameToStart.name}! Tap below to play.`;
+          const gameRoute = `/modules/games/${gameToStart.key}?sessionId=${session.id}&opponent=friend&difficulty=${selectedDifficulty}`;
+          
+          await sendChatMessage(conversationResult.id, createdBy, inviteText, {
+            url: gameRoute,
+            name: gameToStart.key,
+            type: 'game_invite',
+          });
+        }
+
         Alert.alert(
           'Invitation sent',
-          `${friendToInvite?.display_name ?? 'Your friend'} has been challenged to a ${selectedDifficulty} ${gameToStart.name} game.`,
+          `${friendToInvite.display_name} has been challenged to a ${selectedDifficulty} ${gameToStart.name} game and notified in chat.`,
         );
         loadIncomingChallenges();
         return;
@@ -820,7 +830,7 @@ export default function GamesScreen() {
         )}
 
         <View style={styles.cardsStack}>
-          {filteredGames.map((m, index) => {
+          {filteredGames.map((m) => {
             const pos = positions[m.key];
             const friendsPosition = pos?.friends_position == null
               ? (rankingsLoading ? '…' : '#--')
