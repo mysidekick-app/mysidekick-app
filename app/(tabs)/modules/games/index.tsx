@@ -467,9 +467,6 @@ export default function GamesScreen() {
         <View style={styles.cardsStack}>
           {filteredGames.map((m, index) => {
             const pos = positions[m.key];
-            const globalPosition = pos?.global_position == null
-              ? (rankingsLoading ? '…' : '#--')
-              : `#${pos.global_position}`;
             const friendsPosition = pos?.friends_position == null
               ? (rankingsLoading ? '…' : '#--')
               : `#${pos.friends_position}`;
@@ -479,7 +476,6 @@ export default function GamesScreen() {
                 key={m.key}
                 style={[
                   styles.cardContainer,
-                  index > 0 && styles.overlappingCard,
                 ]}
               >
                 <View style={styles.cardShadowBackdrop} />
@@ -516,11 +512,7 @@ export default function GamesScreen() {
 
                   <View style={styles.positionsRow}>
                     <View style={[styles.posBadge, { backgroundColor: pageBg }]}>
-                      <Text style={styles.posLabel}>Global</Text>
-                      <Text style={styles.posVal}>{globalPosition}</Text>
-                    </View>
-                    <View style={[styles.posBadge, { backgroundColor: pageBg }]}>
-                      <Text style={styles.posLabel}>Friends</Text>
+                      <Text style={styles.posLabel}>FRIENDS RANK</Text>
                       <Text style={styles.posVal}>{friendsPosition}</Text>
                     </View>
                   </View>
@@ -763,13 +755,14 @@ const styles = StyleSheet.create({
   },
   cardsStack: {
     paddingTop: 4,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    rowGap: 14,
   },
   cardContainer: {
     position: 'relative',
-    width: '100%',
-  },
-  overlappingCard: {
-    marginTop: 12,
+    width: '48%',
   },
   cardShadowBackdrop: {
     position: 'absolute',
@@ -783,8 +776,8 @@ const styles = StyleSheet.create({
   moduleCardBody: {
     borderRadius: 16,
     borderWidth: 3,
-    paddingVertical: 22,
-    paddingHorizontal: 20,
+    paddingVertical: 18,
+    paddingHorizontal: 14,
     flexDirection: 'column',
     justifyContent: 'space-between',
     minHeight: 135,
@@ -798,15 +791,14 @@ const styles = StyleSheet.create({
   },
   moduleTitleText: {
     fontFamily: 'Poppins-ExtraBold',
-    fontSize: 22,
-    letterSpacing: 0.8,
+    fontSize: 17,
+    letterSpacing: 0.5,
   },
   arrowContainer: {
     transform: [{ rotate: '-45deg' }],
   },
   positionsRow: {
     flexDirection: 'row',
-    gap: 10,
   },
   posBadge: {
     flex: 1,
