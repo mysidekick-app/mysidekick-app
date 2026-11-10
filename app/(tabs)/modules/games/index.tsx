@@ -25,7 +25,7 @@ import { router } from 'expo-router';
 
 import { useApp } from '@/components/AppProvider';
 import { supabase } from '@/lib/supabase';
-import { ensureDirectConversation, sendChatMessage } from '@/app/chat/chatHelpers';
+import { ensureDirectConversation, sendChatMessage } from '@/app/(tabs)/chat/chatHelpers';
 
 type GameKey = 'tictactoe' | 'sudoku' | 'wordsearch' | 'sequence';
 type Mode = 'computer' | 'friend';
