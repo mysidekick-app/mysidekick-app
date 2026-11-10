@@ -1375,174 +1375,176 @@ export default function ProfileScreen() {
               </Pressable>
             </View>
 
-            <Text
-              style={[
-                styles.group,
-                {
-                  color:
-                    C.text,
-                },
-              ]}
-            >
-              PREFERENCES
-            </Text>
-
-            {/* CURRENCY */}
-            <Pressable
-              onPress={() =>
-                setCurrencyOpen(
-                  true
-                )
-              }
-              style={[styles.settingRow, { borderBottomColor: C.divider }]}
-            >
-              <View
+            <ScrollView showsVerticalScrollIndicator={false} style={{ flexShrink: 1 }}>
+              <Text
                 style={[
-                  styles.rowIcon,
+                  styles.group,
                   {
-                    backgroundColor:
-                      accentForeground,
-                    borderColor: '#000000',
-                    borderWidth: 1.5,
+                    color:
+                      C.text,
                   },
                 ]}
               >
-                <Text
-                  style={[
-                    styles.currencySymbol,
-                    {
-                      color:
-                        '#000000',
-                    },
-                  ]}
-                >
-                  {currency.symbol}
-                </Text>
-              </View>
+                PREFERENCES
+              </Text>
 
-              <View
-                style={
-                  styles.rowCopy
+              {/* CURRENCY */}
+              <Pressable
+                onPress={() =>
+                  setCurrencyOpen(
+                    true
+                  )
                 }
+                style={[styles.settingRow, { borderBottomColor: C.divider }]}
               >
-                <Text
+                <View
                   style={[
-                    styles.rowLabel,
+                    styles.rowIcon,
                     {
-                      color:
-                        C.text,
+                      backgroundColor:
+                        accentForeground,
+                      borderColor: '#000000',
+                      borderWidth: 1.5,
                     },
                   ]}
                 >
-                  Currency
-                </Text>
+                  <Text
+                    style={[
+                      styles.currencySymbol,
+                      {
+                        color:
+                          '#000000',
+                      },
+                    ]}
+                  >
+                    {currency.symbol}
+                  </Text>
+                </View>
 
-                <Text
-                  style={[
-                    styles.rowValue,
-                    {
-                      color:
-                        C.muted,
-                    },
-                  ]}
+                <View
+                  style={
+                    styles.rowCopy
+                  }
                 >
-                  {currency.name} (
-                  {currency.code})
-                </Text>
-              </View>
+                  <Text
+                    style={[
+                      styles.rowLabel,
+                      {
+                        color:
+                          C.text,
+                      },
+                    ]}
+                  >
+                    Currency
+                  </Text>
 
-              <ChevronRight
-                color={
-                  isDark
-                    ? '#77736C'
-                    : '#000000'
-                }
-                size={17}
-                strokeWidth={2.5}
-              />
-            </Pressable>
+                  <Text
+                    style={[
+                      styles.rowValue,
+                      {
+                        color:
+                          C.muted,
+                      },
+                    ]}
+                  >
+                    {currency.name} (
+                    {currency.code})
+                  </Text>
+                </View>
 
-            {/* TIMEZONE */}
-            <Pressable
-              onPress={() => {
-                setTimezoneSearch(
-                  ''
-                );
-                setTimezoneOpen(
-                  true
-                );
-              }}
-              style={[styles.settingRow, { borderBottomWidth: 0 }]}
-            >
-              <View
-                style={[
-                  styles.rowIcon,
-                  {
-                    backgroundColor:
-                      accentForeground,
-                    borderColor: '#000000',
-                    borderWidth: 1.5,
-                  },
-                ]}
+                <ChevronRight
+                  color={
+                    isDark
+                      ? '#77736C'
+                      : '#000000'
+                  }
+                  size={17}
+                  strokeWidth={2.5}
+                />
+              </Pressable>
+
+              {/* TIMEZONE */}
+              <Pressable
+                onPress={() => {
+                  setTimezoneSearch(
+                    ''
+                  );
+                  setTimezoneOpen(
+                    true
+                  );
+                }}
+                style={[styles.settingRow, { borderBottomWidth: 0 }]}
               >
-                <Text
+                <View
                   style={[
-                    styles.timezoneIconText,
+                    styles.rowIcon,
                     {
-                      color:
-                        '#000000',
+                      backgroundColor:
+                        accentForeground,
+                      borderColor: '#000000',
+                      borderWidth: 1.5,
                     },
                   ]}
                 >
-                  TZ
-                </Text>
-              </View>
+                  <Text
+                    style={[
+                      styles.timezoneIconText,
+                      {
+                        color:
+                          '#000000',
+                      },
+                    ]}
+                  >
+                    TZ
+                  </Text>
+                </View>
 
-              <View
-                style={
-                  styles.rowCopy
-                }
-              >
-                <Text
-                  style={[
-                    styles.rowLabel,
-                    {
-                      color:
-                        C.text,
-                    },
-                  ]}
+                <View
+                  style={
+                    styles.rowCopy
+                  }
                 >
-                  Timezone
-                </Text>
+                  <Text
+                    style={[
+                      styles.rowLabel,
+                      {
+                        color:
+                          C.text,
+                      },
+                    ]}
+                  >
+                    Timezone
+                  </Text>
 
-                <Text
-                  style={[
-                    styles.rowValue,
-                    {
-                      color:
-                        C.muted,
-                    },
-                  ]}
-                  numberOfLines={1}
-                >
-                  {selectedTimezone
-                    ?.label ??
-                    timezone}
-                </Text>
-              </View>
+                  <Text
+                    style={[
+                      styles.rowValue,
+                      {
+                        color:
+                          C.muted,
+                      },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {selectedTimezone
+                      ?.label ??
+                      timezone}
+                  </Text>
+                </View>
 
-              <ChevronRight
-                color={
-                  isDark
-                    ? '#77736C'
-                    : '#000000'
-                }
-                size={17}
-                strokeWidth={2.5}
-              />
-            </Pressable>
+                <ChevronRight
+                  color={
+                    isDark
+                      ? '#77736C'
+                      : '#000000'
+                  }
+                  size={17}
+                  strokeWidth={2.5}
+                />
+              </Pressable>
+            </ScrollView>
 
-            <View style={{ position: 'relative', width: '100%', marginTop: 22 }}>
+            <View style={{ position: 'relative', width: '100%', marginTop: 12 }}>
               <View style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
               <Pressable
                 onPress={() =>
@@ -1641,216 +1643,218 @@ export default function ProfileScreen() {
               </Pressable>
             </View>
 
-            {/* THEME */}
-            <View style={{ position: 'relative', width: '100%', marginBottom: 16 }}>
-              <View style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 14 }} />
-              <View
-                style={[
-                  styles.subCard,
-                  {
-                    backgroundColor: C.card,
-                    borderColor:
-                      '#000000',
-                    borderWidth: 2,
-                    marginBottom: 0,
-                  },
-                ]}
-              >
-              <View
-                style={
-                  styles.panelTitleRow
-                }
-              >
-                <Moon
-                  color={
-                    accentForeground
+            <ScrollView showsVerticalScrollIndicator={false} style={{ flexShrink: 1 }}>
+              {/* THEME */}
+              <View style={{ position: 'relative', width: '100%', marginBottom: 16 }}>
+                <View style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 14 }} />
+                <View
+                  style={[
+                    styles.subCard,
+                    {
+                      backgroundColor: C.card,
+                      borderColor:
+                        '#000000',
+                      borderWidth: 2,
+                      marginBottom: 0,
+                    },
+                  ]}
+                >
+                <View
+                  style={
+                    styles.panelTitleRow
                   }
-                  size={16}
-                />
+                >
+                  <Moon
+                    color={
+                      accentForeground
+                    }
+                    size={16}
+                  />
 
+                  <Text
+                    style={[
+                      styles.panelTitleText,
+                      {
+                        color:
+                          C.text,
+                      },
+                    ]}
+                  >
+                    Theme mode
+                  </Text>
+                </View>
+
+                <View
+                  style={[
+                    styles.modeToggle,
+                    {
+                      backgroundColor:
+                        isDark
+                          ? '#1A1A1A'
+                          : '#F4F2EE',
+                      borderColor: '#000000',
+                      borderWidth: 1.5,
+                    },
+                  ]}
+                >
+                  {(
+                    [
+                      'system',
+                      'light',
+                      'dark',
+                    ] as ThemeMode[]
+                  ).map(
+                    (mode) => (
+                      <Pressable
+                        key={mode}
+                        onPress={() =>
+                          updateSettings(
+                            {
+                              theme_mode:
+                                mode,
+                            }
+                          )
+                        }
+                        style={[
+                          styles.modeOption,
+                          theme_mode ===
+                            mode && {
+                            backgroundColor: '#000000',
+                            borderColor: accentForeground,
+                            borderWidth: 1.5,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.modeText,
+                            {
+                              color:
+                                C.text,
+                            },
+                            theme_mode ===
+                              mode && {
+                              color:
+                                accentForeground,
+                            },
+                          ]}
+                        >
+                          {mode
+                            .charAt(
+                              0
+                            )
+                            .toUpperCase() +
+                            mode.slice(
+                              1
+                            )}
+                        </Text>
+                      </Pressable>
+                    )
+                  )}
+                </View>
+              </View>
+              </View>
+
+              {/* ACCENT */}
+              <View style={{ position: 'relative', width: '100%', marginBottom: 16 }}>
+                <View style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 14 }} />
+                <View
+                  style={[
+                    styles.subCard,
+                    {
+                      backgroundColor: C.card,
+                      borderColor:
+                        '#000000',
+                      borderWidth: 2,
+                      marginBottom: 0,
+                    },
+                  ]}
+                >
                 <Text
                   style={[
-                    styles.panelTitleText,
+                    styles.panelLabel,
                     {
                       color:
                         C.text,
                     },
                   ]}
                 >
-                  Theme mode
+                  Accent color
                 </Text>
-              </View>
 
-              <View
-                style={[
-                  styles.modeToggle,
-                  {
-                    backgroundColor:
-                      isDark
-                        ? '#1A1A1A'
-                        : '#F4F2EE',
-                    borderColor: '#000000',
-                    borderWidth: 1.5,
-                  },
-                ]}
-              >
-                {(
-                  [
-                    'system',
-                    'light',
-                    'dark',
-                  ] as ThemeMode[]
-                ).map(
-                  (mode) => (
-                    <Pressable
-                      key={mode}
-                      onPress={() =>
-                        updateSettings(
-                          {
-                            theme_mode:
-                              mode,
-                          }
-                        )
-                      }
-                      style={[
-                        styles.modeOption,
-                        theme_mode ===
-                          mode && {
-                          backgroundColor: '#000000',
-                          borderColor: accentForeground,
-                          borderWidth: 1.5,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.modeText,
-                          {
-                            color:
-                              C.text,
-                          },
-                          theme_mode ===
-                            mode && {
-                            color:
-                              accentForeground,
-                          },
-                        ]}
-                      >
-                        {mode
-                          .charAt(
-                            0
-                          )
-                          .toUpperCase() +
-                          mode.slice(
-                            1
-                          )}
-                      </Text>
-                    </Pressable>
-                  )
-                )}
-              </View>
-            </View>
-            </View>
-
-            {/* ACCENT */}
-            <View style={{ position: 'relative', width: '100%', marginBottom: 16 }}>
-              <View style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 14 }} />
-              <View
-                style={[
-                  styles.subCard,
-                  {
-                    backgroundColor: C.card,
-                    borderColor:
-                      '#000000',
-                    borderWidth: 2,
-                    marginBottom: 0,
-                  },
-                ]}
-              >
-              <Text
-                style={[
-                  styles.panelLabel,
-                  {
-                    color:
-                      C.text,
-                  },
-                ]}
-              >
-                Accent color
-              </Text>
-
-              <View
-                style={
-                  styles.palette
-                }
-              >
-                {accentChoices.map(
-                  ({
-                    key,
-                    label,
-                  }) => (
-                    <Pressable
-                      key={key}
-                      onPress={() =>
-                        updateSettings(
-                          {
-                            accent_family:
-                              key,
-                          }
-                        )
-                      }
-                      style={
-                        styles.swatchWrap
-                      }
-                    >
-                      <View style={{ position: 'relative' }}>
-                        <View style={{ position: 'absolute', top: 2, left: 2, right: -2, bottom: -2, backgroundColor: '#000000', borderRadius: 16 }} />
-                        <View
-                          style={[
-                            styles.swatch,
+                <View
+                  style={
+                    styles.palette
+                  }
+                >
+                  {accentChoices.map(
+                    ({
+                      key,
+                      label,
+                    }) => (
+                      <Pressable
+                        key={key}
+                        onPress={() =>
+                          updateSettings(
                             {
-                              backgroundColor:
-                                accentPalettes[
-                                  key
-                                ]
-                                  .standard,
-                              borderColor: '#000000',
-                              borderWidth: accent_family === key ? 2 : 1.5,
+                              accent_family:
+                                key,
+                            }
+                          )
+                        }
+                        style={
+                          styles.swatchWrap
+                        }
+                      >
+                        <View style={{ position: 'relative' }}>
+                          <View style={{ position: 'absolute', top: 2, left: 2, right: -2, bottom: -2, backgroundColor: '#000000', borderRadius: 16 }} />
+                          <View
+                            style={[
+                              styles.swatch,
+                              {
+                                backgroundColor:
+                                  accentPalettes[
+                                    key
+                                  ]
+                                    .standard,
+                                borderColor: '#000000',
+                                borderWidth: accent_family === key ? 2 : 1.5,
+                              },
+                            ]}
+                          >
+                            {accent_family ===
+                              key && (
+                              <Check
+                                color="#000000"
+                                size={14}
+                                strokeWidth={
+                                  3
+                                }
+                              />
+                            )}
+                          </View>
+                        </View>
+
+                        <Text
+                          style={[
+                            styles.swatchLabel,
+                            {
+                              color:
+                                C.text,
                             },
                           ]}
                         >
-                          {accent_family ===
-                            key && (
-                            <Check
-                              color="#000000"
-                              size={14}
-                              strokeWidth={
-                                3
-                              }
-                            />
-                          )}
-                        </View>
-                      </View>
-
-                      <Text
-                        style={[
-                          styles.swatchLabel,
-                          {
-                            color:
-                              C.text,
-                          },
-                        ]}
-                      >
-                        {label}
-                      </Text>
-                    </Pressable>
-                  )
-                )}
+                          {label}
+                        </Text>
+                      </Pressable>
+                    )
+                  )}
+                </View>
               </View>
-            </View>
-            </View>
+              </View>
+            </ScrollView>
 
-            <View style={{ position: 'relative', width: '100%', marginTop: 6 }}>
+            <View style={{ position: 'relative', width: '100%', marginTop: 12 }}>
               <View style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
               <Pressable
                 onPress={() =>
@@ -2071,8 +2075,165 @@ export default function ProfileScreen() {
               }
             >
               <ScrollView showsVerticalScrollIndicator={false}>
-                <Text style={[styles.placeholder, { color: C.text, paddingVertical: 10 }]}>
-                  Need help with My Sidekick? We are here for you! Reach out to our community support channels or check out our guide notes to get back on track.
+                <Text
+                  style={{
+                    color: C.muted,
+                    fontFamily: FONT,
+                    fontSize: 14,
+                    lineHeight: 22,
+                    marginBottom: 16,
+                  }}
+                >
+                  Welcome to My Sidekick support. We're here to help you get the most out of the app.
+                </Text>
+
+                <Text
+                  style={{
+                    color: C.text,
+                    fontFamily: FONT_BOLD,
+                    fontSize: 18,
+                    marginBottom: 8,
+                  }}
+                >
+                  Need Help?
+                </Text>
+
+                <Text
+                  style={{
+                    color: C.muted,
+                    fontFamily: FONT,
+                    fontSize: 14,
+                    lineHeight: 22,
+                    marginBottom: 20,
+                  }}
+                >
+                  If you have a question or experience a problem with My Sidekick, please contact us by email and describe the issue.
+                </Text>
+
+                <Text
+                  style={{
+                    color: C.text,
+                    fontFamily: FONT_SEMI,
+                    fontSize: 15,
+                    marginBottom: 24,
+                  }}
+                >
+                  Support: theallapplication@gmail.com
+                </Text>
+
+                <Text
+                  style={{
+                    color: C.text,
+                    fontFamily: FONT_BOLD,
+                    fontSize: 18,
+                    marginBottom: 8,
+                  }}
+                >
+                  About My Sidekick
+                </Text>
+
+                <Text
+                  style={{
+                    color: C.muted,
+                    fontFamily: FONT,
+                    fontSize: 14,
+                    lineHeight: 22,
+                    marginBottom: 20,
+                  }}
+                >
+                  My Sidekick brings everyday organization into one place. Use it to plan your days, track habits, manage finances, organize lists and reminders, save resources, and support your wellbeing.
+                </Text>
+
+                <Text
+                  style={{
+                    color: C.text,
+                    fontFamily: FONT_BOLD,
+                    fontSize: 18,
+                    marginBottom: 8,
+                  }}
+                >
+                  Account Help
+                </Text>
+
+                <Text
+                  style={{
+                    color: C.muted,
+                    fontFamily: FONT,
+                    fontSize: 14,
+                    lineHeight: 22,
+                    marginBottom: 12,
+                  }}
+                >
+                  To create an account, open My Sidekick and follow the sign-up process.
+                </Text>
+
+                <Text
+                  style={{
+                    color: C.muted,
+                    fontFamily: FONT,
+                    fontSize: 14,
+                    lineHeight: 22,
+                    marginBottom: 20,
+                  }}
+                >
+                  If you have forgotten your password, use the password reset option on the sign-in screen.
+                </Text>
+
+                <Text
+                  style={{
+                    color: C.text,
+                    fontFamily: FONT_BOLD,
+                    fontSize: 18,
+                    marginBottom: 8,
+                  }}
+                >
+                  Request Data Deletion
+                </Text>
+
+                <Text
+                  style={{
+                    color: C.muted,
+                    fontFamily: FONT,
+                    fontSize: 14,
+                    lineHeight: 22,
+                    marginBottom: 20,
+                  }}
+                >
+                  If you would like to request deletion of your My Sidekick account or personal data, please email us at theallapplication@gmail.com. Include the email address associated with your account and clearly state that you are requesting data deletion.
+                </Text>
+
+                <Text
+                  style={{
+                    color: C.text,
+                    fontFamily: FONT_BOLD,
+                    fontSize: 18,
+                    marginBottom: 8,
+                  }}
+                >
+                  Report Harm, Scams, or Safety Concerns
+                </Text>
+
+                <Text
+                  style={{
+                    color: C.muted,
+                    fontFamily: FONT,
+                    fontSize: 14,
+                    lineHeight: 22,
+                    marginBottom: 24,
+                  }}
+                >
+                  If you experience or become aware of harm, scams, abuse, harassment, fraudulent activity, or other safety concerns involving My Sidekick, please report it to us at theallapplication@gmail.com. Please describe what happened and provide any relevant information that can help us investigate the report.
+                </Text>
+
+                <Text
+                  style={{
+                    color: C.muted,
+                    fontFamily: FONT,
+                    fontSize: 12,
+                    marginTop: 10,
+                  }}
+                >
+                  © 2026 My Sidekick. All rights reserved.
                 </Text>
               </ScrollView>
             </View>
@@ -2176,19 +2337,21 @@ export default function ProfileScreen() {
               </Pressable>
             </View>
 
-            <Text
-              style={[
-                styles.placeholder,
-                {
-                  color:
-                    C.muted,
-                },
-              ]}
-            >
-              This will reset all app data to
-              defaults. This action cannot be
-              undone.
-            </Text>
+            <ScrollView showsVerticalScrollIndicator={false} style={{ flexShrink: 1 }}>
+              <Text
+                style={[
+                  styles.placeholder,
+                  {
+                    color:
+                      C.muted,
+                  },
+                ]}
+              >
+                This will reset all app data to
+                defaults. This action cannot be
+                undone.
+              </Text>
+            </ScrollView>
 
             <View style={{ position: 'relative', width: '100%', marginTop: 22 }}>
               <View style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
@@ -3004,6 +3167,8 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
     maxHeight: '85%',
     width: '100%',
+    display: 'flex',
+    flexDirection: 'column',
   },
 
   privacySheetCenter: {
@@ -3122,7 +3287,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
-    marginTop: 22,
+    marginTop: 0,
   },
 
   saveText: {
