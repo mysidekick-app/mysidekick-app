@@ -41,7 +41,7 @@ const FONT = 'Poppins-Regular';
 const FONT_MED = 'Poppins-Medium';
 const FONT_SEMI = 'Poppins-SemiBold';
 const FONT_BOLD = 'Poppins-Bold';
-const PARAGRAPH_MIN_HEIGHT = 46;
+const PARAGRAPH_MIN_HEIGHT = 120; // Full paragraph height for blank list input area
 const PARAGRAPH_MAX_HEIGHT = Math.round(Dimensions.get('window').height * 0.7);
 
 /* =========================================================
@@ -974,6 +974,12 @@ export default function ListsScreen() {
                                         flexGrow: 0,
                                         flexShrink: 0,
                                         height: currentSavedHeight,
+                                        backgroundColor: C.cardInputBg,
+                                        borderColor: C.cardInputBorder,
+                                        borderWidth: 2,
+                                        borderRadius: 8,
+                                        paddingHorizontal: 12,
+                                        paddingVertical: 10,
                                       },
                                       isChecklist && item.completed && styles.itemDone,
                                     ]}
@@ -1497,7 +1503,7 @@ const styles = StyleSheet.create({
   itemRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 6, // Reduced gap between number/bullet and text item
+    gap: 6,
     paddingVertical: 6,
     borderBottomWidth: 1,
   },
@@ -1510,7 +1516,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   bulletPrefix: {
-    width: 14, // Tighter width for bullets
+    width: 14,
     alignItems: 'center',
   },
   bulletText: {
@@ -1518,7 +1524,7 @@ const styles = StyleSheet.create({
     fontSize: 20,
   },
   numberPrefix: {
-    width: 18, // Tighter width for numbers
+    width: 18,
     alignItems: 'flex-start',
   },
   numberText: {
@@ -1553,21 +1559,22 @@ const styles = StyleSheet.create({
   },
   addItemRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6, // Matching tighter gap
+    alignItems: 'flex-start',
+    gap: 6,
     marginTop: 12,
   },
   addItemPrefixBox: {
     width: 16,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingTop: 10,
   },
   addItemInput: {
     flex: 1,
     fontFamily: FONT,
     fontSize: 13,
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 10,
     borderRadius: 8,
     borderWidth: 2,
   },
