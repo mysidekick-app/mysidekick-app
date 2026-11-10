@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  Activity,
   ArrowRight,
   ChevronLeft,
   Grid3X3,
@@ -105,24 +104,71 @@ export default function GamesScreen() {
   const [activeGames, setActiveGames] = useState<ActiveGame[]>([]);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
-  // Updated position rankings holder with only global and friends
-  const [positions] = useState<Record<string, { global: string; friends: string }>>({
-    tictactoe: { global: '#12', friends: '#1' },
-    sudoku: { global: '#8', friends: '#1' },
-    wordsearch: { global: '#24', friends: '#2' },
-    sequence: { global: '#15', friends: '#1' },
-  });
+  // Rankings are calculated in Supabase from completed game sessions.
+  const [positions, setPositions] = useState<
+    Partial<Record<GameKey, {
+      global_position: number | null;
+      friends_position: number | null;
+      total_points: number;
+      completed_games: number;
+    }>>
+  >({});
+  const [rankingsLoading, setRankingsLoading] = useState(true);
 
   useEffect(() => {
     loadFriends();
     loadActiveGames();
+    loadRankings();
 
+    // Refresh rankings periodically so changes made by other players appear
+    // without requiring the user to leave and reopen the Games screen.
     const refreshTimer = setInterval(() => {
       loadActiveGames();
+      loadRankings();
     }, 30000);
 
     return () => clearInterval(refreshTimer);
   }, []);
+
+  async function loadRankings() {
+    setRankingsLoading(true);
+    try {
+      const { data, error } = await (supabase as any).rpc('get_my_game_rankings');
+
+      if (error) {
+        console.error('LOAD GAME RANKINGS ERROR:', error);
+        setPositions({});
+        return;
+      }
+
+      const nextPositions: Partial<Record<GameKey, {
+        global_position: number | null;
+        friends_position: number | null;
+        total_points: number;
+        completed_games: number;
+      }>> = {};
+
+      (data ?? []).forEach((row: any) => {
+        if (!['tictactoe', 'sudoku', 'wordsearch', 'sequence'].includes(row.game)) {
+          return;
+        }
+
+        nextPositions[row.game as GameKey] = {
+          global_position: row.global_position == null ? null : Number(row.global_position),
+          friends_position: row.friends_position == null ? null : Number(row.friends_position),
+          total_points: Number(row.total_points ?? 0),
+          completed_games: Number(row.completed_games ?? 0),
+        };
+      });
+
+      setPositions(nextPositions);
+    } catch (error) {
+      console.error('LOAD GAME RANKINGS ERROR:', error);
+      setPositions({});
+    } finally {
+      setRankingsLoading(false);
+    }
+  }
 
   async function loadFriends() {
     setFriendsLoading(true);
@@ -420,7 +466,13 @@ export default function GamesScreen() {
 
         <View style={styles.cardsStack}>
           {filteredGames.map((m, index) => {
-            const pos = positions[m.key] || { global: '#--', friends: '#--' };
+            const pos = positions[m.key];
+            const globalPosition = pos?.global_position == null
+              ? (rankingsLoading ? '…' : '#--')
+              : `#${pos.global_position}`;
+            const friendsPosition = pos?.friends_position == null
+              ? (rankingsLoading ? '…' : '#--')
+              : `#${pos.friends_position}`;
 
             return (
               <View
@@ -465,11 +517,11 @@ export default function GamesScreen() {
                   <View style={styles.positionsRow}>
                     <View style={[styles.posBadge, { backgroundColor: pageBg }]}>
                       <Text style={styles.posLabel}>Global</Text>
-                      <Text style={styles.posVal}>{pos.global}</Text>
+                      <Text style={styles.posVal}>{globalPosition}</Text>
                     </View>
                     <View style={[styles.posBadge, { backgroundColor: pageBg }]}>
                       <Text style={styles.posLabel}>Friends</Text>
-                      <Text style={styles.posVal}>{pos.friends}</Text>
+                      <Text style={styles.posVal}>{friendsPosition}</Text>
                     </View>
                   </View>
                 </Pressable>
