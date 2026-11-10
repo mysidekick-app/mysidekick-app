@@ -72,7 +72,8 @@ type AttachmentType =
   | 'image'
   | 'video'
   | 'audio'
-  | 'document';
+  | 'document'
+  | 'game_invite';
 
 type Message = {
   id: string;
@@ -1115,7 +1116,9 @@ export default function ChatDetailScreen() {
           ? '🎬 Video'
           : type === 'audio'
             ? '🎤 Voice message'
-            : `📄 ${fileName}`;
+            : type === 'game_invite'
+              ? '🎮 Game Challenge'
+              : `📄 ${fileName}`;
 
     const optimistic: Message = {
       id: `local-${Date.now()}`,
@@ -1141,7 +1144,9 @@ export default function ChatDetailScreen() {
             ? 'video/mp4'
             : type === 'audio'
               ? 'audio/m4a'
-              : 'application/octet-stream',
+              : type === 'game_invite'
+                ? 'application/json'
+                : 'application/octet-stream',
     });
 
     if (result.error) {
@@ -1708,6 +1713,27 @@ export default function ChatDetailScreen() {
                     {item.attachment_name ?? 'Document'}
                   </Text>
                 </Pressable>
+              ) : null}
+
+              {item.attachment_type === 'game_invite' ? (
+                <View style={styles.gameInviteCard}>
+                  <Text style={[styles.bubbleText, { color: contentColor, fontFamily: 'Poppins-Bold' }]}>
+                    🎮 {(item.attachment_name ?? 'game').toUpperCase()} CHALLENGE
+                  </Text>
+                  <Text style={[styles.bubbleText, { color: contentColor, fontSize: 13, marginVertical: 4 }]}>
+                    {item.content}
+                  </Text>
+                  <Pressable
+                    onPress={() => {
+                      if (item.attachment_url) {
+                        router.push(item.attachment_url as never);
+                      }
+                    }}
+                    style={styles.joinGameBtn}
+                  >
+                    <Text style={styles.joinGameBtnText}>Play Now</Text>
+                  </Pressable>
+                </View>
               ) : null}
 
               {!item.attachment_type ? (
@@ -2749,6 +2775,25 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins-Medium',
     fontSize: 13,
     flexShrink: 1,
+  },
+  gameInviteCard: {
+    padding: 4,
+    gap: 4,
+  },
+  joinGameBtn: {
+    backgroundColor: '#000000',
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    marginTop: 6,
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+  },
+  joinGameBtnText: {
+    fontFamily: 'Poppins-Bold',
+    fontSize: 12,
+    color: '#FFFFFF',
   },
   bubbleTime: {
     fontFamily: 'Poppins-Medium',
