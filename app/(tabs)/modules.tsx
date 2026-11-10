@@ -26,13 +26,13 @@ import { supabase } from '@/lib/supabase';
 import SidekickAvatar from '@/components/SidekickAvatar';
 import { formatMoney } from '@/components/currencies';
 /* =========================================================*
-*   FONTS*
+*   FONTS*
 *========================================================= */
 const FONT = 'Poppins-Regular';
 const FONT_MED = 'Poppins-Medium';
 const FONT_BOLD = 'Poppins-Bold';
 /* =========================================================*
-*   AFFIRMATIONS DATA & STORAGE KEY*
+*   AFFIRMATIONS DATA & STORAGE KEY*
 *========================================================= */
 const AFFIRMATIONS_STORAGE_KEY = '@mysidekick_affirmation_state';
 const AFFIRMATIONS_BANK: string[] = [
@@ -48,7 +48,7 @@ const AFFIRMATIONS_BANK: string[] = [
   'I am enough, just as I am, in this moment. I do not need to prove my worth to anyone.',
 ];
 /* =========================================================*
-*   GREETINGS ROTATION (Changes every 2 hours)*
+*   GREETINGS ROTATION (Changes every 2 hours)*
 *========================================================= */
 const GREETINGS = [
   'Ciao',
@@ -104,7 +104,7 @@ function formatHeaderDateTime(timeZone: string = 'Africa/Nairobi'): string {
   }
 }
 /* =========================================================*
-*   TYPES*
+*   TYPES*
 *========================================================= */
 export type ListItemPreview = {
   text: string;
@@ -122,7 +122,7 @@ export type FolderModuleData = {
   route: string;
 };
 /* =========================================================*
-*   DATE HELPERS*
+*   DATE HELPERS*
 *========================================================= */
 function getTodayKey(timeZone: string = 'Africa/Nairobi'): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -182,7 +182,7 @@ function isAccentBlack(color?: string): boolean {
   );
 }
 /* =========================================================*
-*   LISTS TITLE FORMATTER*
+*   LISTS TITLE FORMATTER*
 *========================================================= */
 function formatListTitleWithCount(title: string, count: number): string {
   const trimmed = title.trim();
@@ -192,7 +192,7 @@ function formatListTitleWithCount(title: string, count: number): string {
   return `${baseTitle} (${itemLabel})`;
 }
 /* =========================================================*
-*   CROSS-PLATFORM NEO-BRUTALIST FOLDER CARD*
+*   CROSS-PLATFORM NEO-BRUTALIST FOLDER CARD*
 *========================================================= */
 const BLACK_MODULE_KEYS = new Set(['habits', 'reminders', 'plants', 'lists']);
 function NeoFolderCard({
@@ -332,7 +332,7 @@ function NeoFolderCard({
   );
 }
 /* =========================================================*
-*   MAIN MODULES SCREEN*
+*   MAIN MODULES SCREEN*
 *========================================================= */
 export default function ModulesScreen() {
   const appContext = useApp() as any;
@@ -744,19 +744,17 @@ export default function ModulesScreen() {
       {/* FIXED / STICKY HEADER OUTSIDE SCROLLVIEW */}
       <View style={[styles.headerRowContainer, { backgroundColor: pageBg }]}>
         <View style={styles.headerLeftTextGroup}>
-          <Text style={[styles.headerDateTime, { color: headerTextColor }]} numberOfLines={1}>
-            {headerDateTime}
-          </Text>
           <Text
-            style={[styles.headerName, { color: headerTextColor }]}
+            style={[styles.headerGreetingLine, { color: headerTextColor }]}
             numberOfLines={1}
             adjustsFontSizeToFit
-            minimumFontScale={0.65}
+            minimumFontScale={0.5}
           >
-            {userName}!
+            <Text style={styles.headerGreeting}>{greeting} </Text>
+            <Text style={styles.headerName}>{userName},</Text>
           </Text>
-          <Text style={[styles.headerGreeting, { color: headerTextColor }]}>
-            {greeting},
+          <Text style={[styles.headerDateTime, { color: headerTextColor }]} numberOfLines={1}>
+            {headerDateTime}
           </Text>
         </View>
         {/* DOOR FRAME: SIDEKICK TALL & FITTING DOOR ALMOST COMPLETELY */}
@@ -808,7 +806,7 @@ export default function ModulesScreen() {
   );
 }
 /* =========================================================*
-*   STYLES: CROSS-PLATFORM HARD SHADOWS & GEOMETRY*
+*   STYLES: CROSS-PLATFORM HARD SHADOWS & GEOMETRY*
 *========================================================= */
 const styles = StyleSheet.create({
   safe: {
@@ -837,26 +835,24 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
   },
-  headerDateTime: {
-    fontFamily: FONT_MED,
-    fontSize: 9,
-    lineHeight: 13,
-    letterSpacing: 0.2,
-    opacity: 0.75,
-    marginBottom: 2,
+  headerGreetingLine: {
+    fontSize: 30,
+    lineHeight: 36,
+    letterSpacing: -0.4,
   },
   headerGreeting: {
-    fontFamily: FONT_MED,
-    fontSize: 19,
-    lineHeight: 25,
-    letterSpacing: 0.1,
+    fontFamily: FONT_BOLD,
   },
   headerName: {
     fontFamily: FONT_BOLD,
-    fontSize: 36,
-    lineHeight: 42,
-    letterSpacing: -0.4,
-    marginTop: -1,
+  },
+  headerDateTime: {
+    fontFamily: FONT_MED,
+    fontSize: 12,
+    lineHeight: 16,
+    letterSpacing: 0.2,
+    opacity: 0.75,
+    marginTop: 2,
   },
   /* DOOR FRAME & CROSS-PLATFORM SHADOW */
   doorFrameWrapper: {
