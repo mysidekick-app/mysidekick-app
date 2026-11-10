@@ -33,7 +33,7 @@ export default function TabsLayout() {
   const router = useRouter();
   const routeParams = useLocalSearchParams<{ shareStreak?: string; flex?: string }>();
 
-  // Hide the bottom navbar while the Chat tab is displaying Share Streak mode[cite: 1].
+  // Hide the bottom navbar while the Chat tab is displaying Share Streak mode.
   const isShareStreak =
     routeParams.shareStreak === 'true' ||
     routeParams.shareStreak === '1' ||
@@ -57,7 +57,7 @@ export default function TabsLayout() {
   /*
    * Show the bottom navbar only on the main tabs:
    * Chat, Home (Modules), and Profile.
-   * All sub-module routes and share streaks hide it[cite: 1].
+   * All sub-module routes and share streaks hide it.
    */
   const showNavbar =
     !isShareStreak &&
@@ -71,10 +71,6 @@ export default function TabsLayout() {
    * ============================================================
    * SYSTEM BACK
    * ============================================================
-   *
-   * When the user is inside a module and uses the phone's
-   * system back button / back gesture, always return to
-   * Modules Home[cite: 1].
    */
 
   useEffect(() => {
@@ -111,8 +107,6 @@ export default function TabsLayout() {
    * ============================================================
    * UI ONLY
    * ============================================================
-   *
-   * Determine which tab gets the selected visual treatment[cite: 1].
    */
 
   const isProfileSelected =
@@ -145,7 +139,7 @@ export default function TabsLayout() {
 
         /*
          * ========================================================
-         * NAVBAR STYLING
+         * NAVBAR
          * ========================================================
          */
 
@@ -367,10 +361,6 @@ export default function TabsLayout() {
     </Tabs>
   );
 }
-
-/* ================================================================
-   NAVBAR STYLES
-   ================================================================ */
 
 const styles = StyleSheet.create({
   tab: {
