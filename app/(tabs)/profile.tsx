@@ -516,35 +516,35 @@ const accentChoices: {
 }[] = [
   {
     key: 'black',
-    label: 'Bubblegum',
+    label: 'Bounce',
   },
   {
     key: 'red',
-    label: 'Berry',
+    label: 'Vamp',
   },
   {
     key: 'orange',
-    label: 'Tangerine',
+    label: 'Spark',
   },
   {
     key: 'mustard',
-    label: 'Mustard',
+    label: 'Grit',
   },
   {
     key: 'green',
-    label: 'Sage',
+    label: 'Scout',
   },
   {
     key: 'blue',
-    label: 'Powder',
+    label: 'Drift',
   },
   {
     key: 'indigo',
-    label: 'Indigo',
+    label: 'Stealth',
   },
   {
     key: 'violet',
-    label: 'Royal',
+    label: 'Vanguard',
   },
 ];
 
@@ -611,6 +611,8 @@ export default function ProfileScreen() {
 
   const [sidekickPickerOpen, setSidekickPickerOpen] =
     useState(false);
+
+  const [tempSidekickId, setTempSidekickId] = useState(sidekick_id);
 
   const currency = getCurrency(currency_code);
 
@@ -837,11 +839,10 @@ export default function ProfileScreen() {
                 <View style={{ position: 'relative' }}>
                   <View style={{ position: 'absolute', top: 2, left: 2, right: -2, bottom: -2, backgroundColor: '#000000', borderRadius: 12 }} />
                   <Pressable
-                    onPress={() =>
-                      setSidekickPickerOpen(
-                        true
-                      )
-                    }
+                    onPress={() => {
+                      setTempSidekickId(sidekick_id);
+                      setSidekickPickerOpen(true);
+                    }}
                     style={[
                       styles.camera,
                       {
@@ -1249,7 +1250,7 @@ export default function ProfileScreen() {
                   }
 
                   if (key === 'support') {
-                    router.push('/support');
+                    setOpenSetting('support');
                     return;
                   }
 
@@ -2000,6 +2001,119 @@ export default function ProfileScreen() {
         </View>
       </Modal>
 
+      {/* SUPPORT MODAL */}
+      <Modal
+        visible={
+          openSetting ===
+          'support'
+        }
+        transparent
+        animationType="fade"
+        onRequestClose={() =>
+          setOpenSetting(null)
+        }
+      >
+        <View
+          style={
+            styles.modalShadeCenter
+          }
+        >
+          <View style={{ width: '100%', maxWidth: 460, height: '80%', paddingHorizontal: 16 }}>
+          <View
+            style={[
+              styles.sheetCenter,
+              styles.privacySheetCenter,
+              {
+                backgroundColor:
+                  C.card,
+                borderColor: '#000000',
+                borderWidth: 3,
+                borderRadius: 20,
+              },
+            ]}
+          >
+            <View
+              style={
+                styles.sheetHeader
+              }
+            >
+              <Text
+                style={[
+                  styles.sheetTitle,
+                  {
+                    color:
+                      C.text,
+                    textAlign: 'left',
+                  },
+                ]}
+              >
+                Support
+              </Text>
+
+              <Pressable
+                onPress={() =>
+                  setOpenSetting(
+                    null
+                  )
+                }
+                hitSlop={12}
+              >
+                <X
+                  color={C.muted}
+                  size={21}
+                />
+              </Pressable>
+            </View>
+
+            <View
+              style={
+                styles.privacyContent
+              }
+            >
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <Text style={[styles.placeholder, { color: C.text, paddingVertical: 10 }]}>
+                  Need help with My Sidekick? We are here for you! Reach out to our community support channels or check out our guide notes to get back on track.
+                </Text>
+              </ScrollView>
+            </View>
+
+            <View style={{ position: 'relative', width: '100%', marginTop: 12 }}>
+              <View style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
+              <Pressable
+                onPress={() =>
+                  setOpenSetting(
+                    null
+                  )
+                }
+                style={({ pressed }) => [
+                  styles.saveButton,
+                  {
+                    backgroundColor: '#000000',
+                    borderColor: accentForeground,
+                    borderWidth: 2,
+                    marginTop: 0,
+                  },
+                  pressed && { transform: [{ translateX: 2 }, { translateY: 2 }] },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.saveText,
+                    {
+                      color:
+                        accentForeground,
+                    },
+                  ]}
+                >
+                  Done
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* RESET SHEET */}
       <Modal
         visible={
@@ -2186,25 +2300,20 @@ export default function ProfileScreen() {
               showsVerticalScrollIndicator={false}
             >
               {Array.from(
-                { length: 50 },
+                { length: 48 },
                 (_, index) => {
                   const id = `sidekick-${String(
                     index + 1
                   ).padStart(2, '0')}`;
 
                   const selected =
-                    sidekick_id === id;
+                    tempSidekickId === id;
 
                   return (
                     <Pressable
                       key={id}
-                      onPress={async () => {
-                        await updateSettings({
-                          sidekick_id: id,
-                        });
-                        setSidekickPickerOpen(
-                          false
-                        );
+                      onPress={() => {
+                        setTempSidekickId(id);
                       }}
                       style={[
                         styles.sidekickOption,
@@ -2260,9 +2369,14 @@ export default function ProfileScreen() {
             <View style={{ position: 'relative', width: '100%', marginTop: 12 }}>
               <View style={{ position: 'absolute', top: 4, left: 4, right: -4, bottom: -4, backgroundColor: '#000000', borderRadius: 12 }} />
               <Pressable
-                onPress={() =>
-                  setSidekickPickerOpen(false)
-                }
+                onPress={async () => {
+                  if (tempSidekickId) {
+                    await updateSettings({
+                      sidekick_id: tempSidekickId,
+                    });
+                  }
+                  setSidekickPickerOpen(false);
+                }}
                 style={({ pressed }) => [
                   styles.saveButton,
                   {
