@@ -262,6 +262,11 @@ export default function WellbeingEntryScreen() {
     [selectedDate, today],
   );
 
+  const isBlank = useMemo(
+    () => !content.trim(),
+    [content],
+  );
+
   const dailyPrompt = useMemo(() => {
     const list = PROMPT_LISTS[moduleKey];
 
@@ -449,6 +454,13 @@ export default function WellbeingEntryScreen() {
         return;
       }
 
+      if (isBlank) {
+        setSaveMsg(
+          'You cannot save a blank entry.',
+        );
+        return;
+      }
+
       if (!user) {
         setError(
           'You must be signed in to save an entry.',
@@ -526,6 +538,7 @@ export default function WellbeingEntryScreen() {
     [
       content,
       isFuture,
+      isBlank,
       moduleKey,
       selectedDate,
       user,
@@ -890,11 +903,11 @@ export default function WellbeingEntryScreen() {
             <View style={styles.fabShadowBackdropFull} />
             <Pressable
               onPress={onSave}
-              disabled={saving || isFuture}
+              disabled={saving || isFuture || isBlank}
               style={({ pressed }) => [
                 styles.saveBtn,
                 { backgroundColor: '#000000', borderColor: '#000000' },
-                (saving || isFuture) &&
+                (saving || isFuture || isBlank) &&
                   styles.saveBtnDisabled,
                 pressed &&
                   styles.pressedBtn,
