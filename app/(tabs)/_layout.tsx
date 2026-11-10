@@ -33,7 +33,7 @@ export default function TabsLayout() {
   const router = useRouter();
   const routeParams = useLocalSearchParams<{ shareStreak?: string; flex?: string }>();
 
-  // Hide the bottom navbar while the Chat tab is displaying Share Streak mode.
+  // Hide the bottom navbar while the Chat tab is displaying Share Streak mode[cite: 1].
   const isShareStreak =
     routeParams.shareStreak === 'true' ||
     routeParams.shareStreak === '1' ||
@@ -55,14 +55,15 @@ export default function TabsLayout() {
     : '#FFFFFF';
 
   /*
-   * Show the bottom navbar only on the three main tabs:
+   * Show the bottom navbar only on the main tabs:
    * Chat, Home (Modules), and Profile.
-   * All sub-module routes hide it.
+   * All sub-module routes and share streaks hide it[cite: 1].
    */
   const showNavbar =
     !isShareStreak &&
     (pathname === '/' ||
       pathname === '/index' ||
+      pathname === '/chat' ||
       pathname === '/modules' ||
       pathname === '/profile');
 
@@ -73,10 +74,7 @@ export default function TabsLayout() {
    *
    * When the user is inside a module and uses the phone's
    * system back button / back gesture, always return to
-   * Modules Home.
-   *
-   * Existing in-app arrows are NOT affected because this
-   * only listens to the native Android BackHandler.
+   * Modules Home[cite: 1].
    */
 
   useEffect(() => {
@@ -114,15 +112,13 @@ export default function TabsLayout() {
    * UI ONLY
    * ============================================================
    *
-   * Determine which tab gets the selected visual treatment.
-   *
-   * Home remains selected while inside any module.
+   * Determine which tab gets the selected visual treatment[cite: 1].
    */
 
   const isProfileSelected =
-  pathname === '/profile' ||
-  pathname.startsWith('/profile/') ||
-  pathname === '/support';
+    pathname === '/profile' ||
+    pathname.startsWith('/profile/') ||
+    pathname === '/support';
 
   const isModuleSelected =
     pathname === '/modules' ||
@@ -149,11 +145,8 @@ export default function TabsLayout() {
 
         /*
          * ========================================================
-         * NAVBAR
+         * NAVBAR STYLING
          * ========================================================
-         *
-         * This is only the visual styling of the existing
-         * Expo Router tab bar.
          */
 
         tabBarStyle: showNavbar
@@ -178,15 +171,7 @@ export default function TabsLayout() {
               display: 'none',
             },
 
-        /*
-         * We display the selected label ourselves.
-         */
-
         tabBarShowLabel: false,
-
-        /*
-         * Give each item comfortable space.
-         */
 
         tabBarItemStyle: {
           height: 58,
@@ -367,89 +352,18 @@ export default function TabsLayout() {
           HIDDEN ROUTES
           ============================================================ */}
 
-      <Tabs.Screen
-        name="bookmarks"
-        options={{
-          href: null,
-        }}
-      />
-
-      <Tabs.Screen
-        name="chat"
-        options={{
-          href: null,
-        }}
-      />
-
-      <Tabs.Screen
-        name="habits"
-        options={{
-          href: null,
-        }}
-      />
-
-      <Tabs.Screen
-        name="plants"
-        options={{
-          href: null,
-        }}
-      />
-
-      <Tabs.Screen
-        name="planner"
-        options={{
-          href: null,
-        }}
-      />
-
-      <Tabs.Screen
-        name="reminders"
-        options={{
-          href: null,
-        }}
-      />
-
-      <Tabs.Screen
-        name="settings"
-        options={{
-          href: null,
-        }}
-      />
-
-      <Tabs.Screen
-        name="support"
-        options={{
-          href: null,
-        }}
-      />
-
-      <Tabs.Screen
-        name="modules/games"
-        options={{
-          href: null,
-        }}
-      />
-
-      <Tabs.Screen
-        name="modules/finances"
-        options={{
-          href: null,
-        }}
-      />
-
-      <Tabs.Screen
-        name="modules/lists"
-        options={{
-          href: null,
-        }}
-      />
-
-      <Tabs.Screen
-        name="modules/wellbeing"
-        options={{
-          href: null,
-        }}
-      />
+      <Tabs.Screen name="bookmarks" options={{ href: null }} />
+      <Tabs.Screen name="chat" options={{ href: null }} />
+      <Tabs.Screen name="habits" options={{ href: null }} />
+      <Tabs.Screen name="plants" options={{ href: null }} />
+      <Tabs.Screen name="planner" options={{ href: null }} />
+      <Tabs.Screen name="reminders" options={{ href: null }} />
+      <Tabs.Screen name="settings" options={{ href: null }} />
+      <Tabs.Screen name="support" options={{ href: null }} />
+      <Tabs.Screen name="modules/games" options={{ href: null }} />
+      <Tabs.Screen name="modules/finances" options={{ href: null }} />
+      <Tabs.Screen name="modules/lists" options={{ href: null }} />
+      <Tabs.Screen name="modules/wellbeing" options={{ href: null }} />
     </Tabs>
   );
 }
@@ -459,11 +373,6 @@ export default function TabsLayout() {
    ================================================================ */
 
 const styles = StyleSheet.create({
-  /*
-   * Unselected:
-   * icon only.
-   */
-
   tab: {
     minWidth: 46,
     height: 46,
@@ -473,11 +382,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     borderRadius: 12,
   },
-
-  /*
-   * Selected:
-   * icon + title inside a rounded rectangle.
-   */
 
   selectedTab: {
     minWidth: 96,
@@ -492,8 +396,7 @@ const styles = StyleSheet.create({
 
   selectedText: {
     color: '#000000',
-    fontFamily:
-      'Poppins-Bold',
+    fontFamily: 'Poppins-Bold',
     fontSize: 13,
     lineHeight: 18,
     includeFontPadding: false,
