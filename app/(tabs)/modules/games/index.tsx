@@ -671,30 +671,60 @@ export default function GamesScreen() {
         return;
       }
 
-      setSheetVisible(false);
-      setSelectedGame(null);
-
       if (isFriendChallenge && friendToInvite) {
-        // Send chat invitation card automatically
-        const conversationResult = await ensureDirectConversation(createdBy, friendToInvite.id);
-        if (conversationResult.id) {
-          const inviteText = `I challenged you to a game of ${gameToStart.name}! Tap below to play.`;
-          const gameRoute = `/modules/games/${gameToStart.key}?sessionId=${session.id}&opponent=friend&difficulty=${selectedDifficulty}`;
-          
-          await sendChatMessage(conversationResult.id, createdBy, inviteText, {
-            url: gameRoute,
-            name: gameToStart.key,
-            type: 'game_invite',
-          });
+        // A direct chat message is sent as plain text. The game session itself
+        // remains the source of truth for Accept / Decline in Games > Incoming.
+        const conversationResult = await ensureDirectConversation(
+          createdBy,
+          friendToInvite.id,
+        );
+
+        if (conversationResult.error || !conversationResult.id) {
+          const reason = conversationResult.error?.message ?? 'No conversation ID was returned.';
+          console.error('CREATE GAME INVITE CONVERSATION ERROR:', conversationResult.error);
+          Alert.alert(
+            'Challenge created, message not sent',
+            `The game challenge was created, but chat could not be opened: ${reason}`,
+          );
+          loadIncomingChallenges();
+          return;
         }
 
+        const inviteText =
+          `🎮 Game challenge\n\n` +
+          `You have been challenged to a ${selectedDifficulty} ${gameToStart.name} game.\n\n` +
+          `Open Games → Incoming Challenges to Accept or Decline.\n` +
+          `Challenge ID: ${session.id}`;
+
+        const messageResult = await sendChatMessage(
+          conversationResult.id,
+          createdBy,
+          inviteText,
+        );
+
+        if (messageResult.error || !messageResult.message) {
+          const reason = messageResult.error?.message ?? 'The chat message was not saved.';
+          console.error('SEND GAME INVITE MESSAGE ERROR:', messageResult.error);
+          Alert.alert(
+            'Challenge created, message not sent',
+            `The game challenge was created, but the chat message failed: ${reason}`,
+          );
+          loadIncomingChallenges();
+          return;
+        }
+
+        setSheetVisible(false);
+        setSelectedGame(null);
         Alert.alert(
           'Invitation sent',
-          `${friendToInvite.display_name} has been challenged to a ${selectedDifficulty} ${gameToStart.name} game and notified in chat.`,
+          `Your ${selectedDifficulty} ${gameToStart.name} challenge was sent to ${friendToInvite.display_name} in chat. They can Accept or Decline from Games > Incoming Challenges.`,
         );
         loadIncomingChallenges();
         return;
       }
+
+      setSheetVisible(false);
+      setSelectedGame(null);
 
       router.push({
         pathname: `/modules/games/${gameToStart.key}`,
