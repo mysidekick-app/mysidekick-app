@@ -856,13 +856,15 @@ export async function sendChatMessage(
           name: attachment.name,
           mime_type: attachment.type,
           attachment_type:
-            attachment.type.startsWith('image/')
-              ? 'image'
-              : attachment.type.startsWith('audio/')
-                ? 'audio'
-                : attachment.type.startsWith('video/')
-                  ? 'video'
-                  : 'document',
+            attachment.type === 'application/x-game-invite'
+              ? 'game_invite'
+              : attachment.type.startsWith('image/')
+                ? 'image'
+                : attachment.type.startsWith('audio/')
+                  ? 'audio'
+                  : attachment.type.startsWith('video/')
+                    ? 'video'
+                    : 'document',
         })
         .select(
           'message_id, url, name, mime_type, attachment_type',
